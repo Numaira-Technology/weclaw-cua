@@ -49,6 +49,7 @@ from Quartz.CoreGraphics import *  # type: ignore
 from Quartz.CoreGraphics import CGPoint, CGSize  # type: ignore
 
 from .base import BaseAccessibilityHandler, BaseAutomationHandler
+from ..utils.human_mouse import HumanMouseConfig, HumanMouseMover, move_mouse_human
 
 logger = logging.getLogger(__name__)
 
@@ -971,6 +972,8 @@ class MacOSAutomationHandler(BaseAutomationHandler):
     # Mouse Actions
     mouse = MouseController()
     keyboard = KeyboardController()
+    human_mouse_config = HumanMouseConfig(enabled=True, speed_factor=0.8)
+    human_mouse_mover = HumanMouseMover(human_mouse_config)
 
     async def mouse_down(
         self, x: Optional[int] = None, y: Optional[int] = None, button: str = "left"
@@ -987,7 +990,10 @@ class MacOSAutomationHandler(BaseAutomationHandler):
         """
         try:
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.press(
                 Button.left
                 if button == "left"
@@ -1012,7 +1018,10 @@ class MacOSAutomationHandler(BaseAutomationHandler):
         """
         try:
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.release(
                 Button.left
                 if button == "left"
@@ -1034,7 +1043,10 @@ class MacOSAutomationHandler(BaseAutomationHandler):
         """
         try:
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.click(Button.left, 1)
             return {"success": True}
         except Exception as e:
@@ -1052,7 +1064,10 @@ class MacOSAutomationHandler(BaseAutomationHandler):
         """
         try:
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.click(Button.right, 1)
             return {"success": True}
         except Exception as e:
@@ -1072,7 +1087,10 @@ class MacOSAutomationHandler(BaseAutomationHandler):
         """
         try:
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.click(Button.left, 2)
             return {"success": True}
         except Exception as e:
@@ -1089,7 +1107,10 @@ class MacOSAutomationHandler(BaseAutomationHandler):
             Dictionary containing success status and error message if failed
         """
         try:
-            self.mouse.position = (x, y)
+            await move_mouse_human(
+                self.mouse, x, y,
+                config=self.human_mouse_config,
+            )
             return {"success": True}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -1114,18 +1135,11 @@ class MacOSAutomationHandler(BaseAutomationHandler):
                 if button == "left"
                 else Button.right if button == "right" else Button.middle
             )
-            # Press
             self.mouse.press(btn)
-            # Move with sleep to simulate drag duration
-            start = self.mouse.position
-            steps = 20
-            start_x, start_y = start
-            dx = (x - start_x) / steps
-            dy = (y - start_y) / steps
-            for i in range(steps):
-                self.mouse.position = (int(start_x + dx * (i + 1)), int(start_y + dy * (i + 1)))
-                time.sleep(duration / steps)
-            # Release
+            await move_mouse_human(
+                self.mouse, x, y,
+                config=self.human_mouse_config,
+            )
             self.mouse.release(btn)
             return {"success": True}
         except Exception as e:
@@ -1156,13 +1170,17 @@ class MacOSAutomationHandler(BaseAutomationHandler):
                 if button == "left"
                 else Button.right if button == "right" else Button.middle
             )
-            # Move to the first point
-            self.mouse.position = path[0]
+            first_x, first_y = path[0]
+            await move_mouse_human(
+                self.mouse, first_x, first_y,
+                config=self.human_mouse_config,
+            )
             self.mouse.press(btn)
-            step_duration = duration / (len(path) - 1) if len(path) > 1 else duration
             for x, y in path[1:]:
-                self.mouse.position = (x, y)
-                time.sleep(step_duration)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.release(btn)
             return {"success": True}
         except Exception as e:

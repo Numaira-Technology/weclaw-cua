@@ -28,13 +28,21 @@ def classification_prompt() -> str:
         "使用头像图标区分群聊（多人头像）与单聊（单人头像）。"
         "记录每个会话的未读状态（是否有未读消息标记）。"
         "直接输出JSON格式结果，不要执行任何点击操作。"
-        "JSON格式：{\"threads\": [{\"thread_id\": \"会话名称\", \"name\": \"会话名称\", \"is_group\": true/false, \"unread\": true/false}, ...]}"
+        'JSON格式：{"threads": [{"thread_id": "会话名称", "name": "会话名称", "is_group": true/false, "unread": true/false}, ...]}'
         "只输出JSON，不要输出其他文字。"
     )
 
 
 def parse_classification(text_output: str) -> List[GroupThread]:
-    payload = json.loads(text_output)
+    text = text_output.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        # Remove first line (```json or ```) and last line (```)
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines)
+    payload = json.loads(text)
     raw_threads = payload.get("threads", [])
     return [
         GroupThread(

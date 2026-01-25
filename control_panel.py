@@ -147,6 +147,8 @@ class ControlPanel:
         self.running_step: Optional[str] = None
         self.server_process: Optional[subprocess.Popen] = None
         self.workflow_process: Optional[subprocess.Popen] = None
+        self._stop_requested: bool = False
+        self._is_running: bool = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -245,6 +247,19 @@ class ControlPanel:
 
         ttk.Separator(sidebar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
 
+        run_frame = ttk.Frame(sidebar)
+        run_frame.pack(fill=tk.X, pady=5)
+        self.run_all_btn = ttk.Button(
+            run_frame, text="▶ Run All", command=self._run_all_steps, width=12
+        )
+        self.run_all_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.stop_btn = ttk.Button(
+            run_frame, text="■ Stop", command=self._stop_execution, width=10, state=tk.DISABLED
+        )
+        self.stop_btn.pack(side=tk.LEFT)
+
+        ttk.Separator(sidebar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+
         ttk.Button(
             sidebar, text="Reset State", command=self._reset_state, width=25
         ).pack(pady=5)
@@ -333,6 +348,270 @@ class ControlPanel:
         )
         self._log(f"Report exported to {report_path}")
         messagebox.showinfo("Export", f"Report saved to:\n{report_path}")
+
+    def _run_all_steps(self) -> None:
+        """Execute all workflow steps automatically in sequence."""
+        if not self.workflow_process:
+            messagebox.showwarning(
+                "Workflow Not Running", "Start the workflow backend first."
+            )
+            return
+        self._stop_requested = False
+        self._is_running = True
+        self.run_all_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.NORMAL)
+        self._log("=" * 50)
+        self._log("Starting automated workflow execution...")
+        self._log("=" * 50)
+        self._run_all_classify()
+
+    def _stop_execution(self) -> None:
+        """Stop the automated workflow execution."""
+        if not self._is_running:
+            return
+        self._stop_requested = True
+        self._log("=" * 50)
+        self._log("[Stop] Stop requested. Waiting for current step to complete...")
+        self._log("=" * 50)
+        self._set_status("Stopping...")
+
+    def _check_stop_requested(self) -> bool:
+        """Check if stop was requested and handle cleanup if so."""
+        if self._stop_requested:
+            self._log("[Stop] Workflow stopped by user.")
+            self._set_status("Stopped")
+            self._is_running = False
+            self._stop_requested = False
+            self.run_all_btn.config(state=tk.NORMAL)
+            self.stop_btn.config(state=tk.DISABLED)
+            return True
+        return False
+
+    def _finish_run_all(self) -> None:
+        """Clean up after run all completes or stops."""
+        self._is_running = False
+        self._stop_requested = False
+        self.run_all_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
+
+    def _run_all_classify(self) -> None:
+        """Step 1 of run all: Classify threads."""
+        if self._check_stop_requested():
+            return
+        self._set_status("Run All: Classify Threads")
+        self._log("[Run All] Step 1: Classifying threads...")
+        self._request_agent_step("classify", {})
+        self._poll_agent_result(self._run_all_on_classify_result)
+
+    def _run_all_on_classify_result(self, result: dict) -> None:
+        """Handle classify result and proceed to filter."""
+        if self._check_stop_requested():
+            return
+        text_output = result.get("text", "")
+        self._log(f"Classification output: {text_output[:200]}...")
+        try:
+            self.state.threads = parse_classification(text_output)
+            self.state.step_logs["classify"] = text_output
+            self._save_state()
+            self._log(f"Parsed {len(self.state.threads)} threads.")
+            # Proceed to filter
+            self._run_all_filter()
+        except Exception as e:
+            self._log(f"Parse error: {e}")
+            self._set_status("Error")
+            self._log("[Run All] Stopped due to error.")
+            self._finish_run_all()
+
+    def _run_all_filter(self) -> None:
+        """Step 2 of run all: Filter unread groups."""
+        if self._check_stop_requested():
+            return
+        self._set_status("Run All: Filter Unread")
+        self._log("[Run All] Step 2: Filtering unread groups...")
+        self.state.unread_groups = filter_unread_groups(self.state.threads)
+        self.state.current_thread_index = 0
+        self._save_state()
+        self._log(f"Found {len(self.state.unread_groups)} unread group(s).")
+        for g in self.state.unread_groups:
+            self._log(f"  - {g.name} (id={g.thread_id})")
+        if not self.state.unread_groups:
+            self._log("[Run All] No unread groups found. Workflow complete.")
+            self._set_status("Ready")
+            self._finish_run_all()
+            messagebox.showinfo("Run All Complete", "No unread groups found.")
+            return
+        # Proceed to process first group
+        self._run_all_read_messages()
+
+    def _run_all_read_messages(self) -> None:
+        """Step 3 of run all: Read messages for current group."""
+        if self._check_stop_requested():
+            return
+        idx = self.state.current_thread_index
+        if idx >= len(self.state.unread_groups):
+            self._run_all_complete()
+            return
+        # Reset per-group state
+        self.state.current_group_suspects = []
+        self.state.current_group_plan = None
+        self._save_state()
+        thread = self.state.unread_groups[idx]
+        self._set_status(f"Run All: Read Messages ({thread.name})")
+        self._log(f"[Run All] Step 3: Reading messages from {thread.name} ({idx + 1}/{len(self.state.unread_groups)})...")
+        self._request_agent_step(
+            "read_messages", {"thread_id": thread.thread_id, "thread_name": thread.name}
+        )
+        self._poll_agent_result(self._run_all_on_read_result)
+
+    def _run_all_on_read_result(self, result: dict) -> None:
+        """Handle read result and proceed to extract."""
+        if self._check_stop_requested():
+            return
+        text_output = result.get("text", "")
+        screenshots = result.get("screenshots", [])
+        self._log(f"Read result: {text_output[:200]}...")
+        idx = self.state.current_thread_index
+        thread = self.state.unread_groups[idx]
+        self.state.step_logs[f"read_{thread.thread_id}"] = text_output
+        self.state.step_logs[f"read_{thread.thread_id}_screenshots"] = json.dumps(screenshots)
+        self._save_state()
+        self._log(f"Read complete for {thread.name}.")
+        # Proceed to extract
+        self._run_all_extract()
+
+    def _run_all_extract(self) -> None:
+        """Step 4 of run all: Extract suspects from current group."""
+        if self._check_stop_requested():
+            return
+        idx = self.state.current_thread_index
+        thread = self.state.unread_groups[idx]
+        self._set_status(f"Run All: Extract Suspects ({thread.name})")
+        self._log(f"[Run All] Step 4: Extracting suspects from {thread.name}...")
+        text_key = f"read_{thread.thread_id}"
+        screenshots_key = f"read_{thread.thread_id}_screenshots"
+        text_output = self.state.step_logs.get(text_key, "{}")
+        screenshots_json = self.state.step_logs.get(screenshots_key, "[]")
+        screenshot_paths = [Path(p) for p in json.loads(screenshots_json)]
+        try:
+            suspects = extract_suspects(thread, text_output, screenshot_paths)
+            self.state.current_group_suspects = suspects
+            self._save_state()
+            self._log(f"Found {len(suspects)} suspect(s) in {thread.name}.")
+            for s in suspects:
+                self._log(f"  - {s.sender_name}: {s.evidence_text[:50]}...")
+            # Proceed to build plan
+            self._run_all_build_plan()
+        except Exception as e:
+            self._log(f"Parse error: {e}")
+            self._set_status("Error")
+            self._log("[Run All] Stopped due to error.")
+            self._finish_run_all()
+
+    def _run_all_build_plan(self) -> None:
+        """Step 5 of run all: Build removal plan for current group."""
+        if self._check_stop_requested():
+            return
+        idx = self.state.current_thread_index
+        thread = self.state.unread_groups[idx]
+        self._set_status(f"Run All: Build Plan ({thread.name})")
+        self._log(f"[Run All] Step 5: Building removal plan for {thread.name}...")
+        self.state.current_group_plan = build_removal_plan(self.state.current_group_suspects)
+        self._save_state()
+        self._log(f"Plan created with {len(self.state.current_group_plan.suspects)} suspect(s).")
+        # Proceed to removal
+        self._run_all_removal()
+
+    def _run_all_removal(self) -> None:
+        """Step 6 of run all: Execute removal for current group."""
+        if self._check_stop_requested():
+            return
+        idx = self.state.current_thread_index
+        thread = self.state.unread_groups[idx]
+        if not self.state.current_group_plan or not self.state.current_group_plan.suspects:
+            self._log(f"No suspects in {thread.name}. Advancing to next group.")
+            self._run_all_advance_to_next_group()
+            return
+        self.state.current_group_plan.confirmed = True
+        self._save_state()
+        self._set_status(f"Run All: Execute Removal ({thread.name})")
+        self._log(f"[Run All] Step 6: Executing removal for {thread.name}...")
+        suspect_data = [
+            {
+                "sender_id": s.sender_id,
+                "sender_name": s.sender_name,
+                "thread_id": s.thread_id,
+            }
+            for s in self.state.current_group_plan.suspects
+        ]
+        self._request_agent_step("remove", {"suspects": suspect_data})
+        self._poll_agent_result(self._run_all_on_removal_result)
+
+    def _run_all_on_removal_result(self, result: dict) -> None:
+        """Handle removal result and advance to next group."""
+        if self._check_stop_requested():
+            return
+        text_output = result.get("text", "")
+        idx = self.state.current_thread_index
+        thread = self.state.unread_groups[idx]
+        self._log(f"Removal result for {thread.name}: {text_output}")
+        if self.state.current_group_plan:
+            self.state.current_group_plan.note = text_output
+        self.state.step_logs[f"removal_{thread.thread_id}"] = text_output
+        self._save_state()
+        self._run_all_advance_to_next_group()
+
+    def _run_all_advance_to_next_group(self) -> None:
+        """Advance to next group in run all mode."""
+        # Accumulate results from current group
+        self.state.all_suspects.extend(self.state.current_group_suspects)
+        if self.state.current_group_plan:
+            self.state.all_plans.append(self.state.current_group_plan)
+        # Update legacy fields
+        self.state.suspects = list(self.state.all_suspects)
+        if self.state.all_plans:
+            all_plan_suspects = []
+            for p in self.state.all_plans:
+                all_plan_suspects.extend(p.suspects)
+            self.state.plan = RemovalPlan(
+                suspects=all_plan_suspects,
+                confirmed=True,
+                note=f"Processed {len(self.state.all_plans)} group(s)",
+            )
+        # Advance to next group
+        self.state.current_thread_index += 1
+        self.state.current_group_suspects = []
+        self.state.current_group_plan = None
+        self._save_state()
+        # Check for stop before continuing to next group
+        if self._check_stop_requested():
+            return
+        remaining = len(self.state.unread_groups) - self.state.current_thread_index
+        if remaining > 0:
+            next_group = self.state.unread_groups[self.state.current_thread_index]
+            self._log(f"[Run All] Advanced to next group. {remaining} group(s) remaining.")
+            self._log(f"[Run All] Processing: {next_group.name}")
+            # Continue with next group
+            self._run_all_read_messages()
+        else:
+            self._run_all_complete()
+
+    def _run_all_complete(self) -> None:
+        """Run all workflow complete."""
+        self._log("=" * 50)
+        self._log("[Run All] Workflow complete!")
+        self._log(f"Total groups processed: {len(self.state.unread_groups)}")
+        self._log(f"Total suspects found: {len(self.state.all_suspects)}")
+        self._log(f"Total plans executed: {len(self.state.all_plans)}")
+        self._log("=" * 50)
+        self._set_status("Ready")
+        self._finish_run_all()
+        messagebox.showinfo(
+            "Run All Complete",
+            f"Automated workflow complete!\n\n"
+            f"Groups processed: {len(self.state.unread_groups)}\n"
+            f"Total suspects: {len(self.state.all_suspects)}\n\n"
+            f"Click 'Export Report' to save results.",
+        )
 
     # Server control methods
     def _toggle_server(self) -> None:
@@ -1074,9 +1353,6 @@ class ControlPanel:
         self._poll_agent_result(self._on_read_result)
 
     def _on_read_result(self, result: dict) -> None:
-        # #region agent log
-        import json as _json; open(r'd:\Documents\Project Bird\code\cua\.cursor\debug.log', 'a', encoding='utf-8').write(_json.dumps({"location":"control_panel.py:_on_read_result","message":"result dict received","data":{"result_keys":list(result.keys()),"text_len":len(result.get("text","")),"text_preview":result.get("text","")[:500],"screenshots_count":len(result.get("screenshots",[]))},"timestamp":__import__('time').time(),"sessionId":"debug-session","hypothesisId":"A,E"})+'\n')
-        # #endregion
         text_output = result.get("text", "")
         screenshots = result.get("screenshots", [])
         self._log(f"Read result: {text_output[:200]}...")
@@ -1088,9 +1364,6 @@ class ControlPanel:
         )
         # Don't advance index here - wait until removal is complete for this group
         self._save_state()
-        # #region agent log
-        import json as _json; open(r'd:\Documents\Project Bird\code\cua\.cursor\debug.log', 'a', encoding='utf-8').write(_json.dumps({"location":"control_panel.py:_on_read_result:after_save","message":"state saved","data":{"text_key":f"read_{thread.thread_id}","stored_len":len(self.state.step_logs.get(f"read_{thread.thread_id}",""))},"timestamp":__import__('time').time(),"sessionId":"debug-session","hypothesisId":"C"})+'\n')
-        # #endregion
         self._log(f"Read complete for {thread.name}. Proceed to Extract Suspects.")
         self._set_status("Ready")
 
@@ -1111,9 +1384,6 @@ class ControlPanel:
         text_key = f"read_{thread.thread_id}"
         screenshots_key = f"read_{thread.thread_id}_screenshots"
         text_output = self.state.step_logs.get(text_key, "{}")
-        # #region agent log
-        import json as _json; open(r'd:\Documents\Project Bird\code\cua\.cursor\debug.log', 'a', encoding='utf-8').write(_json.dumps({"location":"control_panel.py:_run_extract","message":"text_output retrieved from step_logs","data":{"text_key":text_key,"text_output_len":len(text_output),"text_output_preview":text_output[:500],"text_output_is_empty":text_output=="","text_output_is_default":text_output=="{}"},"timestamp":__import__('time').time(),"sessionId":"debug-session","hypothesisId":"B,C"})+'\n')
-        # #endregion
         if text_output == "{}":
             messagebox.showwarning(
                 "Missing Data",
@@ -1130,9 +1400,6 @@ class ControlPanel:
             for s in suspects:
                 self._log(f"  - {s.sender_name}: {s.evidence_text[:50]}...")
         except Exception as e:
-            # #region agent log
-            import json as _json; open(r'd:\Documents\Project Bird\code\cua\.cursor\debug.log', 'a', encoding='utf-8').write(_json.dumps({"location":"control_panel.py:_run_extract:exception","message":"extract_suspects failed","data":{"error":str(e),"error_type":type(e).__name__,"text_output_full":text_output},"timestamp":__import__('time').time(),"sessionId":"debug-session","hypothesisId":"B"})+'\n')
-            # #endregion
             self._log(f"Parse error: {e}")
         self._set_status("Ready")
 
@@ -1172,7 +1439,6 @@ class ControlPanel:
             )
             return
         if not self.state.current_group_plan.suspects:
-            # No suspects - skip removal and advance to next group
             self._log(f"No suspects in {thread.name}. Advancing to next group.")
             self._advance_to_next_group()
             return

@@ -1,3 +1,3 @@
-from . import helpers, wallpaper
+from . import helpers, human_mouse, wallpaper
 
-__all__ = ["helpers", "wallpaper"]
+__all__ = ["helpers", "human_mouse", "wallpaper"]

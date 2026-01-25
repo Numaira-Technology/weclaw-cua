@@ -5,3 +5,11 @@ display: "1280x720"
 timeout: 180
 telemetry_enabled: false
 screenshot_delay: 0.5
+
+# Human-like mouse movement settings
+human_mouse:
+  enabled: true
+  speed_factor: 0.8  # Lower = faster movement (0.5-2.0 recommended)
+  curve_variance: 0.3  # How much the path curves (0.1-0.5)
+  zigzag_enabled: false  # Enable subtle zigzag patterns
+  base_delay_ms: 5.0  # Base delay between movement steps in milliseconds

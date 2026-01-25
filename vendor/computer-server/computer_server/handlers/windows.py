@@ -61,6 +61,7 @@ except Exception as e:
     WINDOWS_API_AVAILABLE = False
 
 from .base import BaseAccessibilityHandler, BaseAutomationHandler
+from ..utils.human_mouse import HumanMouseConfig, HumanMouseMover, move_mouse_human
 
 
 class WindowsAccessibilityHandler(BaseAccessibilityHandler):
@@ -198,6 +199,8 @@ class WindowsAutomationHandler(BaseAutomationHandler):
 
     mouse = MouseController()
     keyboard = KeyboardController()
+    human_mouse_config = HumanMouseConfig(enabled=True, speed_factor=0.8)
+    human_mouse_mover = HumanMouseMover(human_mouse_config)
 
     def is_desktop_locked(self) -> bool:
         try:
@@ -287,7 +290,10 @@ class WindowsAutomationHandler(BaseAutomationHandler):
         """
         try:
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.press(self._map_button(button))
             return {"success": True}
         except Exception as e:
@@ -309,7 +315,10 @@ class WindowsAutomationHandler(BaseAutomationHandler):
         """
         try:
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.release(self._map_button(button))
             return {"success": True}
         except Exception as e:
@@ -327,7 +336,10 @@ class WindowsAutomationHandler(BaseAutomationHandler):
             Dict[str, Any]: A dictionary with success status and optional error message.
         """
         try:
-            self.mouse.position = (x, y)
+            await move_mouse_human(
+                self.mouse, x, y,
+                config=self.human_mouse_config,
+            )
             return {"success": True}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -345,7 +357,10 @@ class WindowsAutomationHandler(BaseAutomationHandler):
         """
         try:
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.click(MouseButton.left, 1)
             return {"success": True}
         except Exception as e:
@@ -364,7 +379,10 @@ class WindowsAutomationHandler(BaseAutomationHandler):
         """
         try:
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.click(MouseButton.right, 1)
             return {"success": True}
         except Exception as e:
@@ -385,7 +403,10 @@ class WindowsAutomationHandler(BaseAutomationHandler):
         """
         try:
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.click(MouseButton.left, 2)
             return {"success": True}
         except Exception as e:
@@ -407,9 +428,11 @@ class WindowsAutomationHandler(BaseAutomationHandler):
             Dict[str, Any]: A dictionary with success status and optional error message.
         """
         try:
-            # simple drag implementation
             self.mouse.press(self._map_button(button))
-            self.mouse.position = (x, y)
+            await move_mouse_human(
+                self.mouse, x, y,
+                config=self.human_mouse_config,
+            )
             self.mouse.release(self._map_button(button))
             return {"success": True}
         except Exception as e:
@@ -433,14 +456,19 @@ class WindowsAutomationHandler(BaseAutomationHandler):
             if not path:
                 return {"success": False, "error": "Path is empty"}
 
-            # Move to first position
-            self.mouse.position = path[0]
+            first_x, first_y = path[0]
+            await move_mouse_human(
+                self.mouse, first_x, first_y,
+                config=self.human_mouse_config,
+            )
 
-            # Drag through all positions
+            self.mouse.press(self._map_button(button))
             for x, y in path[1:]:
-                self.mouse.press(self._map_button(button))
-                self.mouse.position = (x, y)
-                self.mouse.release(self._map_button(button))
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
+            self.mouse.release(self._map_button(button))
 
             return {"success": True}
         except Exception as e:

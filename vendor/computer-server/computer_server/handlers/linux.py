@@ -29,6 +29,7 @@ from pynput.mouse import Button
 from pynput.mouse import Controller as MouseController
 
 from .base import BaseAccessibilityHandler, BaseAutomationHandler
+from ..utils.human_mouse import HumanMouseConfig, HumanMouseMover, move_mouse_human
 
 
 class LinuxAccessibilityHandler(BaseAccessibilityHandler):
@@ -115,6 +116,8 @@ class LinuxAutomationHandler(BaseAutomationHandler):
 
     keyboard = KeyboardController()
     mouse = MouseController()
+    human_mouse_config = HumanMouseConfig(enabled=True, speed_factor=0.8)
+    human_mouse_mover = HumanMouseMover(human_mouse_config)
 
     # Mouse Actions
     async def mouse_down(
@@ -132,7 +135,10 @@ class LinuxAutomationHandler(BaseAutomationHandler):
         """
         try:
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             from pynput.mouse import Button
 
             btn = getattr(Button, button if button in ["left", "right", "middle"] else "left")
@@ -156,7 +162,10 @@ class LinuxAutomationHandler(BaseAutomationHandler):
         """
         try:
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             from pynput.mouse import Button
 
             btn = getattr(Button, button if button in ["left", "right", "middle"] else "left")
@@ -176,7 +185,10 @@ class LinuxAutomationHandler(BaseAutomationHandler):
             Dict[str, Any]: A dictionary with success status and error message if failed.
         """
         try:
-            self.mouse.position = (x, y)
+            await move_mouse_human(
+                self.mouse, x, y,
+                config=self.human_mouse_config,
+            )
             return {"success": True}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -195,7 +207,10 @@ class LinuxAutomationHandler(BaseAutomationHandler):
             from pynput.mouse import Button
 
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.click(Button.left, 1)
             return {"success": True}
         except Exception as e:
@@ -215,7 +230,10 @@ class LinuxAutomationHandler(BaseAutomationHandler):
             from pynput.mouse import Button
 
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.click(Button.right, 1)
             return {"success": True}
         except Exception as e:
@@ -237,7 +255,10 @@ class LinuxAutomationHandler(BaseAutomationHandler):
             from pynput.mouse import Button
 
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             self.mouse.click(Button.left, 2)
             return {"success": True}
         except Exception as e:
@@ -260,7 +281,10 @@ class LinuxAutomationHandler(BaseAutomationHandler):
             from pynput.mouse import Button
 
             if x is not None and y is not None:
-                self.mouse.position = (x, y)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
             btn = getattr(Button, button if button in ["left", "right", "middle"] else "left")
             self.mouse.click(btn, 1)
             return {"success": True}
@@ -286,7 +310,10 @@ class LinuxAutomationHandler(BaseAutomationHandler):
 
             btn = getattr(Button, button if button in ["left", "right", "middle"] else "left")
             self.mouse.press(btn)
-            self.mouse.position = (x, y)
+            await move_mouse_human(
+                self.mouse, x, y,
+                config=self.human_mouse_config,
+            )
             self.mouse.release(btn)
             return {"success": True}
         except Exception as e:
@@ -311,11 +338,18 @@ class LinuxAutomationHandler(BaseAutomationHandler):
             if not path:
                 return {"success": False, "error": "Path is empty"}
             btn = getattr(Button, button if button in ["left", "right", "middle"] else "left")
-            self.mouse.position = path[0]
+            first_x, first_y = path[0]
+            await move_mouse_human(
+                self.mouse, first_x, first_y,
+                config=self.human_mouse_config,
+            )
+            self.mouse.press(btn)
             for x, y in path[1:]:
-                self.mouse.press(btn)
-                self.mouse.position = (x, y)
-                self.mouse.release(btn)
+                await move_mouse_human(
+                    self.mouse, x, y,
+                    config=self.human_mouse_config,
+                )
+            self.mouse.release(btn)
             return {"success": True}
         except Exception as e:
             return {"success": False, "error": str(e)}
