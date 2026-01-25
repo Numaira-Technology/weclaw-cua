@@ -1,0 +1,13 @@
+[project]
+name = "wechat-removal"
+version = "0.1.0"
+description = "WeChat group removal agent built on vendored CUA components"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pyright]
+pythonVersion = "3.12"

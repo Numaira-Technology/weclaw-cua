@@ -1,0 +1,7 @@
+use_host_computer_server: true
+os_type: windows
+api_port: 8000
+display: "1280x720"
+timeout: 180
+telemetry_enabled: false
+screenshot_delay: 0.5
