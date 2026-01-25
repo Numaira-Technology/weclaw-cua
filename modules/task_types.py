@@ -40,3 +40,15 @@ class RemovalPlan:
     suspects: List[Suspect] = field(default_factory=list)
     confirmed: bool = False
     note: Optional[str] = None
+
+
+@dataclass
+class RemovalResult:
+    """Result of attempting to remove a single suspect from a group."""
+
+    sender_name: str
+    sender_id: str
+    thread_id: str
+    success: bool
+    attempts: int = 1
+    error: Optional[str] = None

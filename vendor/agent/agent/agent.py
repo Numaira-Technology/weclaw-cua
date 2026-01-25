@@ -16,7 +16,6 @@ from typing import (
     Set,
     Tuple,
     Union,
-    cast,
 )
 
 import litellm
@@ -57,11 +56,15 @@ def assert_callable_with(f, *args, **kwargs):
         return True
     except TypeError as e:
         sig = inspect.signature(f)
-        raise IllegalArgumentError(f"Expected {sig}, got args={args} kwargs={kwargs}") from e
+        raise IllegalArgumentError(
+            f"Expected {sig}, got args={args} kwargs={kwargs}"
+        ) from e
 
 
 def get_json(obj: Any, max_depth: int = 10) -> Any:
-    def custom_serializer(o: Any, depth: int = 0, seen: Optional[Set[int]] = None) -> Any:
+    def custom_serializer(
+        o: Any, depth: int = 0, seen: Optional[Set[int]] = None
+    ) -> Any:
         if seen is None:
             seen = set()
 
@@ -251,7 +254,9 @@ class ComputerAgent:
 
         # Add image retention callback if only_n_most_recent_images is set
         if self.only_n_most_recent_images:
-            self.callbacks.append(ImageRetentionCallback(self.only_n_most_recent_images))
+            self.callbacks.append(
+                ImageRetentionCallback(self.only_n_most_recent_images)
+            )
 
         # Add trajectory saver callback if trajectory_dir is set
         if self.trajectory_dir:
@@ -335,7 +340,9 @@ class ComputerAgent:
             if computer_handler is None:
                 for schema in self.tool_schemas:
                     if schema["type"] == "computer":
-                        computer_handler = await make_computer_handler(schema["computer"])
+                        computer_handler = await make_computer_handler(
+                            schema["computer"]
+                        )
                         break
 
             self.computer_handler = computer_handler
@@ -392,7 +399,9 @@ class ComputerAgent:
     # AGENT RUN LOOP LIFECYCLE HOOKS
     # ============================================================================
 
-    async def _on_run_start(self, kwargs: Dict[str, Any], old_items: List[Dict[str, Any]]) -> None:
+    async def _on_run_start(
+        self, kwargs: Dict[str, Any], old_items: List[Dict[str, Any]]
+    ) -> None:
         """Initialize run tracking by calling callbacks."""
         for callback in self.callbacks:
             if hasattr(callback, "on_run_start"):
@@ -418,12 +427,16 @@ class ComputerAgent:
         """Check if run should continue by calling callbacks."""
         for callback in self.callbacks:
             if hasattr(callback, "on_run_continue"):
-                should_continue = await callback.on_run_continue(kwargs, old_items, new_items)
+                should_continue = await callback.on_run_continue(
+                    kwargs, old_items, new_items
+                )
                 if not should_continue:
                     return False
         return True
 
-    async def _on_llm_start(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def _on_llm_start(
+        self, messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Prepare messages for the LLM call by applying callbacks."""
         result = messages
         for callback in self.callbacks:
@@ -439,7 +452,9 @@ class ComputerAgent:
                 result = await callback.on_llm_end(result)
         return result
 
-    async def _on_responses(self, kwargs: Dict[str, Any], responses: Dict[str, Any]) -> None:
+    async def _on_responses(
+        self, kwargs: Dict[str, Any], responses: Dict[str, Any]
+    ) -> None:
         """Called when responses are received."""
         for callback in self.callbacks:
             if hasattr(callback, "on_responses"):
@@ -497,7 +512,9 @@ class ComputerAgent:
             if hasattr(callback, "on_usage"):
                 await callback.on_usage(get_json(usage))
 
-    async def _on_screenshot(self, screenshot: Union[str, bytes], name: str = "screenshot") -> None:
+    async def _on_screenshot(
+        self, screenshot: Union[str, bytes], name: str = "screenshot"
+    ) -> None:
         """Called when a screenshot is taken."""
         for callback in self.callbacks:
             if hasattr(callback, "on_screenshot"):
@@ -546,15 +563,6 @@ class ComputerAgent:
 
                 # Extract action arguments (all fields except 'type')
                 action_args = {k: v for k, v in action.items() if k != "type"}
-                
-                # #region agent log
-                import json as _json
-                import time as _time
-                _log_path = Path(r"d:\Documents\Project Bird\code\cua\.cursor\debug.log")
-                open(_log_path, 'a', encoding='utf-8').write(_json.dumps({"location":"agent.py:_handle_item:computer_call","message":"executing computer action","data":{"action_type":action_type,"action_args":action_args,"call_id":item.get("call_id")},"timestamp":_time.time(),"sessionId":"debug-session","hypothesisId":"B,C,D"})+'\n')
-                # #endregion
-
-                # print(f"{action_type}({action_args})")
 
                 # Execute the computer action
                 computer_method = getattr(computer, action_type, None)
@@ -569,6 +577,11 @@ class ComputerAgent:
                     await asyncio.sleep(self.screenshot_delay)
                 screenshot_base64 = await computer.screenshot()
                 await self._on_screenshot(screenshot_base64, "screenshot_after")
+
+                # Update click correction if this was a click action
+                if action_type in ("click", "left_click", "double_click"):
+                    if hasattr(computer, "update_click_correction"):
+                        await computer.update_click_correction(screenshot_base64)
 
                 # Handle safety checks
                 pending_checks = item.get("pending_safety_checks", [])
@@ -683,7 +696,9 @@ class ComputerAgent:
         if (api_key is not None) or (self.api_key is not None):
             merged_kwargs["api_key"] = api_key if api_key is not None else self.api_key
         if (api_base is not None) or (self.api_base is not None):
-            merged_kwargs["api_base"] = api_base if api_base is not None else self.api_base
+            merged_kwargs["api_base"] = (
+                api_base if api_base is not None else self.api_base
+            )
 
         old_items = self._process_input(messages)
         new_items = []
@@ -702,14 +717,18 @@ class ComputerAgent:
         # Increased from 3 to 10 to support multi-step tasks like removal workflow
         MAX_ITERATIONS = 10
         iteration_count = 0
-        
+
         while new_items[-1].get("role") != "assistant" if new_items else True:
             iteration_count += 1
             if iteration_count > MAX_ITERATIONS:
-                print(f"[Agent] WARNING: Max iterations ({MAX_ITERATIONS}) reached, stopping loop")
+                print(
+                    f"[Agent] WARNING: Max iterations ({MAX_ITERATIONS}) reached, stopping loop"
+                )
                 break
             # Lifecycle hook: Check if we should continue based on callbacks (e.g., budget manager)
-            should_continue = await self._on_run_continue(run_kwargs, old_items, new_items)
+            should_continue = await self._on_run_continue(
+                run_kwargs, old_items, new_items
+            )
             if not should_continue:
                 break
 
@@ -718,7 +737,9 @@ class ComputerAgent:
             # - PII anonymization
             # - Image retention policy
             combined_messages = old_items + new_items
-            combined_messages = replace_failed_computer_calls_with_function_calls(combined_messages)
+            combined_messages = replace_failed_computer_calls_with_function_calls(
+                combined_messages
+            )
             preprocessed_messages = await self._on_llm_start(combined_messages)
 
             loop_kwargs = {
@@ -743,13 +764,19 @@ class ComputerAgent:
                         content = m.get("content")
                         if isinstance(content, list):
                             for item in content:
-                                if isinstance(item, dict) and item.get("type") == "image_url":
+                                if (
+                                    isinstance(item, dict)
+                                    and item.get("type") == "image_url"
+                                ):
                                     return True
 
                         # 2️⃣ Check computer_call_output screenshots
                         if m.get("type") == "computer_call_output":
                             output = m.get("output", {})
-                            if output.get("type") == "input_image" and "image_url" in output:
+                            if (
+                                output.get("type") == "input_image"
+                                and "image_url" in output
+                            ):
                                 return True
 
                     return False
@@ -763,12 +790,6 @@ class ComputerAgent:
             # ---------------------------------
 
             # Run agent loop iteration
-            # #region agent log
-            import json as _json
-            import time as _time
-            _log_path = Path(r"d:\Documents\Project Bird\code\cua\.cursor\debug.log")
-            open(_log_path, 'a', encoding='utf-8').write(_json.dumps({"location":"agent.py:run:before_predict_step","message":"about to call predict_step","data":{"iteration_count":iteration_count,"new_items_count":len(new_items),"last_item_type":new_items[-1].get("type") if new_items else None},"timestamp":_time.time(),"sessionId":"debug-session","hypothesisId":"F"})+'\n')
-            # #endregion
             result = await self.agent_loop.predict_step(
                 **loop_kwargs,
                 _on_api_start=self._on_api_start,
@@ -811,12 +832,6 @@ class ComputerAgent:
                         ),
                     }
 
-        # #region agent log
-        import json as _json
-        import time as _time
-        _log_path = Path(r"d:\Documents\Project Bird\code\cua\.cursor\debug.log")
-        open(_log_path, 'a', encoding='utf-8').write(_json.dumps({"location":"agent.py:run:loop_exit","message":"agent loop exited","data":{"iteration_count":iteration_count,"new_items_count":len(new_items),"last_item_type":new_items[-1].get("type") if new_items else None,"last_item_role":new_items[-1].get("role") if new_items else None},"timestamp":_time.time(),"sessionId":"debug-session","hypothesisId":"F"})+'\n')
-        # #endregion
         await self._on_run_end(loop_kwargs, old_items, new_items)
 
     async def predict_click(
@@ -843,7 +858,9 @@ class ComputerAgent:
         if hasattr(self.agent_loop, "predict_click"):
             if not image_b64:
                 if not self.computer_handler:
-                    raise ValueError("Computer tool or image_b64 is required for predict_click")
+                    raise ValueError(
+                        "Computer tool or image_b64 is required for predict_click"
+                    )
                 image_b64 = await self.computer_handler.screenshot()
             # Pass along api credentials if available
             click_kwargs: Dict[str, Any] = {}
@@ -852,7 +869,10 @@ class ComputerAgent:
             if self.api_base is not None:
                 click_kwargs["api_base"] = self.api_base
             return await self.agent_loop.predict_click(
-                model=self.model, image_b64=image_b64, instruction=instruction, **click_kwargs
+                model=self.model,
+                image_b64=image_b64,
+                instruction=instruction,
+                **click_kwargs,
             )
         return None
 

@@ -9,9 +9,21 @@ from __future__ import annotations
 import json
 import math
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import litellm
+from litellm.responses.litellm_completion_transformation.transformation import (
+    LiteLLMCompletionResponsesConfig,
+)
+
+from ..decorators import register_agent
+from ..loops.base import AsyncAgentConfig
+from ..responses import (
+    convert_completion_messages_to_responses_items,
+    convert_responses_items_to_completion_messages,
+    make_reasoning_item,
+)
+from ..types import AgentCapability
 
 
 # Local implementation of smart_resize to avoid torch dependency from qwen_vl_utils
@@ -58,19 +70,6 @@ def _smart_resize(
         w_bar = _ceil_by_factor(int(width * beta), factor)
     return h_bar, w_bar
 
-
-from litellm.responses.litellm_completion_transformation.transformation import (
-    LiteLLMCompletionResponsesConfig,
-)
-
-from ..decorators import register_agent
-from ..loops.base import AsyncAgentConfig
-from ..responses import (
-    convert_completion_messages_to_responses_items,
-    convert_responses_items_to_completion_messages,
-    make_reasoning_item,
-)
-from ..types import AgentCapability
 
 # ComputerUse tool schema (OpenAI function tool format)
 QWEN3_COMPUTER_TOOL: Dict[str, Any] = {
@@ -151,11 +150,13 @@ def _build_nous_system(functions: List[Dict[str, Any]]) -> Optional[Dict[str, An
     try:
         from qwen_agent.llm.fncall_prompts.nous_fncall_prompt import (
             ContentItem as NousContentItem,
-        )
+        )  # type: ignore[import-not-found]
         from qwen_agent.llm.fncall_prompts.nous_fncall_prompt import (
             Message as NousMessage,
-        )
-        from qwen_agent.llm.fncall_prompts.nous_fncall_prompt import NousFnCallPrompt
+        )  # type: ignore[import-not-found]
+        from qwen_agent.llm.fncall_prompts.nous_fncall_prompt import (
+            NousFnCallPrompt,
+        )  # type: ignore[import-not-found]
     except ImportError:
         raise ImportError(
             "qwen-agent not installed. Please install it with `pip install cua-agent[qwen]`."
@@ -187,22 +188,18 @@ def _parse_tool_call_from_text(text: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-async def _unnormalize_coordinate(args: Dict[str, Any], dims: Tuple[int, int]) -> Dict[str, Any]:
+async def _unnormalize_coordinate(
+    args: Dict[str, Any], dims: Tuple[int, int]
+) -> Dict[str, Any]:
     """Coordinates appear in 0..1000 space, scale to actual screen size using dims if provided.
-    
+
     Handles two coordinate formats from the model:
     1. coordinate array [x, y] with values 0-1000: normalized, needs unnormalization
     2. coordinate array [x, y] with values > 1000: already pixel space, pass through
     3. separate x/y fields: already pixel space, pass through
     """
-    # #region agent log
-    _log_path = r"d:\Documents\Project Bird\code\cua\.cursor\debug.log"
-    import json as _json, time as _time
-    open(_log_path, "a", encoding="utf-8").write(_json.dumps({"location": "generic_vlm.py:_unnormalize_coordinate:entry", "message": "unnormalize called", "data": {"args": str(args)[:200], "dims": dims}, "timestamp": _time.time(), "sessionId": "debug-session"}) + "\n")
-    # #endregion
-    
     width, height = float(dims[0]), float(dims[1])
-    
+
     # Handle coordinate array format
     coord = args.get("coordinate")
     if coord and isinstance(coord, (list, tuple)) and len(coord) >= 2:
@@ -213,42 +210,44 @@ async def _unnormalize_coordinate(args: Dict[str, Any], dims: Tuple[int, int]) -
             x_abs = max(0.0, min(width, (x / 1000.0) * width))
             y_abs = max(0.0, min(height, (y / 1000.0) * height))
             args = {**args, "coordinate": [round(x_abs), round(y_abs)]}
-            # #region agent log
-            open(_log_path, "a", encoding="utf-8").write(_json.dumps({"location": "generic_vlm.py:_unnormalize_coordinate:unnormalized", "message": "unnormalized from 0-1000", "data": {"raw": [x, y], "final": [round(x_abs), round(y_abs)], "dims": [width, height]}, "timestamp": _time.time(), "sessionId": "debug-session"}) + "\n")
-            # #endregion
         else:
             # Already in pixel space, just clamp to screen bounds
             x_clamped = max(0.0, min(width - 1, x))
             y_clamped = max(0.0, min(height - 1, y))
             args = {**args, "coordinate": [round(x_clamped), round(y_clamped)]}
-            # #region agent log
-            open(_log_path, "a", encoding="utf-8").write(_json.dumps({"location": "generic_vlm.py:_unnormalize_coordinate:pixel_passthrough", "message": "already pixel space, clamped", "data": {"raw": [x, y], "final": [round(x_clamped), round(y_clamped)], "dims": [width, height]}, "timestamp": _time.time(), "sessionId": "debug-session"}) + "\n")
-            # #endregion
         return args
-    
+
     # Handle separate x/y fields - check if normalized or pixel space
     x_val = args.get("x")
     y_val = args.get("y")
     if x_val is not None and y_val is not None:
-        x = float(x_val)
-        y = float(y_val)
+        # Defensive: handle malformed data where x/y might be lists instead of numbers
+        if isinstance(x_val, (list, tuple)):
+            x_val = x_val[0] if x_val else 0
+        if isinstance(y_val, (list, tuple)):
+            y_val = y_val[0] if y_val else 0
+        is_pixel_fallback = False
+        try:
+            x = float(x_val)
+            y = float(y_val)
+        except (TypeError, ValueError):
+            # Fallback to center of screen if coordinates are unparseable
+            # These are already in pixel space, so skip normalization
+            x = width / 2
+            y = height / 2
+            is_pixel_fallback = True
         # If both values are <= 1000, treat as normalized 0-1000 space
-        if x <= 1000 and y <= 1000:
+        # Skip if we already set pixel-space fallback coordinates
+        if not is_pixel_fallback and x <= 1000 and y <= 1000:
             x_abs = max(0.0, min(width - 1, (x / 1000.0) * width))
             y_abs = max(0.0, min(height - 1, (y / 1000.0) * height))
             args = {**args, "x": round(x_abs), "y": round(y_abs)}
-            # #region agent log
-            open(_log_path, "a", encoding="utf-8").write(_json.dumps({"location": "generic_vlm.py:_unnormalize_coordinate:xy_unnormalized", "message": "x/y fields unnormalized from 0-1000", "data": {"raw": [x, y], "final": [round(x_abs), round(y_abs)], "dims": [width, height]}, "timestamp": _time.time(), "sessionId": "debug-session"}) + "\n")
-            # #endregion
         else:
             # Already in pixel space, just clamp to screen bounds
             x_clamped = max(0.0, min(width - 1, x))
             y_clamped = max(0.0, min(height - 1, y))
             args = {**args, "x": round(x_clamped), "y": round(y_clamped)}
-            # #region agent log
-            open(_log_path, "a", encoding="utf-8").write(_json.dumps({"location": "generic_vlm.py:_unnormalize_coordinate:xy_passthrough", "message": "x/y fields already pixel space, clamped", "data": {"raw": [x, y], "final": [round(x_clamped), round(y_clamped)], "dims": [width, height]}, "timestamp": _time.time(), "sessionId": "debug-session"}) + "\n")
-            # #endregion
-    
+
     return args
 
 
@@ -514,8 +513,8 @@ class GenericVlmConfig(AsyncAgentConfig):
         # Retry logic for transient API errors (502, 503, etc.)
         import asyncio
 
-        max_api_retries = 3
-        retry_delay = 2.0
+        max_api_retries = 5
+        retry_delay = 3.0
         last_error = None
         for attempt in range(max_api_retries):
             try:
@@ -524,27 +523,40 @@ class GenericVlmConfig(AsyncAgentConfig):
             except Exception as e:
                 last_error = e
                 error_str = str(e)
-                # Retry on 502, 503, or "Internal server error"
+                # Retry on 502, 503, 504, ServiceUnavailable, or "Internal server error"
                 if any(
                     x in error_str
-                    for x in ["502", "503", "Internal server error", "server_error"]
+                    for x in [
+                        "502",
+                        "503",
+                        "504",
+                        "ServiceUnavailable",
+                        "Internal server error",
+                        "server_error",
+                        "Bad Gateway",
+                    ]
                 ):
                     if attempt < max_api_retries - 1:
-                        await asyncio.sleep(retry_delay * (attempt + 1))
+                        wait_time = retry_delay * (attempt + 1)
+                        print(
+                            f"[generic_vlm] API error (attempt {attempt + 1}/{max_api_retries}), retrying in {wait_time}s..."
+                        )
+                        await asyncio.sleep(wait_time)
                         continue
                 raise
         else:
             if last_error:
                 raise last_error
+            raise RuntimeError("API call failed after all retries")
 
         if _on_api_end:
             await _on_api_end(api_kwargs, response)
 
         usage = {
             **LiteLLMCompletionResponsesConfig._transform_chat_completion_usage_to_responses_usage(  # type: ignore
-                response.usage
+                response.usage  # type: ignore[union-attr]
             ).model_dump(),
-            "response_cost": response._hidden_params.get("response_cost", 0.0),
+            "response_cost": response._hidden_params.get("response_cost", 0.0),  # type: ignore[union-attr]
         }
         if _on_usage:
             await _on_usage(usage)
@@ -557,37 +569,13 @@ class GenericVlmConfig(AsyncAgentConfig):
         tool_calls_array = message.get("tool_calls") or []
         reasoning_text = message.get("reasoning") or ""
 
-        # #region agent log
-        import time as _time
-        from pathlib import Path as _Path
-
-        _log_path = _Path(r"d:\Documents\Project Bird\code\cua\.cursor\debug.log")
-        open(_log_path, "a", encoding="utf-8").write(
-            json.dumps(
-                {
-                    "location": "generic_vlm.py:predict_step:response",
-                    "message": "LLM response received",
-                    "data": {
-                        "content_text": content_text[:1000] if content_text else "",
-                        "has_tool_calls": bool(tool_calls_array),
-                        "reasoning_preview": (
-                            reasoning_text[:500] if reasoning_text else ""
-                        ),
-                    },
-                    "timestamp": _time.time(),
-                    "sessionId": "debug-session",
-                    "hypothesisId": "A,B,C,D,E",
-                }
-            )
-            + "\n"
-        )
-        # #endregion
-
         output_items: List[Dict[str, Any]] = []
 
         # Add reasoning if present (Ollama Cloud format)
         if reasoning_text:
-            output_items.append(make_reasoning_item(reasoning_text))
+            output_items.append(
+                cast(Dict[str, Any], make_reasoning_item(reasoning_text))
+            )
 
         # Priority 1: Try to parse tool call from content text (OpenRouter format)
         tool_call = _parse_tool_call_from_text(content_text)
@@ -600,48 +588,7 @@ class GenericVlmConfig(AsyncAgentConfig):
                 raise RuntimeError(
                     "No screenshots found to derive dimensions for coordinate unnormalization."
                 )
-            # #region agent log
-            import time as _time
-            from pathlib import Path as _Path
-
-            _log_path = _Path(r"d:\Documents\Project Bird\code\cua\.cursor\debug.log")
-            open(_log_path, "a", encoding="utf-8").write(
-                json.dumps(
-                    {
-                        "location": "generic_vlm.py:predict_step:before_unnormalize",
-                        "message": "coordinate before unnormalization",
-                        "data": {
-                            "raw_args": raw_args,
-                            "last_rw": last_rw,
-                            "last_rh": last_rh,
-                            "content_text_preview": (
-                                content_text[:500] if content_text else ""
-                            ),
-                        },
-                        "timestamp": _time.time(),
-                        "sessionId": "debug-session",
-                        "hypothesisId": "B",
-                    }
-                )
-                + "\n"
-            )
-            # #endregion
             args = await _unnormalize_coordinate(raw_args, (last_rw, last_rh))
-            # #region agent log
-            open(_log_path, "a", encoding="utf-8").write(
-                json.dumps(
-                    {
-                        "location": "generic_vlm.py:predict_step:after_unnormalize",
-                        "message": "coordinate after unnormalization",
-                        "data": {"args": args, "raw_args": raw_args},
-                        "timestamp": _time.time(),
-                        "sessionId": "debug-session",
-                        "hypothesisId": "B",
-                    }
-                )
-                + "\n"
-            )
-            # #endregion
 
             # Build an OpenAI-style tool call so we can reuse the converter
             fake_cm = {
@@ -811,15 +758,8 @@ class GenericVlmConfig(AsyncAgentConfig):
         content_text = ((choice.get("message") or {}).get("content")) or ""
         tool_call = _parse_tool_call_from_text(content_text) or {}
         args = tool_call.get("arguments") or {}
-        # #region agent log
-        _raw_coord = args.get("coordinate", [])
-        open(r"d:\Documents\Project Bird\code\cua\.cursor\debug.log", "a").write(__import__("json").dumps({"location": "generic_vlm.py:predict_click:before_unnorm", "message": "dimensions and raw coord", "data": {"original_w": w, "original_h": h, "resized_rw": rw, "resized_rh": rh, "raw_coord": _raw_coord, "aspect_orig": round(w/h, 4) if h else 0, "aspect_resized": round(rw/rh, 4) if rh else 0}, "timestamp": __import__("time").time(), "sessionId": "debug-session", "hypothesisId": "A,B,C"}) + "\n")
-        # #endregion
         args = await _unnormalize_coordinate(args, (rw, rh))
         coord = args.get("coordinate")
-        # #region agent log
-        open(r"d:\Documents\Project Bird\code\cua\.cursor\debug.log", "a").write(__import__("json").dumps({"location": "generic_vlm.py:predict_click:after_unnorm", "message": "final coord", "data": {"final_coord": coord, "unnorm_dims_used": [rw, rh]}, "timestamp": __import__("time").time(), "sessionId": "debug-session", "hypothesisId": "A,D"}) + "\n")
-        # #endregion
         if isinstance(coord, (list, tuple)) and len(coord) >= 2:
             return int(coord[0]), int(coord[1])
         return None

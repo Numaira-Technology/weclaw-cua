@@ -43,7 +43,11 @@ def parse_classification(text_output: str) -> List[GroupThread]:
             lines = lines[:-1]
         text = "\n".join(lines)
     payload = json.loads(text)
-    raw_threads = payload.get("threads", [])
+    # Handle both formats: {"threads": [...]} or direct array [...]
+    if isinstance(payload, list):
+        raw_threads = payload
+    else:
+        raw_threads = payload.get("threads", [])
     return [
         GroupThread(
             name=str(item.get("name", "")),

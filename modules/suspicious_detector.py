@@ -25,25 +25,6 @@ from modules.task_types import GroupThread, Suspect
 
 def _extract_json_from_text(text: str) -> dict:
     """Extract JSON object from text that may contain surrounding prose."""
-    # #region agent log
-    import json as _json
-
-    open(
-        r"d:\Documents\Project Bird\code\cua\.cursor\debug.log", "a", encoding="utf-8"
-    ).write(
-        _json.dumps(
-            {
-                "location": "suspicious_detector.py:_extract_json_from_text",
-                "message": "attempting JSON extraction",
-                "data": {"text_len": len(text), "text_preview": text[:200]},
-                "timestamp": __import__("time").time(),
-                "sessionId": "debug-session",
-                "hypothesisId": "B-fix",
-            }
-        )
-        + "\n"
-    )
-    # #endregion
     # Try parsing the whole string first (in case it's already pure JSON)
     try:
         return json.loads(text)
@@ -56,27 +37,6 @@ def _extract_json_from_text(text: str) -> dict:
     )
     if matches:
         json_str = matches[-1].group(0)
-        # #region agent log
-        import json as _json
-
-        open(
-            r"d:\Documents\Project Bird\code\cua\.cursor\debug.log",
-            "a",
-            encoding="utf-8",
-        ).write(
-            _json.dumps(
-                {
-                    "location": "suspicious_detector.py:_extract_json_from_text:regex_match",
-                    "message": "found JSON via regex",
-                    "data": {"json_str": json_str[:300]},
-                    "timestamp": __import__("time").time(),
-                    "sessionId": "debug-session",
-                    "hypothesisId": "B-fix",
-                }
-            )
-            + "\n"
-        )
-        # #endregion
         return json.loads(json_str)
     # Fallback: find any JSON object starting with {"thread_id" or {"suspects"
     for pattern in [r'\{"thread_id".*?\}(?=\s*$)', r'\{"suspects".*?\}(?=\s*$)']:

@@ -29,6 +29,14 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import Callable, Optional
 
+
+def _sanitize_surrogates(text: str) -> str:
+    """Remove surrogate characters that cause UTF-8 encoding errors."""
+    return text.encode("utf-8", errors="surrogatepass").decode(
+        "utf-8", errors="replace"
+    )
+
+
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -166,7 +174,7 @@ class ControlPanel:
         style.configure("Small.TButton", padding=4, font=("Segoe UI", 9))
         style.configure("Header.TLabel", font=("Segoe UI", 14, "bold"))
         style.configure("Status.TLabel", font=("Segoe UI", 9))
-        style.configure("Server.TLabel", font=("Segoe UI", 9), foreground="#888888")
+        style.configure("Server.TLabel", font=("Segoe UI", 9))
 
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -186,8 +194,9 @@ class ControlPanel:
             server_frame, text="Start Server", command=self._toggle_server, width=15
         )
         self.server_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.server_status = ttk.Label(
-            server_frame, text="Stopped", style="Server.TLabel"
+        self.server_status = tk.Label(
+            server_frame, text="Stopped", font=("Segoe UI", 9),
+            bg="#1e1e1e", fg="#888888"
         )
         self.server_status.pack(side=tk.LEFT)
 
@@ -200,8 +209,9 @@ class ControlPanel:
             width=15,
         )
         self.workflow_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.workflow_status = ttk.Label(
-            workflow_frame, text="Stopped", style="Server.TLabel"
+        self.workflow_status = tk.Label(
+            workflow_frame, text="Stopped", font=("Segoe UI", 9),
+            bg="#1e1e1e", fg="#888888"
         )
         self.workflow_status.pack(side=tk.LEFT)
 
@@ -254,7 +264,11 @@ class ControlPanel:
         )
         self.run_all_btn.pack(side=tk.LEFT, padx=(0, 5))
         self.stop_btn = ttk.Button(
-            run_frame, text="■ Stop", command=self._stop_execution, width=10, state=tk.DISABLED
+            run_frame,
+            text="■ Stop",
+            command=self._stop_execution,
+            width=10,
+            state=tk.DISABLED,
         )
         self.stop_btn.pack(side=tk.LEFT)
 
@@ -323,7 +337,8 @@ class ControlPanel:
             current_group_name = self.state.unread_groups[idx].name
         parts = [
             f"Threads: {len(self.state.threads)}",
-            f"Groups: {idx}/{total}" + (f" ({current_group_name})" if current_group_name else ""),
+            f"Groups: {idx}/{total}"
+            + (f" ({current_group_name})" if current_group_name else ""),
             f"Current Suspects: {len(self.state.current_group_suspects)}",
             f"Total Suspects: {len(self.state.all_suspects)}",
         ]
@@ -457,7 +472,9 @@ class ControlPanel:
         self._save_state()
         thread = self.state.unread_groups[idx]
         self._set_status(f"Run All: Read Messages ({thread.name})")
-        self._log(f"[Run All] Step 3: Reading messages from {thread.name} ({idx + 1}/{len(self.state.unread_groups)})...")
+        self._log(
+            f"[Run All] Step 3: Reading messages from {thread.name} ({idx + 1}/{len(self.state.unread_groups)})..."
+        )
         self._request_agent_step(
             "read_messages", {"thread_id": thread.thread_id, "thread_name": thread.name}
         )
@@ -473,7 +490,9 @@ class ControlPanel:
         idx = self.state.current_thread_index
         thread = self.state.unread_groups[idx]
         self.state.step_logs[f"read_{thread.thread_id}"] = text_output
-        self.state.step_logs[f"read_{thread.thread_id}_screenshots"] = json.dumps(screenshots)
+        self.state.step_logs[f"read_{thread.thread_id}_screenshots"] = json.dumps(
+            screenshots
+        )
         self._save_state()
         self._log(f"Read complete for {thread.name}.")
         # Proceed to extract
@@ -515,9 +534,13 @@ class ControlPanel:
         thread = self.state.unread_groups[idx]
         self._set_status(f"Run All: Build Plan ({thread.name})")
         self._log(f"[Run All] Step 5: Building removal plan for {thread.name}...")
-        self.state.current_group_plan = build_removal_plan(self.state.current_group_suspects)
+        self.state.current_group_plan = build_removal_plan(
+            self.state.current_group_suspects
+        )
         self._save_state()
-        self._log(f"Plan created with {len(self.state.current_group_plan.suspects)} suspect(s).")
+        self._log(
+            f"Plan created with {len(self.state.current_group_plan.suspects)} suspect(s)."
+        )
         # Proceed to removal
         self._run_all_removal()
 
@@ -527,7 +550,10 @@ class ControlPanel:
             return
         idx = self.state.current_thread_index
         thread = self.state.unread_groups[idx]
-        if not self.state.current_group_plan or not self.state.current_group_plan.suspects:
+        if (
+            not self.state.current_group_plan
+            or not self.state.current_group_plan.suspects
+        ):
             self._log(f"No suspects in {thread.name}. Advancing to next group.")
             self._run_all_advance_to_next_group()
             return
@@ -554,9 +580,33 @@ class ControlPanel:
         idx = self.state.current_thread_index
         thread = self.state.unread_groups[idx]
         self._log(f"Removal result for {thread.name}: {text_output}")
+
+        # Parse per-user removal results
+        removal_results = result.get("removal_results", [])
+        all_removed = result.get("all_removed", True)
+
+        if removal_results:
+            self._log(f"  Per-user results:")
+            for r in removal_results:
+                status = "SUCCESS" if r.get("success") else "FAILED"
+                error = f" - {r.get('error')}" if r.get("error") else ""
+                self._log(
+                    f"    - {r.get('sender_name')}: {status} "
+                    f"(attempts: {r.get('attempts', 1)}){error}"
+                )
+
+            if not all_removed:
+                failed_names = [
+                    r.get("sender_name") for r in removal_results if not r.get("success")
+                ]
+                self._log(f"  WARNING: Failed to remove: {', '.join(failed_names)}")
+
         if self.state.current_group_plan:
             self.state.current_group_plan.note = text_output
         self.state.step_logs[f"removal_{thread.thread_id}"] = text_output
+        self.state.step_logs[f"removal_{thread.thread_id}_results"] = json.dumps(
+            removal_results
+        )
         self._save_state()
         self._run_all_advance_to_next_group()
 
@@ -588,7 +638,9 @@ class ControlPanel:
         remaining = len(self.state.unread_groups) - self.state.current_thread_index
         if remaining > 0:
             next_group = self.state.unread_groups[self.state.current_thread_index]
-            self._log(f"[Run All] Advanced to next group. {remaining} group(s) remaining.")
+            self._log(
+                f"[Run All] Advanced to next group. {remaining} group(s) remaining."
+            )
             self._log(f"[Run All] Processing: {next_group.name}")
             # Continue with next group
             self._run_all_read_messages()
@@ -625,8 +677,15 @@ class ControlPanel:
         try:
             req = urllib.request.Request("http://localhost:8000/status", method="GET")
             with urllib.request.urlopen(req, timeout=2) as resp:
-                return resp.status == 200
-        except Exception:
+                if resp.status == 200:
+                    return True
+                return False
+        except urllib.error.URLError:
+            # Connection refused or other URL error - server not ready yet
+            return False
+        except Exception as e:
+            # Unexpected error
+            print(f"[_check_server_ready] Unexpected error: {type(e).__name__}: {e}")
             return False
 
     def _start_server(self) -> None:
@@ -695,8 +754,10 @@ class ControlPanel:
             def monitor_server():
                 ready = False
                 start_time = time.time()
+                check_count = 0
 
                 while self.server_process and time.time() - start_time < 30:
+                    check_count += 1
                     # Check if process is still running
                     if self.server_process.poll() is not None:
                         # Process exited
@@ -730,7 +791,15 @@ class ControlPanel:
                         return
 
                     # Check if server is responding
-                    if self._check_server_ready():
+                    check_result = self._check_server_ready()
+                    if check_count <= 3 or check_count % 10 == 0:
+                        self.root.after(
+                            0,
+                            lambda c=check_count, r=check_result: self._log(
+                                f"  Server check #{c}: {'ready' if r else 'not ready'}"
+                            ),
+                        )
+                    if check_result:
                         # Verify our process is still alive (not detecting someone else's server)
                         if self.server_process.poll() is not None:
                             # Our process died, but something else is on port 8000
@@ -1113,7 +1182,9 @@ class ControlPanel:
                     for s in dialog.result
                 ]
                 self._save_state()
-                self._log(f"Loaded {len(self.state.current_group_suspects)} suspects manually (for current group).")
+                self._log(
+                    f"Loaded {len(self.state.current_group_suspects)} suspects manually (for current group)."
+                )
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to parse suspects: {e}")
 
@@ -1250,6 +1321,7 @@ class ControlPanel:
                         )
                     elif status == "complete" and result_file.exists():
                         result_text = result_file.read_text(encoding="utf-8")
+                        result_text = _sanitize_surrogates(result_text)
                         self.root.after(
                             0,
                             lambda: self._log(
@@ -1346,7 +1418,9 @@ class ControlPanel:
         self._save_state()
         thread = self.state.unread_groups[idx]
         self._set_status(f"Running: Read Messages ({thread.name})")
-        self._log(f"[Group {idx + 1}/{len(self.state.unread_groups)}] Reading messages from: {thread.name}")
+        self._log(
+            f"[Group {idx + 1}/{len(self.state.unread_groups)}] Reading messages from: {thread.name}"
+        )
         self._request_agent_step(
             "read_messages", {"thread_id": thread.thread_id, "thread_name": thread.name}
         )
@@ -1380,7 +1454,9 @@ class ControlPanel:
             return
         thread = self.state.unread_groups[idx]
         self._set_status(f"Running: Extract Suspects ({thread.name})")
-        self._log(f"[Group {idx + 1}/{len(self.state.unread_groups)}] Extracting suspects from: {thread.name}")
+        self._log(
+            f"[Group {idx + 1}/{len(self.state.unread_groups)}] Extracting suspects from: {thread.name}"
+        )
         text_key = f"read_{thread.thread_id}"
         screenshots_key = f"read_{thread.thread_id}_screenshots"
         text_output = self.state.step_logs.get(text_key, "{}")
@@ -1416,10 +1492,16 @@ class ControlPanel:
             )
             return
         self._set_status(f"Running: Build Plan ({thread.name})")
-        self._log(f"[Group {idx + 1}/{len(self.state.unread_groups)}] Building removal plan for: {thread.name}")
-        self.state.current_group_plan = build_removal_plan(self.state.current_group_suspects)
+        self._log(
+            f"[Group {idx + 1}/{len(self.state.unread_groups)}] Building removal plan for: {thread.name}"
+        )
+        self.state.current_group_plan = build_removal_plan(
+            self.state.current_group_suspects
+        )
         self._save_state()
-        self._log(f"Plan created with {len(self.state.current_group_plan.suspects)} suspect(s).")
+        self._log(
+            f"Plan created with {len(self.state.current_group_plan.suspects)} suspect(s)."
+        )
         self._set_status("Ready")
 
     def _run_removal(self) -> None:
@@ -1445,7 +1527,9 @@ class ControlPanel:
         confirm = messagebox.askyesno(
             "Confirm Removal",
             f"Remove {len(self.state.current_group_plan.suspects)} suspect(s) from {thread.name}?\n\n"
-            + "\n".join(f"- {s.sender_name}" for s in self.state.current_group_plan.suspects),
+            + "\n".join(
+                f"- {s.sender_name}" for s in self.state.current_group_plan.suspects
+            ),
         )
         if not confirm:
             self._log("Removal cancelled by user. Advancing to next group.")
@@ -1454,7 +1538,9 @@ class ControlPanel:
         self.state.current_group_plan.confirmed = True
         self._save_state()
         self._set_status(f"Running: Execute Removal ({thread.name})")
-        self._log(f"[Group {idx + 1}/{len(self.state.unread_groups)}] Executing removal for: {thread.name}")
+        self._log(
+            f"[Group {idx + 1}/{len(self.state.unread_groups)}] Executing removal for: {thread.name}"
+        )
         suspect_data = [
             {
                 "sender_id": s.sender_id,
@@ -1471,9 +1557,33 @@ class ControlPanel:
         idx = self.state.current_thread_index
         thread = self.state.unread_groups[idx]
         self._log(f"Removal result for {thread.name}: {text_output}")
+
+        # Parse per-user removal results
+        removal_results = result.get("removal_results", [])
+        all_removed = result.get("all_removed", True)
+
+        if removal_results:
+            self._log(f"  Per-user results:")
+            for r in removal_results:
+                status = "SUCCESS" if r.get("success") else "FAILED"
+                error = f" - {r.get('error')}" if r.get("error") else ""
+                self._log(
+                    f"    - {r.get('sender_name')}: {status} "
+                    f"(attempts: {r.get('attempts', 1)}){error}"
+                )
+
+            if not all_removed:
+                failed_names = [
+                    r.get("sender_name") for r in removal_results if not r.get("success")
+                ]
+                self._log(f"  WARNING: Failed to remove: {', '.join(failed_names)}")
+
         if self.state.current_group_plan:
             self.state.current_group_plan.note = text_output
         self.state.step_logs[f"removal_{thread.thread_id}"] = text_output
+        self.state.step_logs[f"removal_{thread.thread_id}_results"] = json.dumps(
+            removal_results
+        )
         self._save_state()
         self._advance_to_next_group()
         self._set_status("Ready")
@@ -1506,7 +1616,9 @@ class ControlPanel:
         if remaining > 0:
             next_group = self.state.unread_groups[self.state.current_thread_index]
             self._log(f"Advanced to next group. {remaining} group(s) remaining.")
-            self._log(f"Next group: {next_group.name}. Click 'Read Messages' to continue.")
+            self._log(
+                f"Next group: {next_group.name}. Click 'Read Messages' to continue."
+            )
             messagebox.showinfo(
                 "Group Complete",
                 f"Finished processing current group.\n\n"

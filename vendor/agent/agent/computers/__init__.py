@@ -38,7 +38,7 @@ async def make_computer_handler(computer):
     if isinstance(computer, AsyncComputerHandler):
         return computer
     if isinstance(computer, cuaComputer):
-        computer_handler = cuaComputerHandler(computer)
+        computer_handler = cuaComputerHandler(computer, enable_click_correction=True)
         await computer_handler._initialize()
         return computer_handler
     if isinstance(computer, dict):

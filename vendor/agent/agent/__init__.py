@@ -8,10 +8,19 @@ import sys
 # Import loops to register them
 from . import loops
 from .agent import ComputerAgent
+from .click_correction import ClickCorrector, ClickCorrectionConfig, ClickCorrectionCallback
 from .decorators import register_agent
 from .types import AgentResponse, Messages
 
-__all__ = ["register_agent", "ComputerAgent", "Messages", "AgentResponse"]
+__all__ = [
+    "register_agent",
+    "ComputerAgent",
+    "Messages",
+    "AgentResponse",
+    "ClickCorrector",
+    "ClickCorrectionConfig",
+    "ClickCorrectionCallback",
+]
 
 __version__ = "0.4.0"
 

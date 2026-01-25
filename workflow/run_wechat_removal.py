@@ -20,49 +20,93 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import io
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
+
+# Add vendor packages to sys.path before importing from them
+_ROOT = Path(__file__).resolve().parents[1]
+_VENDOR = _ROOT / "vendor"
+for _pkg in [_VENDOR / "agent", _VENDOR / "computer", _VENDOR / "core"]:
+    if str(_pkg) not in sys.path:
+        sys.path.insert(0, str(_pkg))
+
+from agent import ClickCorrector  # type: ignore[import-not-found]
 
 from modules.group_classifier import classification_prompt, parse_classification
 from modules.human_confirmation import require_confirmation
 from modules.message_reader import message_reader_prompt
-from modules.removal_executor import removal_prompt
+from modules.removal_executor import removal_prompt, removal_prompt_single
 from modules.removal_precheck import build_removal_plan
+from modules.removal_verifier import verify_user_removed
 from modules.suspicious_detector import extract_suspects
-from modules.task_types import GroupThread, RemovalPlan, Suspect
+from modules.task_types import GroupThread, RemovalPlan, RemovalResult, Suspect
 from modules.unread_scanner import filter_unread_groups
 from runtime.computer_session import build_computer, load_computer_settings
 from runtime.model_session import build_agent, load_model_settings
 
+# Fix Windows console encoding for emoji/unicode characters
+if sys.platform == "win32" and sys.stdout.encoding != "utf-8":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
+
+def _sanitize_surrogates(text: str) -> str:
+    """Remove surrogate characters that cause UTF-8 encoding errors."""
+    return text.encode("utf-8", errors="surrogatepass").decode(
+        "utf-8", errors="replace"
+    )
+
+
+# Module-level click corrector instance
+_click_corrector: Optional[ClickCorrector] = None
+
 
 async def targeted_click(
-    agent, computer, element_description: str, max_retries: int = 3
+    agent,
+    computer,
+    element_description: str,
+    max_retries: int = 3,
+    enable_correction: bool = True,
 ) -> Tuple[bool, str]:
     """
     Perform a targeted click on a UI element using the predict_click capability.
 
-    This implements the proper click workflow:
+    This implements the proper click workflow with automatic correction:
     1. Take a screenshot
     2. Use predict_click to find the element coordinates
-    3. Execute the click at those coordinates
-    4. Take another screenshot to verify
+    3. Apply click correction offset if enabled
+    4. Execute the click at those coordinates
+    5. Take another screenshot to verify
+    6. Update click correction based on cursor position
 
     Args:
         agent: The ComputerAgent instance
         computer: The computer interface
         element_description: Description of the element to click (e.g., "the minus button", "Catherine's avatar")
         max_retries: Number of retries if click prediction fails
+        enable_correction: Whether to use click correction mechanism
 
     Returns:
         Tuple of (success: bool, message: str)
     """
+    global _click_corrector
+
+    # Initialize corrector if needed
+    corrector = None
+    if enable_correction:
+        if _click_corrector is None:
+            _click_corrector = ClickCorrector()
+        corrector = _click_corrector
 
     for attempt in range(max_retries):
         try:
-            # Step 1: Take a screenshot
-            screenshot_b64 = await computer.interface.screenshot()
+            # Step 1: Take a screenshot (before click)
+            screenshot_before = await computer.interface.screenshot()
+            screenshot_b64 = base64.b64encode(screenshot_before).decode("utf-8")
 
             # Step 2: Use predict_click to find coordinates
             coords = await agent.predict_click(
@@ -76,40 +120,48 @@ async def targeted_click(
                 return False, f"Could not locate element: {element_description}"
 
             x, y = coords
+            original_x, original_y = x, y
 
-            # #region agent log
-            import json as _json, time as _time
-            from PIL import Image as _Image
-            import io as _io, base64 as _b64
-            _ss_bytes = _b64.b64decode(screenshot_b64)
-            _ss_img = _Image.open(_io.BytesIO(_ss_bytes))
-            _ss_w, _ss_h = _ss_img.size
-            # Get actual screen size to check for scaling difference
-            _screen_size = await computer.interface.get_screen_size()
-            _screen_w, _screen_h = _screen_size["width"], _screen_size["height"]
-            open(r"d:\Documents\Project Bird\code\cua\.cursor\debug.log", "a").write(_json.dumps({"location": "run_wechat_removal.py:targeted_click:before_transform", "message": "dimensions comparison", "data": {"predicted_x": x, "predicted_y": y, "screenshot_w": _ss_w, "screenshot_h": _ss_h, "screen_w": _screen_w, "screen_h": _screen_h, "element": element_description}, "timestamp": _time.time(), "sessionId": "debug-session", "hypothesisId": "SCREEN_VS_SCREENSHOT"}) + "\n")
-            # #endregion
+            # Step 3: Apply click correction if enabled
+            if corrector:
+                x, y = corrector.apply_correction(x, y)
+                corrector.record_intended_click(x, y)
 
-            # Step 3: Convert from screenshot coordinates to screen coordinates
+            # Step 4: Convert from screenshot coordinates to screen coordinates
             # The model outputs coordinates based on the screenshot it sees,
             # but clicks need to happen in actual screen space
             screen_x, screen_y = await computer.interface.to_screen_coordinates(x, y)
             screen_x, screen_y = int(round(screen_x)), int(round(screen_y))
 
-            # #region agent log
-            open(r"d:\Documents\Project Bird\code\cua\.cursor\debug.log", "a").write(_json.dumps({"location": "run_wechat_removal.py:targeted_click:after_transform", "message": "click after screen transform", "data": {"original_x": x, "original_y": y, "screen_x": screen_x, "screen_y": screen_y, "element": element_description}, "timestamp": _time.time(), "sessionId": "debug-session", "hypothesisId": "SCREEN_VS_SCREENSHOT"}) + "\n")
-            # #endregion
-
-            # Step 4: Execute the click in screen coordinates
+            # Step 5: Execute the click in screen coordinates
             await computer.interface.left_click(screen_x, screen_y)
 
-            # Step 4: Wait for UI to respond
+            # Step 6: Wait for UI to respond
             await asyncio.sleep(0.5)
 
-            # Step 5: Take verification screenshot
-            await computer.interface.screenshot()
+            # Step 7: Take verification screenshot
+            screenshot_after = await computer.interface.screenshot()
+            screenshot_after_b64 = base64.b64encode(screenshot_after).decode("utf-8")
 
-            return True, f"Clicked at ({x}, {y}) for: {element_description}"
+            # Step 8: Update click correction based on cursor position
+            if corrector:
+                offset = await corrector.detect_and_update_offset(
+                    x, y, screenshot_after_b64
+                )
+                if offset and (abs(offset[0]) > 5 or abs(offset[1]) > 5):
+                    stats = corrector.get_correction_stats()
+                    print(
+                        f"[targeted_click] Click correction updated: offset=({stats['current_offset']['x']:.1f}, {stats['current_offset']['y']:.1f})"
+                    )
+
+            correction_info = ""
+            if corrector and (original_x != x or original_y != y):
+                correction_info = f" (corrected from ({original_x}, {original_y}))"
+
+            return (
+                True,
+                f"Clicked at ({x}, {y}){correction_info} for: {element_description}",
+            )
 
         except Exception as e:
             if attempt < max_retries - 1:
@@ -118,6 +170,21 @@ async def targeted_click(
             return False, f"Error clicking {element_description}: {str(e)}"
 
     return False, f"Failed to click {element_description} after {max_retries} attempts"
+
+
+def reset_click_correction():
+    """Reset the click correction state."""
+    global _click_corrector
+    if _click_corrector:
+        _click_corrector.reset()
+        print("[reset_click_correction] Click correction reset")
+
+
+def get_click_correction_stats() -> dict:
+    """Get current click correction statistics."""
+    if _click_corrector:
+        return _click_corrector.get_correction_stats()
+    return {"error": "No corrector initialized"}
 
 
 def _capture_path(root: Path, task_label: str, index: int) -> Path:
@@ -177,12 +244,46 @@ async def run_vision_query(
 
     print(f"[run_vision_query] Calling {model}...")
     start = time.time()
-    response = await litellm.acompletion(model=model, messages=messages, timeout=60)
+
+    # Retry logic for transient API errors (502, 503, etc.)
+    import asyncio
+
+    max_retries = 3
+    retry_delay = 2.0
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            response = await litellm.acompletion(
+                model=model, messages=messages, timeout=60
+            )
+            break
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+            if any(
+                x in error_str
+                for x in ["502", "503", "ServiceUnavailable", "server_error"]
+            ):
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (attempt + 1)
+                    print(
+                        f"[run_vision_query] API error (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s..."
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+            raise
+    else:
+        if last_error:
+            raise last_error
+        raise RuntimeError("API call failed after all retries")
+
     elapsed = time.time() - start
     print(f"[run_vision_query] Response received in {elapsed:.1f}s")
 
     # Step 3: Extract text response
-    text_output = response.choices[0].message.content or ""
+    text_output = response.choices[0].message.content or ""  # type: ignore[union-attr]
+    # Sanitize surrogate characters that cause UTF-8 encoding errors
+    text_output = _sanitize_surrogates(text_output)
     # Use ASCII-safe encoding for Windows console compatibility
     response_preview = text_output[:200].encode("ascii", "replace").decode("ascii")
     print(f"[run_vision_query] Response: {response_preview}...")
@@ -190,8 +291,22 @@ async def run_vision_query(
     return text_output, [screenshot_path]
 
 
+def _is_transient_api_error(error: Exception) -> bool:
+    """Check if an error is a transient API error that should be retried."""
+    error_str = str(error)
+    transient_indicators = [
+        "502",
+        "503",
+        "504",
+        "ServiceUnavailable",
+        "server_error",
+        "Bad Gateway",
+    ]
+    return any(indicator in error_str for indicator in transient_indicators)
+
+
 async def run_agent_task(
-    agent, prompt: str, capture_dir: Path, task_label: str
+    agent, prompt: str, capture_dir: Path, task_label: str, max_retries: int = 3
 ) -> Tuple[str, List[Path]]:
     """Run agent task with tool loop (for tasks that need clicking/typing)."""
     import time
@@ -206,124 +321,62 @@ async def run_agent_task(
     index = 0
     start_time = time.time()
     print("[run_agent_task] Calling agent.run()...")
-    # #region agent log
-    _log_path = Path(__file__).resolve().parents[1] / ".cursor" / "debug.log"
-    import json as _json
 
-    open(_log_path, "a", encoding="utf-8").write(
-        _json.dumps(
-            {
-                "location": "run_wechat_removal.py:run_agent_task:start",
-                "message": "agent.run starting",
-                "data": {"task_label": task_label, "prompt_len": len(prompt)},
-                "timestamp": time.time(),
-                "sessionId": "debug-session",
-                "hypothesisId": "A,D",
-            }
-        )
-        + "\n"
-    )
-    # #endregion
-    async for result in agent.run(messages):
-        elapsed = time.time() - start_time
-        print(
-            f"[run_agent_task] Got result after {elapsed:.1f}s with {len(result.get('output', []))} output items"
-        )
-        # #region agent log
-        import json as _json
+    # Retry wrapper for transient API errors
+    retry_count = 0
+    while True:
+        try:
+            async for result in agent.run(messages):
+                elapsed = time.time() - start_time
+                print(
+                    f"[run_agent_task] Got result after {elapsed:.1f}s with {len(result.get('output', []))} output items"
+                )
+                for item in result["output"]:
+                    item_type = item.get("type")
+                    print(f"[run_agent_task] Processing item type: {item_type}")
+                    if item_type == "message":
+                        for content_item in item.get("content", []):
+                            text = content_item.get("text")
+                            if text:
+                                # Use ASCII-safe encoding for Windows console compatibility
+                                text_preview = (
+                                    text[:100]
+                                    .encode("ascii", "replace")
+                                    .decode("ascii")
+                                )
+                                print(
+                                    f"[run_agent_task] Message text: {text_preview}..."
+                                )
+                                text_messages.append(_sanitize_surrogates(text))
+                    if item_type == "computer_call_output":
+                        output = item.get("output", {})
+                        image_url = output.get("image_url", "")
+                        path = _capture_path(capture_dir, task_label, index)
+                        _save_screenshot(image_url, path)
+                        screenshot_paths.append(path)
+                        print(f"[run_agent_task] Saved screenshot to: {path}")
+                        index += 1
+                    if item_type == "computer_call":
+                        action = item.get("action", {})
+                        print(f"[run_agent_task] Computer call action: {action}")
+                start_time = time.time()  # Reset for next iteration
+            # Successfully completed - break out of retry loop
+            break
+        except Exception as e:
+            if _is_transient_api_error(e) and retry_count < max_retries:
+                retry_count += 1
+                wait_time = 2.0 * retry_count
+                print(
+                    f"[run_agent_task] Transient API error (attempt {retry_count}/{max_retries}), retrying in {wait_time}s: {e}"
+                )
+                await asyncio.sleep(wait_time)
+                continue
+            raise
 
-        open(_log_path, "a", encoding="utf-8").write(
-            _json.dumps(
-                {
-                    "location": "run_wechat_removal.py:run_agent_task:iteration",
-                    "message": "agent yielded result",
-                    "data": {
-                        "elapsed": elapsed,
-                        "output_count": len(result.get("output", [])),
-                        "output_types": [
-                            item.get("type") for item in result.get("output", [])
-                        ],
-                    },
-                    "timestamp": time.time(),
-                    "sessionId": "debug-session",
-                    "hypothesisId": "A,D",
-                }
-            )
-            + "\n"
-        )
-        # #endregion
-        for item in result["output"]:
-            item_type = item.get("type")
-            print(f"[run_agent_task] Processing item type: {item_type}")
-            if item_type == "message":
-                for content_item in item.get("content", []):
-                    text = content_item.get("text")
-                    if text:
-                        # Use ASCII-safe encoding for Windows console compatibility
-                        text_preview = (
-                            text[:100].encode("ascii", "replace").decode("ascii")
-                        )
-                        print(f"[run_agent_task] Message text: {text_preview}...")
-                        text_messages.append(text)
-                        # #region agent log
-                        import json as _json
-
-                        open(_log_path, "a", encoding="utf-8").write(
-                            _json.dumps(
-                                {
-                                    "location": "run_wechat_removal.py:run_agent_task:message",
-                                    "message": "collected message text",
-                                    "data": {
-                                        "text_len": len(text),
-                                        "text_preview": text[:300],
-                                        "total_messages": len(text_messages),
-                                    },
-                                    "timestamp": time.time(),
-                                    "sessionId": "debug-session",
-                                    "hypothesisId": "A,B",
-                                }
-                            )
-                            + "\n"
-                        )
-                        # #endregion
-            if item_type == "computer_call_output":
-                output = item.get("output", {})
-                image_url = output.get("image_url", "")
-                path = _capture_path(capture_dir, task_label, index)
-                _save_screenshot(image_url, path)
-                screenshot_paths.append(path)
-                print(f"[run_agent_task] Saved screenshot to: {path}")
-                index += 1
-            if item_type == "computer_call":
-                action = item.get("action", {})
-                print(f"[run_agent_task] Computer call action: {action}")
-        start_time = time.time()  # Reset for next iteration
     print(
         f"[run_agent_task] Task complete. Messages: {len(text_messages)}, Screenshots: {len(screenshot_paths)}"
     )
     final_text = text_messages[-1] if text_messages else ""
-    # #region agent log
-    import json as _json
-
-    open(_log_path, "a", encoding="utf-8").write(
-        _json.dumps(
-            {
-                "location": "run_wechat_removal.py:run_agent_task:end",
-                "message": "task complete",
-                "data": {
-                    "total_messages": len(text_messages),
-                    "final_text_len": len(final_text),
-                    "final_text_preview": final_text[:500],
-                    "all_messages": [m[:200] for m in text_messages],
-                },
-                "timestamp": time.time(),
-                "sessionId": "debug-session",
-                "hypothesisId": "A,D",
-            }
-        )
-        + "\n"
-    )
-    # #endregion
     return final_text, screenshot_paths
 
 
@@ -376,12 +429,16 @@ class StepModeRunner:
 
     def _write_result(self, result: dict) -> None:
         result_json = json.dumps(result, ensure_ascii=False, indent=2)
+        # Sanitize to avoid encoding issues on Windows
+        result_json = _sanitize_surrogates(result_json)
         print(f"[StepModeRunner] Writing result ({len(result_json)} bytes)")
         self.result_file.write_text(result_json, encoding="utf-8")
 
     def _write_error(self, error: str) -> None:
         print(f"[StepModeRunner] Writing error: {error}")
-        self.result_file.write_text(error, encoding="utf-8")
+        # Sanitize error message to avoid encoding issues on Windows
+        sanitized = _sanitize_surrogates(error)
+        self.result_file.write_text(sanitized, encoding="utf-8")
         self._write_status("error")
 
     def _clear_request(self) -> None:
@@ -433,31 +490,11 @@ class StepModeRunner:
         self._write_status("complete")
 
     async def handle_remove(self, params: dict) -> None:
+        """Remove suspects one by one with verification after each removal."""
         suspects_data = params.get("suspects", [])
+        max_retries = params.get("max_retries", 2)
         print(f"[StepModeRunner] Executing: remove {len(suspects_data)} suspect(s)")
-        # #region agent log
-        import time as _time
 
-        _log_path = Path(__file__).resolve().parents[1] / ".cursor" / "debug.log"
-        import json as _json
-
-        open(_log_path, "a", encoding="utf-8").write(
-            _json.dumps(
-                {
-                    "location": "run_wechat_removal.py:handle_remove:entry",
-                    "message": "handle_remove called",
-                    "data": {
-                        "suspects_count": len(suspects_data),
-                        "suspects_data": suspects_data,
-                    },
-                    "timestamp": _time.time(),
-                    "sessionId": "debug-session",
-                    "hypothesisId": "E",
-                }
-            )
-            + "\n"
-        )
-        # #endregion
         suspects = [
             Suspect(
                 sender_id=s["sender_id"],
@@ -468,62 +505,150 @@ class StepModeRunner:
             )
             for s in suspects_data
         ]
-        plan = RemovalPlan(suspects=suspects, confirmed=True)
-        prompt = removal_prompt(plan)
-        print(f"[StepModeRunner] Prompt length: {len(prompt)} chars")
-        print("[StepModeRunner] Calling agent.run()...")
-        # #region agent log
-        import json as _json
 
-        open(_log_path, "a", encoding="utf-8").write(
-            _json.dumps(
-                {
-                    "location": "run_wechat_removal.py:handle_remove:before_agent",
-                    "message": "about to call run_agent_task",
-                    "data": {"prompt_len": len(prompt)},
-                    "timestamp": _time.time(),
-                    "sessionId": "debug-session",
-                    "hypothesisId": "E",
-                }
+        removal_results: List[RemovalResult] = []
+        all_screenshots: List[Path] = []
+
+        for i, suspect in enumerate(suspects):
+            is_first = i == 0
+            print(
+                f"[StepModeRunner] Removing suspect {i + 1}/{len(suspects)}: {suspect.sender_name}"
             )
-            + "\n"
+
+            result = await self._remove_single_suspect(
+                suspect, is_first=is_first, max_retries=max_retries
+            )
+            removal_results.append(result)
+
+            # Collect screenshots for this removal
+            removal_label = f"removal_{suspect.sender_id}_{i}"
+            screenshot_path = self.capture_dir / f"{removal_label}_final.png"
+            if screenshot_path.exists():
+                all_screenshots.append(screenshot_path)
+
+            status = "SUCCESS" if result.success else "FAILED"
+            print(
+                f"[StepModeRunner] Suspect {suspect.sender_name}: {status} "
+                f"(attempts: {result.attempts})"
+            )
+
+        # Build result summary
+        successful = sum(1 for r in removal_results if r.success)
+        failed = len(removal_results) - successful
+        all_removed = failed == 0
+
+        summary_text = (
+            f"Removal complete: {successful}/{len(removal_results)} succeeded"
         )
-        # #endregion
-        try:
-            text_output, screenshots = await run_agent_task(
-                self.agent, prompt, self.capture_dir, "removal"
-            )
-        except Exception as e:
-            # #region agent log
-            import traceback
+        if failed > 0:
+            failed_names = [r.sender_name for r in removal_results if not r.success]
+            summary_text += f"\nFailed: {', '.join(failed_names)}"
 
-            import json as _json
+        print(f"[StepModeRunner] {summary_text}")
 
-            open(_log_path, "a", encoding="utf-8").write(
-                _json.dumps(
-                    {
-                        "location": "run_wechat_removal.py:handle_remove:exception",
-                        "message": "run_agent_task raised exception",
-                        "data": {"error": str(e), "traceback": traceback.format_exc()},
-                        "timestamp": _time.time(),
-                        "sessionId": "debug-session",
-                        "hypothesisId": "E",
-                    }
-                )
-                + "\n"
-            )
-            # #endregion
-            raise
-        print(
-            f"[StepModeRunner] Agent returned: {len(text_output)} chars, {len(screenshots)} screenshots"
-        )
         self._write_result(
             {
-                "text": text_output,
-                "screenshots": [str(p) for p in screenshots],
+                "text": summary_text,
+                "screenshots": [str(p) for p in all_screenshots],
+                "removal_results": [
+                    {
+                        "sender_name": r.sender_name,
+                        "sender_id": r.sender_id,
+                        "thread_id": r.thread_id,
+                        "success": r.success,
+                        "attempts": r.attempts,
+                        "error": r.error,
+                    }
+                    for r in removal_results
+                ],
+                "all_removed": all_removed,
             }
         )
         self._write_status("complete")
+
+    async def _remove_single_suspect(
+        self, suspect: Suspect, is_first: bool, max_retries: int
+    ) -> RemovalResult:
+        """Attempt to remove a single suspect with verification and retries."""
+        attempts = 0
+
+        while attempts < max_retries:
+            attempts += 1
+            print(
+                f"[StepModeRunner] Removal attempt {attempts}/{max_retries} "
+                f"for {suspect.sender_name}"
+            )
+
+            # Generate prompt for this removal
+            prompt = removal_prompt_single(
+                suspect, is_first=(is_first and attempts == 1)
+            )
+
+            # Run the agent to perform the removal
+            try:
+                text_output, screenshots = await run_agent_task(
+                    self.agent,
+                    prompt,
+                    self.capture_dir,
+                    f"removal_{suspect.sender_id}_attempt{attempts}",
+                )
+            except Exception as e:
+                print(f"[StepModeRunner] Agent error during removal: {e}")
+                continue
+
+            # Take a verification screenshot
+            print("[StepModeRunner] Taking verification screenshot...")
+            try:
+                screenshot_bytes = await self.computer.interface.screenshot()
+                screenshot_b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
+
+                # Save verification screenshot
+                verify_path = (
+                    self.capture_dir
+                    / f"removal_{suspect.sender_id}_verify{attempts}.png"
+                )
+                verify_path.write_bytes(screenshot_bytes)
+                print(f"[StepModeRunner] Saved verification screenshot: {verify_path}")
+            except Exception as e:
+                print(f"[StepModeRunner] Failed to take verification screenshot: {e}")
+                continue
+
+            # Verify the user was removed using VLM
+            print(f"[StepModeRunner] Verifying removal of {suspect.sender_name}...")
+            try:
+                is_removed = await verify_user_removed(
+                    screenshot_b64, suspect.sender_name, self.model
+                )
+            except Exception as e:
+                print(f"[StepModeRunner] Verification error: {e}")
+                is_removed = False
+
+            if is_removed:
+                print(
+                    f"[StepModeRunner] Verified: {suspect.sender_name} removed successfully"
+                )
+                return RemovalResult(
+                    sender_name=suspect.sender_name,
+                    sender_id=suspect.sender_id,
+                    thread_id=suspect.thread_id,
+                    success=True,
+                    attempts=attempts,
+                )
+            else:
+                print(
+                    f"[StepModeRunner] Verification failed: {suspect.sender_name} "
+                    f"still visible (attempt {attempts})"
+                )
+
+        # All retries exhausted
+        return RemovalResult(
+            sender_name=suspect.sender_name,
+            sender_id=suspect.sender_id,
+            thread_id=suspect.thread_id,
+            success=False,
+            attempts=attempts,
+            error="User still visible after all attempts",
+        )
 
     async def process_request(self, request: dict) -> None:
         step = request.get("step", "")
@@ -543,9 +668,19 @@ class StepModeRunner:
         except Exception as e:
             import traceback
 
-            print(f"[StepModeRunner] Exception during step: {e}")
-            print(f"[StepModeRunner] Traceback:\n{traceback.format_exc()}")
-            self._write_error(f"{type(e).__name__}: {e}\n\n{traceback.format_exc()}")
+            error_msg = str(e)
+            tb = traceback.format_exc()
+            # Sanitize for console output
+            safe_error = error_msg.encode("ascii", "replace").decode("ascii")
+            safe_tb = tb.encode("ascii", "replace").decode("ascii")
+            print(f"[StepModeRunner] Exception during step: {safe_error}")
+            print(f"[StepModeRunner] Traceback:\n{safe_tb}")
+            try:
+                self._write_error(f"{type(e).__name__}: {error_msg}\n\n{tb}")
+            except Exception as write_err:
+                # Fallback: write ASCII-safe version if encoding fails
+                print(f"[StepModeRunner] Failed to write error: {write_err}")
+                self._write_error(f"{type(e).__name__}: {safe_error}\n\n{safe_tb}")
 
     async def run_loop(self, poll_interval: float = 0.5) -> None:
         print("\n" + "=" * 60)
@@ -591,12 +726,21 @@ class StepModeRunner:
                 except Exception as e:
                     import traceback
 
-                    print(f"[StepModeRunner] Unexpected error: {e}")
-                    print(f"[StepModeRunner] Traceback:\n{traceback.format_exc()}")
+                    error_msg = str(e)
+                    tb = traceback.format_exc()
+                    # Sanitize for console output
+                    safe_error = error_msg.encode("ascii", "replace").decode("ascii")
+                    safe_tb = tb.encode("ascii", "replace").decode("ascii")
+                    print(f"[StepModeRunner] Unexpected error: {safe_error}")
+                    print(f"[StepModeRunner] Traceback:\n{safe_tb}")
                     self._clear_request()
-                    self._write_error(
-                        f"Unexpected error: {e}\n\n{traceback.format_exc()}"
-                    )
+                    try:
+                        self._write_error(f"Unexpected error: {error_msg}\n\n{tb}")
+                    except Exception as write_err:
+                        print(f"[StepModeRunner] Failed to write error: {write_err}")
+                        self._write_error(
+                            f"Unexpected error: {safe_error}\n\n{safe_tb}"
+                        )
             await asyncio.sleep(poll_interval)
 
 
