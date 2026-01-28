@@ -687,6 +687,7 @@ class StepModeRunner:
         print("STEP MODE ACTIVE")
         print("=" * 60)
         print("Waiting for step requests from control panel...")
+        sys.stdout.flush()
         print(f"Request file: {self.request_file}")
         print(f"Artifacts dir: {self.artifacts_dir}")
         print("Press Ctrl+C to exit.\n")
@@ -746,8 +747,10 @@ class StepModeRunner:
 
 async def orchestrate_step_mode() -> None:
     print("[orchestrate_step_mode] Starting...")
+    sys.stdout.flush()
     root = Path(__file__).resolve().parents[1]
     print(f"[orchestrate_step_mode] Root directory: {root}")
+    sys.stdout.flush()
 
     capture_dir = root / "artifacts" / "captures"
     capture_dir.mkdir(parents=True, exist_ok=True)
@@ -768,11 +771,13 @@ async def orchestrate_step_mode() -> None:
     print(f"  model: {model_settings.model}")
 
     print("[orchestrate_step_mode] Building computer...")
+    sys.stdout.flush()
     computer = build_computer(computer_settings)
 
     print(
         "[orchestrate_step_mode] Connecting to computer server (await computer.run())..."
     )
+    sys.stdout.flush()
     try:
         await computer.run()
         print("[orchestrate_step_mode] Computer server connected successfully!")
@@ -791,6 +796,7 @@ async def orchestrate_step_mode() -> None:
     print("\n" + "-" * 60)
 
     print("[orchestrate_step_mode] Building agent...")
+    sys.stdout.flush()
     agent = build_agent(model_settings, computer)
     print("[orchestrate_step_mode] Agent built successfully!")
 
@@ -798,6 +804,7 @@ async def orchestrate_step_mode() -> None:
     runner = StepModeRunner(root, agent, computer, model_settings.model, capture_dir)
 
     print("[orchestrate_step_mode] Starting run_loop...")
+    sys.stdout.flush()
     await runner.run_loop()
 
 

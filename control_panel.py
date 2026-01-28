@@ -30,6 +30,22 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import Callable, Optional
 
 
+# Color palette - Minimalist White & Blue
+COLORS = {
+    "bg": "#ffffff",
+    "bg_secondary": "#f8fafc",
+    "card": "#f1f5f9",
+    "primary": "#2563eb",
+    "primary_hover": "#1d4ed8",
+    "primary_light": "#dbeafe",
+    "text": "#1e293b",
+    "text_secondary": "#64748b",
+    "border": "#e2e8f0",
+    "status_running": "#2563eb",
+    "status_stopped": "#94a3b8",
+}
+
+
 def _sanitize_surrogates(text: str) -> str:
     """Remove surrogate characters that cause UTF-8 encoding errors."""
     return text.encode("utf-8", errors="surrogatepass").decode(
@@ -57,18 +73,20 @@ class LoadDataDialog:
         self.dialog = tk.Toplevel(parent)
         self.dialog.title(f"Load Data: {title}")
         self.dialog.geometry("500x400")
-        self.dialog.configure(bg="#1e1e1e")
+        self.dialog.configure(bg=COLORS["bg"])
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
         style = ttk.Style()
-        style.configure("Dialog.TLabel", background="#1e1e1e", foreground="#ffffff")
         style.configure(
-            "Dialog.TRadiobutton", background="#1e1e1e", foreground="#ffffff"
+            "Dialog.TLabel", background=COLORS["bg"], foreground=COLORS["text"]
+        )
+        style.configure(
+            "Dialog.TRadiobutton", background=COLORS["bg"], foreground=COLORS["text"]
         )
 
         main_frame = ttk.Frame(self.dialog, style="TFrame")
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         ttk.Label(
             main_frame,
@@ -99,12 +117,14 @@ class LoadDataDialog:
             main_frame,
             wrap=tk.WORD,
             font=("Consolas", 9),
-            bg="#2d2d2d",
-            fg="#d4d4d4",
-            insertbackground="#ffffff",
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
             height=12,
+            relief=tk.FLAT,
+            borderwidth=0,
         )
-        self.json_text.pack(fill=tk.BOTH, expand=True, pady=(5, 10))
+        self.json_text.pack(fill=tk.BOTH, expand=True, pady=(10, 15))
         self.json_text.insert(tk.END, example_json)
 
         btn_frame = ttk.Frame(main_frame, style="TFrame")
@@ -113,7 +133,9 @@ class LoadDataDialog:
         ttk.Button(btn_frame, text="Cancel", command=self._cancel).pack(
             side=tk.RIGHT, padx=5
         )
-        ttk.Button(btn_frame, text="Load", command=self._load).pack(side=tk.RIGHT)
+        ttk.Button(btn_frame, text="Load", command=self._load, style="Primary.TButton").pack(
+            side=tk.RIGHT
+        )
 
         self.dialog.wait_window()
 
@@ -157,162 +179,333 @@ class ControlPanel:
         self.workflow_process: Optional[subprocess.Popen] = None
         self._stop_requested: bool = False
         self._is_running: bool = False
+        self._system_status: str = "stopped"  # stopped, starting_server, starting_workflow, running
         self._build_ui()
 
     def _build_ui(self) -> None:
         self.root = tk.Tk()
-        self.root.title("WeChat Removal - Control Panel (Desktop Mode)")
-        self.root.geometry("950x650")
-        self.root.configure(bg="#1e1e1e")
+        self.root.title("WeChat Group Manager")
+        self.root.geometry("1000x700")
+        self.root.configure(bg=COLORS["bg"])
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        # Configure styles
         style = ttk.Style()
         style.theme_use("clam")
-        style.configure("TFrame", background="#1e1e1e")
-        style.configure("TLabel", background="#1e1e1e", foreground="#ffffff")
-        style.configure("TButton", padding=8, font=("Segoe UI", 10))
-        style.configure("Small.TButton", padding=4, font=("Segoe UI", 9))
-        style.configure("Header.TLabel", font=("Segoe UI", 14, "bold"))
-        style.configure("Status.TLabel", font=("Segoe UI", 9))
-        style.configure("Server.TLabel", font=("Segoe UI", 9))
 
+        # Base styles
+        style.configure("TFrame", background=COLORS["bg"])
+        style.configure(
+            "TLabel",
+            background=COLORS["bg"],
+            foreground=COLORS["text"],
+            font=("Segoe UI", 10),
+        )
+        style.configure(
+            "TButton",
+            padding=(16, 8),
+            font=("Segoe UI", 10),
+            background=COLORS["card"],
+            foreground=COLORS["text"],
+        )
+        style.map(
+            "TButton",
+            background=[("active", COLORS["border"])],
+        )
+
+        # Primary button style
+        style.configure(
+            "Primary.TButton",
+            padding=(20, 10),
+            font=("Segoe UI", 11, "bold"),
+            background=COLORS["primary"],
+            foreground="#ffffff",
+        )
+        style.map(
+            "Primary.TButton",
+            background=[("active", COLORS["primary_hover"]), ("disabled", COLORS["border"])],
+            foreground=[("disabled", COLORS["text_secondary"])],
+        )
+
+        # Secondary button style
+        style.configure(
+            "Secondary.TButton",
+            padding=(12, 6),
+            font=("Segoe UI", 9),
+            background=COLORS["bg"],
+            foreground=COLORS["text"],
+        )
+        style.map(
+            "Secondary.TButton",
+            background=[("active", COLORS["card"])],
+        )
+
+        # Step button style
+        style.configure(
+            "Step.TButton",
+            padding=(12, 8),
+            font=("Segoe UI", 10),
+            background=COLORS["bg"],
+            foreground=COLORS["text"],
+        )
+        style.map(
+            "Step.TButton",
+            background=[("active", COLORS["primary_light"])],
+        )
+
+        # Card frame style
+        style.configure("Card.TFrame", background=COLORS["card"])
+
+        # Header styles
+        style.configure(
+            "Title.TLabel",
+            font=("Segoe UI", 24, "bold"),
+            foreground=COLORS["text"],
+            background=COLORS["bg"],
+        )
+        style.configure(
+            "Subtitle.TLabel",
+            font=("Segoe UI", 11),
+            foreground=COLORS["text_secondary"],
+            background=COLORS["bg"],
+        )
+        style.configure(
+            "SectionHeader.TLabel",
+            font=("Segoe UI", 12, "bold"),
+            foreground=COLORS["text"],
+            background=COLORS["bg"],
+        )
+        style.configure(
+            "Status.TLabel",
+            font=("Segoe UI", 10),
+            foreground=COLORS["text_secondary"],
+            background=COLORS["bg"],
+        )
+
+        # Main container
         main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=24, pady=20)
 
-        sidebar = ttk.Frame(main_frame, width=280)
-        sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
+        # Header section
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 24))
+
+        ttk.Label(
+            header_frame, text="WeChat Group Manager", style="Title.TLabel"
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            header_frame,
+            text="Automated spam detection and removal workflow",
+            style="Subtitle.TLabel",
+        ).pack(anchor=tk.W, pady=(4, 0))
+
+        # Content area with sidebar
+        content_frame = ttk.Frame(main_frame)
+        content_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Sidebar
+        sidebar = ttk.Frame(content_frame, width=300)
+        sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20))
         sidebar.pack_propagate(False)
 
-        # Server controls section
-        ttk.Label(sidebar, text="Server Control", style="Header.TLabel").pack(
-            pady=(0, 10)
+        # System Control Card
+        self._create_system_control_card(sidebar)
+
+        # Workflow Steps Card
+        self._create_workflow_steps_card(sidebar)
+
+        # Actions Card
+        self._create_actions_card(sidebar)
+
+        # Main content area
+        content = ttk.Frame(content_frame)
+        content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Status bar
+        status_bar = ttk.Frame(content)
+        status_bar.pack(fill=tk.X, pady=(0, 12))
+
+        ttk.Label(status_bar, text="Status", style="SectionHeader.TLabel").pack(
+            side=tk.LEFT
         )
 
-        server_frame = ttk.Frame(sidebar)
-        server_frame.pack(fill=tk.X, pady=(0, 5))
-        self.server_btn = ttk.Button(
-            server_frame, text="Start Server", command=self._toggle_server, width=15
+        self.status_badge = tk.Label(
+            status_bar,
+            text="Ready",
+            font=("Segoe UI", 9, "bold"),
+            bg=COLORS["primary_light"],
+            fg=COLORS["primary"],
+            padx=12,
+            pady=4,
         )
-        self.server_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.server_status = tk.Label(
-            server_frame, text="Stopped", font=("Segoe UI", 9),
-            bg="#1e1e1e", fg="#888888"
-        )
-        self.server_status.pack(side=tk.LEFT)
+        self.status_badge.pack(side=tk.LEFT, padx=(12, 0))
 
-        workflow_frame = ttk.Frame(sidebar)
-        workflow_frame.pack(fill=tk.X, pady=(0, 15))
-        self.workflow_btn = ttk.Button(
-            workflow_frame,
-            text="Start Workflow",
-            command=self._toggle_workflow,
-            width=15,
-        )
-        self.workflow_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.workflow_status = tk.Label(
-            workflow_frame, text="Stopped", font=("Segoe UI", 9),
-            bg="#1e1e1e", fg="#888888"
-        )
-        self.workflow_status.pack(side=tk.LEFT)
+        # Log area with card styling
+        log_card = tk.Frame(content, bg=COLORS["card"], padx=2, pady=2)
+        log_card.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Separator(sidebar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
-
-        # Workflow steps section
-        ttk.Label(sidebar, text="Workflow Steps", style="Header.TLabel").pack(
-            pady=(0, 10)
+        self.log_area = scrolledtext.ScrolledText(
+            log_card,
+            wrap=tk.WORD,
+            font=("Consolas", 10),
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief=tk.FLAT,
+            borderwidth=0,
+            padx=12,
+            pady=12,
         )
+        self.log_area.pack(fill=tk.BOTH, expand=True)
+
+        # State summary bar
+        summary_frame = ttk.Frame(content)
+        summary_frame.pack(fill=tk.X, pady=(12, 0))
+
+        self.state_summary = ttk.Label(summary_frame, text="", style="Status.TLabel")
+        self.state_summary.pack(side=tk.LEFT)
+
+        self._update_state_summary()
+        self._log("Control panel initialized.")
+        self._log(f"Project root: {self.root_dir}")
+
+    def _create_system_control_card(self, parent: ttk.Frame) -> None:
+        """Create the system control card with merged Start/Stop button."""
+        card = tk.Frame(parent, bg=COLORS["card"], padx=16, pady=16)
+        card.pack(fill=tk.X, pady=(0, 16))
+
+        # Header
+        header = tk.Frame(card, bg=COLORS["card"])
+        header.pack(fill=tk.X, pady=(0, 12))
+
+        tk.Label(
+            header,
+            text="System Control",
+            font=("Segoe UI", 12, "bold"),
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+        ).pack(side=tk.LEFT)
+
+        # Status indicator
+        self.system_status_dot = tk.Label(
+            header,
+            text="\u2022",
+            font=("Segoe UI", 16),
+            bg=COLORS["card"],
+            fg=COLORS["status_stopped"],
+        )
+        self.system_status_dot.pack(side=tk.RIGHT)
+
+        # Status text
+        self.system_status_label = tk.Label(
+            card,
+            text="System stopped",
+            font=("Segoe UI", 10),
+            bg=COLORS["card"],
+            fg=COLORS["text_secondary"],
+        )
+        self.system_status_label.pack(fill=tk.X, pady=(0, 12))
+
+        # Start/Stop button
+        self.system_btn = ttk.Button(
+            card,
+            text="Start System",
+            command=self._toggle_system,
+            style="Primary.TButton",
+        )
+        self.system_btn.pack(fill=tk.X)
+
+    def _create_workflow_steps_card(self, parent: ttk.Frame) -> None:
+        """Create the workflow steps card."""
+        card = tk.Frame(parent, bg=COLORS["card"], padx=16, pady=16)
+        card.pack(fill=tk.X, pady=(0, 16))
+
+        tk.Label(
+            card,
+            text="Workflow Steps",
+            font=("Segoe UI", 12, "bold"),
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+        ).pack(anchor=tk.W, pady=(0, 12))
 
         self.step_buttons = {}
         steps = [
             ("1. Classify Threads", "classify", self._run_classify, None),
             ("2. Filter Unread", "filter", self._run_filter, self._load_threads),
             ("3. Read Messages", "read", self._run_read_messages, self._load_groups),
-            (
-                "4. Extract Suspects",
-                "extract",
-                self._run_extract,
-                self._load_read_results,
-            ),
+            ("4. Extract Suspects", "extract", self._run_extract, self._load_read_results),
             ("5. Build Plan", "plan", self._run_build_plan, self._load_suspects),
             ("6. Execute Removal", "remove", self._run_removal, self._load_plan),
         ]
 
-        for label, step_id, callback, load_callback in steps:
-            step_frame = ttk.Frame(sidebar)
-            step_frame.pack(fill=tk.X, pady=3)
+        for i, (label, step_id, callback, load_callback) in enumerate(steps):
+            step_frame = tk.Frame(card, bg=COLORS["card"])
+            step_frame.pack(fill=tk.X, pady=2)
+
+            btn = ttk.Button(
+                step_frame, text=label, command=callback, style="Step.TButton", width=22
+            )
+            btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self.step_buttons[step_id] = btn
 
             if load_callback:
                 load_btn = ttk.Button(
                     step_frame,
-                    text="📂",
+                    text="\u2630",
                     command=load_callback,
                     width=3,
-                    style="Small.TButton",
+                    style="Secondary.TButton",
                 )
-                load_btn.pack(side=tk.LEFT, padx=(0, 5))
+                load_btn.pack(side=tk.RIGHT, padx=(4, 0))
 
-            btn = ttk.Button(step_frame, text=label, command=callback, width=20)
-            btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            self.step_buttons[step_id] = btn
+    def _create_actions_card(self, parent: ttk.Frame) -> None:
+        """Create the actions card."""
+        card = tk.Frame(parent, bg=COLORS["card"], padx=16, pady=16)
+        card.pack(fill=tk.X)
 
-        ttk.Separator(sidebar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
+        tk.Label(
+            card,
+            text="Actions",
+            font=("Segoe UI", 12, "bold"),
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+        ).pack(anchor=tk.W, pady=(0, 12))
 
-        run_frame = ttk.Frame(sidebar)
-        run_frame.pack(fill=tk.X, pady=5)
+        # Run All / Stop buttons
+        run_frame = tk.Frame(card, bg=COLORS["card"])
+        run_frame.pack(fill=tk.X, pady=(0, 8))
+
         self.run_all_btn = ttk.Button(
-            run_frame, text="▶ Run All", command=self._run_all_steps, width=12
+            run_frame,
+            text="Run All Steps",
+            command=self._run_all_steps,
+            style="Primary.TButton",
         )
-        self.run_all_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.run_all_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
         self.stop_btn = ttk.Button(
             run_frame,
-            text="■ Stop",
+            text="Stop",
             command=self._stop_execution,
-            width=10,
+            style="Secondary.TButton",
             state=tk.DISABLED,
         )
-        self.stop_btn.pack(side=tk.LEFT)
+        self.stop_btn.pack(side=tk.RIGHT, padx=(8, 0))
 
-        ttk.Separator(sidebar, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        # Utility buttons
+        ttk.Button(
+            card,
+            text="Reset State",
+            command=self._reset_state,
+            style="Secondary.TButton",
+        ).pack(fill=tk.X, pady=(4, 0))
 
         ttk.Button(
-            sidebar, text="Reset State", command=self._reset_state, width=25
-        ).pack(pady=5)
-        ttk.Button(
-            sidebar, text="Export Report", command=self._export_report, width=25
-        ).pack(pady=5)
-
-        # Content area
-        content = ttk.Frame(main_frame)
-        content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        status_frame = ttk.Frame(content)
-        status_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ttk.Label(status_frame, text="Status:", style="Header.TLabel").pack(
-            side=tk.LEFT
-        )
-        self.status_label = ttk.Label(status_frame, text="Ready", style="Status.TLabel")
-        self.status_label.pack(side=tk.LEFT, padx=10)
-
-        self.log_area = scrolledtext.ScrolledText(
-            content,
-            wrap=tk.WORD,
-            font=("Consolas", 10),
-            bg="#2d2d2d",
-            fg="#d4d4d4",
-            insertbackground="#ffffff",
-        )
-        self.log_area.pack(fill=tk.BOTH, expand=True)
-
-        state_frame = ttk.Frame(content)
-        state_frame.pack(fill=tk.X, pady=(10, 0))
-
-        self.state_summary = ttk.Label(state_frame, text="", style="Status.TLabel")
-        self.state_summary.pack(side=tk.LEFT)
-
-        self._update_state_summary()
-        self._log("Control panel initialized (Desktop Mode).")
-        self._log(f"Project root: {self.root_dir}")
+            card,
+            text="Export Report",
+            command=self._export_report,
+            style="Secondary.TButton",
+        ).pack(fill=tk.X, pady=(4, 0))
 
     def _on_close(self) -> None:
         if self.workflow_process:
@@ -327,7 +520,38 @@ class ControlPanel:
         self.log_area.see(tk.END)
 
     def _set_status(self, status: str) -> None:
-        self.status_label.config(text=status)
+        self.status_badge.config(text=status)
+        if "Error" in status:
+            self.status_badge.config(bg="#fee2e2", fg="#dc2626")
+        elif "Running" in status or "Run All" in status:
+            self.status_badge.config(bg=COLORS["primary_light"], fg=COLORS["primary"])
+        else:
+            self.status_badge.config(bg=COLORS["card"], fg=COLORS["text_secondary"])
+
+    def _update_system_status(self, status: str, message: str) -> None:
+        """Update the system status display."""
+        self._system_status = status
+
+        if status == "stopped":
+            self.system_status_dot.config(fg=COLORS["status_stopped"])
+            self.system_status_label.config(text=message)
+            self.system_btn.config(text="Start System", state=tk.NORMAL)
+        elif status == "starting_server":
+            self.system_status_dot.config(fg="#eab308")
+            self.system_status_label.config(text=message)
+            self.system_btn.config(text="Starting...", state=tk.DISABLED)
+        elif status == "starting_workflow":
+            self.system_status_dot.config(fg="#eab308")
+            self.system_status_label.config(text=message)
+            self.system_btn.config(text="Starting...", state=tk.DISABLED)
+        elif status == "running":
+            self.system_status_dot.config(fg=COLORS["status_running"])
+            self.system_status_label.config(text=message)
+            self.system_btn.config(text="Stop System", state=tk.NORMAL)
+        elif status == "error":
+            self.system_status_dot.config(fg="#ef4444")
+            self.system_status_label.config(text=message)
+            self.system_btn.config(text="Start System", state=tk.NORMAL)
 
     def _update_state_summary(self) -> None:
         idx = self.state.current_thread_index
@@ -364,11 +588,267 @@ class ControlPanel:
         self._log(f"Report exported to {report_path}")
         messagebox.showinfo("Export", f"Report saved to:\n{report_path}")
 
+    # System control methods (merged server + workflow)
+    def _toggle_system(self) -> None:
+        """Toggle the entire system (server + workflow)."""
+        if self._system_status == "running":
+            self._stop_system()
+        elif self._system_status == "stopped" or self._system_status == "error":
+            self._start_system()
+
+    def _start_system(self) -> None:
+        """Start the server, then automatically start the workflow."""
+        self._update_system_status("starting_server", "Starting computer server...")
+        self._log("Starting system...")
+
+        # Check if port 8000 is already in use
+        import socket
+
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.bind(("0.0.0.0", 8000))
+            sock.close()
+        except OSError as e:
+            if e.errno == 10048 or "address already in use" in str(e).lower():
+                self._log("ERROR: Port 8000 is already in use!")
+                self._update_system_status("error", "Port 8000 in use")
+                messagebox.showerror(
+                    "Port In Use",
+                    "Port 8000 is already in use.\n\n"
+                    "Stop the existing server first.",
+                )
+                return
+            else:
+                raise
+
+        self._log("Starting computer-server...")
+        try:
+            vendor_server = self.root_dir / "vendor" / "computer-server"
+            env = os.environ.copy()
+
+            self.server_process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "computer_server",
+                    "--host",
+                    "0.0.0.0",
+                    "--port",
+                    "8000",
+                ],
+                cwd=str(vendor_server),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=env,
+                creationflags=(
+                    subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                ),
+            )
+
+            # Start thread to monitor server and then start workflow
+            def monitor_and_start_workflow():
+                ready = False
+                start_time = time.time()
+
+                while self.server_process and time.time() - start_time < 30:
+                    if self.server_process.poll() is not None:
+                        self.root.after(
+                            0,
+                            lambda: self._update_system_status(
+                                "error", "Server failed to start"
+                            ),
+                        )
+                        self.root.after(
+                            0, lambda: self._log("Server process exited unexpectedly")
+                        )
+                        self.server_process = None
+                        return
+
+                    if self._check_server_ready():
+                        ready = True
+                        self.root.after(
+                            0, lambda: self._log("Computer-server is ready.")
+                        )
+                        break
+
+                    time.sleep(0.5)
+
+                if not ready:
+                    self.root.after(
+                        0,
+                        lambda: self._update_system_status(
+                            "error", "Server startup timeout"
+                        ),
+                    )
+                    return
+
+                # Server is ready, now start workflow
+                self.root.after(0, self._start_workflow_after_server)
+
+            threading.Thread(target=monitor_and_start_workflow, daemon=True).start()
+
+        except Exception as e:
+            self._log(f"Failed to start server: {e}")
+            self._update_system_status("error", "Failed to start server")
+            messagebox.showerror("Error", f"Failed to start server: {e}")
+
+    def _start_workflow_after_server(self) -> None:
+        """Start the workflow after server is ready."""
+        self._update_system_status("starting_workflow", "Starting workflow backend...")
+        self._log("Starting workflow backend...")
+
+        try:
+            self.workflow_process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-u",
+                    "-m",
+                    "workflow.run_wechat_removal",
+                    "--step-mode",
+                ],
+                cwd=str(self.root_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                creationflags=(
+                    subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+                ),
+            )
+
+            def monitor_workflow():
+                if self.workflow_process and self.workflow_process.stdout:
+                    while self.workflow_process:
+                        if self.workflow_process.poll() is not None:
+                            exit_code = self.workflow_process.returncode
+                            self.root.after(
+                                0,
+                                lambda: self._log(
+                                    f"Workflow exited with code {exit_code}"
+                                ),
+                            )
+                            self.root.after(
+                                0,
+                                lambda: self._update_system_status(
+                                    "error", "Workflow stopped"
+                                ),
+                            )
+                            self.workflow_process = None
+                            return
+
+                        line = self.workflow_process.stdout.readline()
+                        if not line:
+                            time.sleep(0.1)
+                            continue
+
+                        decoded = line.decode("utf-8", errors="replace").strip()
+                        if decoded:
+                            self.root.after(
+                                0, lambda l=decoded: self._log(f"  [workflow] {l}")
+                            )
+                            if (
+                                "STEP MODE ACTIVE" in decoded
+                                or "Waiting for step requests" in decoded
+                            ):
+                                self.root.after(
+                                    0,
+                                    lambda: self._update_system_status(
+                                        "running", "System running"
+                                    ),
+                                )
+                                self.root.after(
+                                    0,
+                                    lambda: self._log("System is ready for workflow steps."),
+                                )
+
+            threading.Thread(target=monitor_workflow, daemon=True).start()
+
+        except Exception as e:
+            self._log(f"Failed to start workflow: {e}")
+            self._update_system_status("error", "Failed to start workflow")
+            # Stop server since workflow failed
+            self._stop_server()
+
+    def _stop_system(self) -> None:
+        """Stop both workflow and server."""
+        self._log("Stopping system...")
+
+        if self.workflow_process:
+            try:
+                self.workflow_process.terminate()
+                self.workflow_process.wait(timeout=5)
+            except Exception:
+                self.workflow_process.kill()
+            self.workflow_process = None
+            self._log("Workflow stopped.")
+
+        if self.server_process:
+            try:
+                self.server_process.terminate()
+                self.server_process.wait(timeout=5)
+            except Exception:
+                self.server_process.kill()
+            self.server_process = None
+            self._log("Server stopped.")
+
+        self._update_system_status("stopped", "System stopped")
+
+    def _check_server_ready(self) -> bool:
+        """Check if computer-server is responding on port 8000."""
+        try:
+            req = urllib.request.Request("http://localhost:8000/status", method="GET")
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
+    # Legacy methods for compatibility
+    def _toggle_server(self) -> None:
+        if self.server_process:
+            self._stop_server()
+        else:
+            self._start_server()
+
+    def _start_server(self) -> None:
+        # Redirect to system start
+        self._start_system()
+
+    def _stop_server(self) -> None:
+        if self.server_process:
+            try:
+                self.server_process.terminate()
+                self.server_process.wait(timeout=5)
+            except Exception:
+                self.server_process.kill()
+            self.server_process = None
+
+    def _toggle_workflow(self) -> None:
+        if self.workflow_process:
+            self._stop_workflow()
+        else:
+            self._start_workflow()
+
+    def _start_workflow(self) -> None:
+        # Check if server is running first
+        if not self._check_server_ready():
+            messagebox.showwarning(
+                "Server Not Running", "Start the system first."
+            )
+            return
+        self._start_workflow_after_server()
+
+    def _stop_workflow(self) -> None:
+        if self.workflow_process:
+            try:
+                self.workflow_process.terminate()
+                self.workflow_process.wait(timeout=5)
+            except Exception:
+                self.workflow_process.kill()
+            self.workflow_process = None
+
     def _run_all_steps(self) -> None:
         """Execute all workflow steps automatically in sequence."""
         if not self.workflow_process:
             messagebox.showwarning(
-                "Workflow Not Running", "Start the workflow backend first."
+                "System Not Running", "Start the system first."
             )
             return
         self._stop_requested = False
@@ -429,7 +909,6 @@ class ControlPanel:
             self.state.step_logs["classify"] = text_output
             self._save_state()
             self._log(f"Parsed {len(self.state.threads)} threads.")
-            # Proceed to filter
             self._run_all_filter()
         except Exception as e:
             self._log(f"Parse error: {e}")
@@ -455,7 +934,6 @@ class ControlPanel:
             self._finish_run_all()
             messagebox.showinfo("Run All Complete", "No unread groups found.")
             return
-        # Proceed to process first group
         self._run_all_read_messages()
 
     def _run_all_read_messages(self) -> None:
@@ -466,7 +944,6 @@ class ControlPanel:
         if idx >= len(self.state.unread_groups):
             self._run_all_complete()
             return
-        # Reset per-group state
         self.state.current_group_suspects = []
         self.state.current_group_plan = None
         self._save_state()
@@ -495,7 +972,6 @@ class ControlPanel:
         )
         self._save_state()
         self._log(f"Read complete for {thread.name}.")
-        # Proceed to extract
         self._run_all_extract()
 
     def _run_all_extract(self) -> None:
@@ -518,7 +994,6 @@ class ControlPanel:
             self._log(f"Found {len(suspects)} suspect(s) in {thread.name}.")
             for s in suspects:
                 self._log(f"  - {s.sender_name}: {s.evidence_text[:50]}...")
-            # Proceed to build plan
             self._run_all_build_plan()
         except Exception as e:
             self._log(f"Parse error: {e}")
@@ -541,7 +1016,6 @@ class ControlPanel:
         self._log(
             f"Plan created with {len(self.state.current_group_plan.suspects)} suspect(s)."
         )
-        # Proceed to removal
         self._run_all_removal()
 
     def _run_all_removal(self) -> None:
@@ -581,12 +1055,11 @@ class ControlPanel:
         thread = self.state.unread_groups[idx]
         self._log(f"Removal result for {thread.name}: {text_output}")
 
-        # Parse per-user removal results
         removal_results = result.get("removal_results", [])
         all_removed = result.get("all_removed", True)
 
         if removal_results:
-            self._log(f"  Per-user results:")
+            self._log("  Per-user results:")
             for r in removal_results:
                 status = "SUCCESS" if r.get("success") else "FAILED"
                 error = f" - {r.get('error')}" if r.get("error") else ""
@@ -612,11 +1085,9 @@ class ControlPanel:
 
     def _run_all_advance_to_next_group(self) -> None:
         """Advance to next group in run all mode."""
-        # Accumulate results from current group
         self.state.all_suspects.extend(self.state.current_group_suspects)
         if self.state.current_group_plan:
             self.state.all_plans.append(self.state.current_group_plan)
-        # Update legacy fields
         self.state.suspects = list(self.state.all_suspects)
         if self.state.all_plans:
             all_plan_suspects = []
@@ -627,12 +1098,10 @@ class ControlPanel:
                 confirmed=True,
                 note=f"Processed {len(self.state.all_plans)} group(s)",
             )
-        # Advance to next group
         self.state.current_thread_index += 1
         self.state.current_group_suspects = []
         self.state.current_group_plan = None
         self._save_state()
-        # Check for stop before continuing to next group
         if self._check_stop_requested():
             return
         remaining = len(self.state.unread_groups) - self.state.current_thread_index
@@ -642,7 +1111,6 @@ class ControlPanel:
                 f"[Run All] Advanced to next group. {remaining} group(s) remaining."
             )
             self._log(f"[Run All] Processing: {next_group.name}")
-            # Continue with next group
             self._run_all_read_messages()
         else:
             self._run_all_complete()
@@ -665,396 +1133,17 @@ class ControlPanel:
             f"Click 'Export Report' to save results.",
         )
 
-    # Server control methods
-    def _toggle_server(self) -> None:
-        if self.server_process:
-            self._stop_server()
-        else:
-            self._start_server()
-
-    def _check_server_ready(self) -> bool:
-        """Check if computer-server is responding on port 8000."""
-        try:
-            req = urllib.request.Request("http://localhost:8000/status", method="GET")
-            with urllib.request.urlopen(req, timeout=2) as resp:
-                if resp.status == 200:
-                    return True
-                return False
-        except urllib.error.URLError:
-            # Connection refused or other URL error - server not ready yet
-            return False
-        except Exception as e:
-            # Unexpected error
-            print(f"[_check_server_ready] Unexpected error: {type(e).__name__}: {e}")
-            return False
-
-    def _start_server(self) -> None:
-        # Check if port 8000 is already in use
-        import socket
-
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.bind(("0.0.0.0", 8000))
-            sock.close()
-        except OSError as e:
-            if e.errno == 10048 or "address already in use" in str(e).lower():
-                self._log("ERROR: Port 8000 is already in use by another process!")
-                self._log("  Please stop the existing server or use a different port.")
-                messagebox.showerror(
-                    "Port In Use",
-                    "Port 8000 is already in use by another process.\n\n"
-                    "Please stop the existing server before starting a new one.\n\n"
-                    "On Windows, you can find the process with:\n"
-                    "  netstat -ano | findstr :8000\n\n"
-                    "Then kill it with:\n"
-                    "  taskkill /F /PID <pid>",
-                )
-                return
-            else:
-                raise
-
-        self._log("Starting computer-server...")
-        self._log(
-            f"  Working directory: {self.root_dir / 'vendor' / 'computer-server'}"
-        )
-        try:
-            vendor_server = self.root_dir / "vendor" / "computer-server"
-
-            # Set up environment with PYTHONPATH for imports
-            env = os.environ.copy()
-
-            self._log(
-                f"  Command: {sys.executable} -m computer_server --host 0.0.0.0 --port 8000"
-            )
-
-            self.server_process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "computer_server",
-                    "--host",
-                    "0.0.0.0",
-                    "--port",
-                    "8000",
-                ],
-                cwd=str(vendor_server),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env=env,
-                creationflags=(
-                    subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-                ),
-            )
-
-            self.server_btn.config(text="Stop Server")
-            self.server_status.config(text="Starting...", foreground="#eab308")
-            self._log("Computer-server process started, waiting for ready...")
-
-            # Start thread to monitor server output and readiness
-            def monitor_server():
-                ready = False
-                start_time = time.time()
-                check_count = 0
-
-                while self.server_process and time.time() - start_time < 30:
-                    check_count += 1
-                    # Check if process is still running
-                    if self.server_process.poll() is not None:
-                        # Process exited
-                        exit_code = self.server_process.returncode
-                        output = (
-                            self.server_process.stdout.read().decode(
-                                "utf-8", errors="replace"
-                            )
-                            if self.server_process.stdout
-                            else ""
-                        )
-
-                        self.root.after(
-                            0,
-                            lambda: self._log(
-                                f"Server process exited with code {exit_code}"
-                            ),
-                        )
-                        if output:
-                            for line in output.split("\n")[:20]:  # First 20 lines
-                                self.root.after(
-                                    0, lambda l=line: self._log(f"  [server] {l}")
-                                )
-                        self.root.after(
-                            0,
-                            lambda: self.server_status.config(
-                                text="Failed", foreground="#ef4444"
-                            ),
-                        )
-                        self.server_process = None
-                        return
-
-                    # Check if server is responding
-                    check_result = self._check_server_ready()
-                    if check_count <= 3 or check_count % 10 == 0:
-                        self.root.after(
-                            0,
-                            lambda c=check_count, r=check_result: self._log(
-                                f"  Server check #{c}: {'ready' if r else 'not ready'}"
-                            ),
-                        )
-                    if check_result:
-                        # Verify our process is still alive (not detecting someone else's server)
-                        if self.server_process.poll() is not None:
-                            # Our process died, but something else is on port 8000
-                            exit_code = self.server_process.returncode
-                            output = (
-                                self.server_process.stdout.read().decode(
-                                    "utf-8", errors="replace"
-                                )
-                                if self.server_process.stdout
-                                else ""
-                            )
-
-                            self.root.after(
-                                0,
-                                lambda: self._log(
-                                    "ERROR: Server check succeeded but our process died!"
-                                ),
-                            )
-                            self.root.after(
-                                0,
-                                lambda: self._log(
-                                    f"Server process exited with code {exit_code}"
-                                ),
-                            )
-                            if output:
-                                for line in output.split("\n")[:20]:
-                                    if line.strip():
-                                        self.root.after(
-                                            0,
-                                            lambda l=line: self._log(f"  [server] {l}"),
-                                        )
-                            self.root.after(
-                                0,
-                                lambda: self._log(
-                                    "This likely means another server is on port 8000."
-                                ),
-                            )
-                            self.root.after(
-                                0,
-                                lambda: self.server_status.config(
-                                    text="Failed", foreground="#ef4444"
-                                ),
-                            )
-                            self.server_process = None
-                            return
-
-                        ready = True
-
-                        self.root.after(
-                            0,
-                            lambda: self._log("Computer-server is ready on port 8000."),
-                        )
-                        self.root.after(
-                            0,
-                            lambda: self.server_status.config(
-                                text="Running", foreground="#22c55e"
-                            ),
-                        )
-                        break
-
-                    time.sleep(0.5)
-
-                if not ready and self.server_process:
-                    self.root.after(
-                        0,
-                        lambda: self._log(
-                            "Server startup timeout - may still be starting..."
-                        ),
-                    )
-                    self.root.after(
-                        0,
-                        lambda: self.server_status.config(
-                            text="Unknown", foreground="#eab308"
-                        ),
-                    )
-
-                # Continue reading output in background
-                if self.server_process and self.server_process.stdout:
-                    while self.server_process:
-                        line = self.server_process.stdout.readline()
-                        if not line:
-                            break
-                        decoded = line.decode("utf-8", errors="replace").strip()
-                        if decoded:
-                            self.root.after(
-                                0, lambda l=decoded: self._log(f"  [server] {l}")
-                            )
-
-            threading.Thread(target=monitor_server, daemon=True).start()
-
-        except Exception as e:
-            self._log(f"Failed to start server: {e}")
-            import traceback
-
-            self._log(f"  Traceback: {traceback.format_exc()}")
-            messagebox.showerror("Error", f"Failed to start server: {e}")
-
-    def _stop_server(self) -> None:
-        if self.server_process:
-            self._log("Stopping computer-server...")
-
-            try:
-                self.server_process.terminate()
-                self.server_process.wait(timeout=5)
-
-            except Exception as e:
-                self._log(f"  Error during termination: {e}")
-                self.server_process.kill()
-
-            self.server_process = None
-            self.server_btn.config(text="Start Server")
-            self.server_status.config(text="Stopped", foreground="#888888")
-            self._log("Computer-server stopped.")
-
-    def _toggle_workflow(self) -> None:
-        if self.workflow_process:
-            self._stop_workflow()
-        else:
-            self._start_workflow()
-
-    def _start_workflow(self) -> None:
-        self._log("Starting workflow backend in step-mode...")
-        self._log(f"  Working directory: {self.root_dir}")
-
-        # Check if server is running first
-        if not self._check_server_ready():
-            self._log("WARNING: Computer-server does not appear to be running!")
-            self._log("  The workflow may fail to connect. Start the server first.")
-
-        try:
-            self._log(
-                f"  Command: {sys.executable} -u -m workflow.run_wechat_removal --step-mode"
-            )
-
-            self.workflow_process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-u",
-                    "-m",
-                    "workflow.run_wechat_removal",
-                    "--step-mode",
-                ],
-                cwd=str(self.root_dir),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                creationflags=(
-                    subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-                ),
-            )
-
-            self.workflow_btn.config(text="Stop Workflow")
-            self.workflow_status.config(text="Starting...", foreground="#eab308")
-            self._log("Workflow process started, monitoring output...")
-
-            # Start thread to monitor workflow output
-            def monitor_workflow():
-                ready_seen = False
-                if self.workflow_process and self.workflow_process.stdout:
-                    while self.workflow_process:
-                        # Check if process exited
-                        if self.workflow_process.poll() is not None:
-                            exit_code = self.workflow_process.returncode
-                            remaining = self.workflow_process.stdout.read().decode(
-                                "utf-8", errors="replace"
-                            )
-                            if remaining:
-                                for line in remaining.split("\n"):
-                                    if line.strip():
-                                        self.root.after(
-                                            0,
-                                            lambda l=line: self._log(
-                                                f"  [workflow] {l}"
-                                            ),
-                                        )
-                            self.root.after(
-                                0,
-                                lambda: self._log(
-                                    f"Workflow process exited with code {exit_code}"
-                                ),
-                            )
-                            self.root.after(
-                                0,
-                                lambda: self.workflow_status.config(
-                                    text="Stopped", foreground="#888888"
-                                ),
-                            )
-                            self.root.after(
-                                0,
-                                lambda: self.workflow_btn.config(text="Start Workflow"),
-                            )
-                            self.workflow_process = None
-                            return
-
-                        line = self.workflow_process.stdout.readline()
-                        if not line:
-                            time.sleep(0.1)
-                            continue
-
-                        decoded = line.decode("utf-8", errors="replace").strip()
-                        if decoded:
-                            self.root.after(
-                                0, lambda l=decoded: self._log(f"  [workflow] {l}")
-                            )
-                            if (
-                                "STEP MODE ACTIVE" in decoded
-                                or "Waiting for step requests" in decoded
-                            ):
-                                ready_seen = True
-                                self.root.after(
-                                    0,
-                                    lambda: self.workflow_status.config(
-                                        text="Running", foreground="#22c55e"
-                                    ),
-                                )
-                                self.root.after(
-                                    0,
-                                    lambda: self._log(
-                                        "Workflow backend is ready for step requests."
-                                    ),
-                                )
-
-            threading.Thread(target=monitor_workflow, daemon=True).start()
-
-        except Exception as e:
-            self._log(f"Failed to start workflow: {e}")
-            import traceback
-
-            self._log(f"  Traceback: {traceback.format_exc()}")
-            messagebox.showerror("Error", f"Failed to start workflow: {e}")
-
-    def _stop_workflow(self) -> None:
-        if self.workflow_process:
-            self._log("Stopping workflow backend...")
-            try:
-                self.workflow_process.terminate()
-                self.workflow_process.wait(timeout=5)
-            except Exception as e:
-                self._log(f"  Error during termination: {e}")
-                self.workflow_process.kill()
-            self.workflow_process = None
-            self.workflow_btn.config(text="Start Workflow")
-            self.workflow_status.config(text="Stopped", foreground="#888888")
-            self._log("Workflow backend stopped.")
-
     # Manual data loading methods
     def _load_threads(self) -> None:
         example = json.dumps(
             [
                 {
                     "thread_id": "g1",
-                    "name": "留学交流群",
+                    "name": "Group Name",
                     "unread": True,
                     "is_group": True,
                 },
-                {"thread_id": "c1", "name": "张三", "unread": False, "is_group": False},
+                {"thread_id": "c1", "name": "Contact", "unread": False, "is_group": False},
             ],
             ensure_ascii=False,
             indent=2,
@@ -1081,7 +1170,7 @@ class ControlPanel:
             [
                 {
                     "thread_id": "g1",
-                    "name": "留学交流群",
+                    "name": "Group Name",
                     "unread": True,
                     "is_group": True,
                 }
@@ -1115,14 +1204,14 @@ class ControlPanel:
                 "threads": [
                     {
                         "thread_id": "g1",
-                        "name": "留学交流群",
+                        "name": "Group Name",
                         "unread": True,
                         "is_group": True,
                     }
                 ],
                 "read_results": {
                     "g1": {
-                        "text": '{"suspects": [{"sender_name": "代写论文", "sender_id": "wxid_xxx", "evidence": "专业代写"}]}',
+                        "text": '{"suspects": []}',
                         "screenshots": [],
                     }
                 },
@@ -1159,9 +1248,9 @@ class ControlPanel:
             [
                 {
                     "sender_id": "wxid_xxx",
-                    "sender_name": "代写论文",
+                    "sender_name": "Suspect Name",
                     "avatar_path": "",
-                    "evidence_text": "专业代写，联系微信xxx",
+                    "evidence_text": "Evidence text here",
                     "thread_id": "g1",
                 }
             ],
@@ -1183,7 +1272,7 @@ class ControlPanel:
                 ]
                 self._save_state()
                 self._log(
-                    f"Loaded {len(self.state.current_group_suspects)} suspects manually (for current group)."
+                    f"Loaded {len(self.state.current_group_suspects)} suspects manually."
                 )
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to parse suspects: {e}")
@@ -1194,7 +1283,7 @@ class ControlPanel:
                 "suspects": [
                     {
                         "sender_id": "wxid_xxx",
-                        "sender_name": "代写论文",
+                        "sender_name": "Suspect Name",
                         "thread_id": "g1",
                     }
                 ],
@@ -1225,7 +1314,7 @@ class ControlPanel:
                 )
                 self._save_state()
                 self._log(
-                    f"Loaded removal plan with {len(suspects)} suspects manually (for current group)."
+                    f"Loaded removal plan with {len(suspects)} suspects manually."
                 )
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to parse plan: {e}")
@@ -1235,35 +1324,24 @@ class ControlPanel:
         request_file = self.artifacts_dir / ".step_request"
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-        # Check if workflow is actually running
         if self.workflow_process:
             poll_result = self.workflow_process.poll()
             if poll_result is not None:
                 self._log(f"WARNING: Workflow process has exited (code {poll_result})")
-                self.workflow_status.config(text="Stopped", foreground="#888888")
-                self.workflow_btn.config(text="Start Workflow")
+                self._update_system_status("error", "Workflow stopped")
                 self.workflow_process = None
 
         request_data = {"step": step, "params": params}
-        self._log(f"Writing request to: {request_file}")
-        self._log(f"  Request data: {json.dumps(request_data, ensure_ascii=False)}")
+        self._log(f"Sending request: {step}")
 
         request_file.write_text(
             json.dumps(request_data, ensure_ascii=False),
             encoding="utf-8",
         )
-        self._log(f"Sent request for step: {step}")
-        self._log(
-            f"  Waiting for response (status file: {self.artifacts_dir / '.step_status'})..."
-        )
 
     def _poll_agent_result(self, callback: Callable[[dict], None]) -> None:
         result_file = self.artifacts_dir / ".step_result"
         status_file = self.artifacts_dir / ".step_status"
-
-        self._log("  Polling for result...")
-        self._log(f"    Status file: {status_file}")
-        self._log(f"    Result file: {result_file}")
 
         def poll():
             poll_count = 0
@@ -1272,23 +1350,19 @@ class ControlPanel:
                 poll_count += 1
                 elapsed = time.time() - start_time
 
-                # Log progress every 10 seconds
-                if poll_count % 20 == 0:  # Every 10 seconds (0.5s * 20)
+                if poll_count % 20 == 0:
                     self.root.after(
                         0,
                         lambda e=elapsed: self._log(
-                            f"  Still waiting for response... ({e:.0f}s elapsed)"
+                            f"  Waiting for response... ({e:.0f}s)"
                         ),
                     )
-                    # Check if workflow is still running
                     if self.workflow_process:
                         poll_result = self.workflow_process.poll()
                         if poll_result is not None:
                             self.root.after(
                                 0,
-                                lambda: self._log(
-                                    "  ERROR: Workflow process exited unexpectedly!"
-                                ),
+                                lambda: self._log("  ERROR: Workflow process exited!"),
                             )
                             self.root.after(
                                 0,
@@ -1296,38 +1370,24 @@ class ControlPanel:
                             )
                             return
 
-                # Timeout after 5 minutes
                 if elapsed > 300:
                     self.root.after(
                         0, lambda: self._log("  TIMEOUT: No response after 5 minutes")
                     )
                     self.root.after(
                         0,
-                        lambda: self._on_agent_error(
-                            "Timeout waiting for agent response"
-                        ),
+                        lambda: self._on_agent_error("Timeout waiting for response"),
                     )
                     return
 
                 if status_file.exists():
                     status = status_file.read_text(encoding="utf-8").strip()
-                    self.root.after(
-                        0, lambda s=status: self._log(f"  Status file found: {s}")
-                    )
 
                     if status == "running":
-                        self.root.after(
-                            0, lambda: self._log("  Agent is processing...")
-                        )
+                        pass
                     elif status == "complete" and result_file.exists():
                         result_text = result_file.read_text(encoding="utf-8")
                         result_text = _sanitize_surrogates(result_text)
-                        self.root.after(
-                            0,
-                            lambda: self._log(
-                                f"  Result received ({len(result_text)} bytes)"
-                            ),
-                        )
                         result = json.loads(result_text)
                         result_file.unlink(missing_ok=True)
                         status_file.unlink(missing_ok=True)
@@ -1338,9 +1398,6 @@ class ControlPanel:
                             result_file.read_text(encoding="utf-8")
                             if result_file.exists()
                             else "Unknown error"
-                        )
-                        self.root.after(
-                            0, lambda e=error_msg: self._log(f"  Error from agent: {e}")
                         )
                         result_file.unlink(missing_ok=True)
                         status_file.unlink(missing_ok=True)
@@ -1359,9 +1416,7 @@ class ControlPanel:
     # Workflow step methods
     def _run_classify(self) -> None:
         if not self.workflow_process:
-            messagebox.showwarning(
-                "Workflow Not Running", "Start the workflow backend first."
-            )
+            messagebox.showwarning("System Not Running", "Start the system first.")
             return
         self._set_status("Running: Classify Threads")
         self._log("Starting thread classification...")
@@ -1399,9 +1454,7 @@ class ControlPanel:
 
     def _run_read_messages(self) -> None:
         if not self.workflow_process:
-            messagebox.showwarning(
-                "Workflow Not Running", "Start the workflow backend first."
-            )
+            messagebox.showwarning("System Not Running", "Start the system first.")
             return
         if not self.state.unread_groups:
             messagebox.showwarning(
@@ -1412,14 +1465,13 @@ class ControlPanel:
         if idx >= len(self.state.unread_groups):
             messagebox.showinfo("Complete", "All unread groups processed.")
             return
-        # Reset per-group state when starting to read a new group
         self.state.current_group_suspects = []
         self.state.current_group_plan = None
         self._save_state()
         thread = self.state.unread_groups[idx]
         self._set_status(f"Running: Read Messages ({thread.name})")
         self._log(
-            f"[Group {idx + 1}/{len(self.state.unread_groups)}] Reading messages from: {thread.name}"
+            f"[Group {idx + 1}/{len(self.state.unread_groups)}] Reading: {thread.name}"
         )
         self._request_agent_step(
             "read_messages", {"thread_id": thread.thread_id, "thread_name": thread.name}
@@ -1436,16 +1488,14 @@ class ControlPanel:
         self.state.step_logs[f"read_{thread.thread_id}_screenshots"] = json.dumps(
             screenshots
         )
-        # Don't advance index here - wait until removal is complete for this group
         self._save_state()
-        self._log(f"Read complete for {thread.name}. Proceed to Extract Suspects.")
+        self._log(f"Read complete for {thread.name}.")
         self._set_status("Ready")
 
     def _run_extract(self) -> None:
         if not self.state.unread_groups:
             messagebox.showwarning(
-                "Missing Data",
-                "Run 'Read Messages' first or load read results manually.",
+                "Missing Data", "Run 'Read Messages' first or load read results manually."
             )
             return
         idx = self.state.current_thread_index
@@ -1455,7 +1505,7 @@ class ControlPanel:
         thread = self.state.unread_groups[idx]
         self._set_status(f"Running: Extract Suspects ({thread.name})")
         self._log(
-            f"[Group {idx + 1}/{len(self.state.unread_groups)}] Extracting suspects from: {thread.name}"
+            f"[Group {idx + 1}/{len(self.state.unread_groups)}] Extracting: {thread.name}"
         )
         text_key = f"read_{thread.thread_id}"
         screenshots_key = f"read_{thread.thread_id}_screenshots"
@@ -1493,7 +1543,7 @@ class ControlPanel:
             return
         self._set_status(f"Running: Build Plan ({thread.name})")
         self._log(
-            f"[Group {idx + 1}/{len(self.state.unread_groups)}] Building removal plan for: {thread.name}"
+            f"[Group {idx + 1}/{len(self.state.unread_groups)}] Building plan: {thread.name}"
         )
         self.state.current_group_plan = build_removal_plan(
             self.state.current_group_suspects
@@ -1506,9 +1556,7 @@ class ControlPanel:
 
     def _run_removal(self) -> None:
         if not self.workflow_process:
-            messagebox.showwarning(
-                "Workflow Not Running", "Start the workflow backend first."
-            )
+            messagebox.showwarning("System Not Running", "Start the system first.")
             return
         idx = self.state.current_thread_index
         if idx >= len(self.state.unread_groups):
@@ -1532,14 +1580,14 @@ class ControlPanel:
             ),
         )
         if not confirm:
-            self._log("Removal cancelled by user. Advancing to next group.")
+            self._log("Removal cancelled. Advancing to next group.")
             self._advance_to_next_group()
             return
         self.state.current_group_plan.confirmed = True
         self._save_state()
         self._set_status(f"Running: Execute Removal ({thread.name})")
         self._log(
-            f"[Group {idx + 1}/{len(self.state.unread_groups)}] Executing removal for: {thread.name}"
+            f"[Group {idx + 1}/{len(self.state.unread_groups)}] Removing: {thread.name}"
         )
         suspect_data = [
             {
@@ -1558,12 +1606,11 @@ class ControlPanel:
         thread = self.state.unread_groups[idx]
         self._log(f"Removal result for {thread.name}: {text_output}")
 
-        # Parse per-user removal results
         removal_results = result.get("removal_results", [])
         all_removed = result.get("all_removed", True)
 
         if removal_results:
-            self._log(f"  Per-user results:")
+            self._log("  Per-user results:")
             for r in removal_results:
                 status = "SUCCESS" if r.get("success") else "FAILED"
                 error = f" - {r.get('error')}" if r.get("error") else ""
@@ -1590,14 +1637,11 @@ class ControlPanel:
 
     def _advance_to_next_group(self) -> None:
         """Save current group results and advance to the next unread group."""
-        # Accumulate results from current group
         self.state.all_suspects.extend(self.state.current_group_suspects)
         if self.state.current_group_plan:
             self.state.all_plans.append(self.state.current_group_plan)
-        # Also update legacy fields for backward compatibility
         self.state.suspects = list(self.state.all_suspects)
         if self.state.all_plans:
-            # Merge all plans into one for legacy compatibility
             all_plan_suspects = []
             for p in self.state.all_plans:
                 all_plan_suspects.extend(p.suspects)
@@ -1606,9 +1650,7 @@ class ControlPanel:
                 confirmed=True,
                 note=f"Processed {len(self.state.all_plans)} group(s)",
             )
-        # Advance to next group
         self.state.current_thread_index += 1
-        # Reset per-group state
         self.state.current_group_suspects = []
         self.state.current_group_plan = None
         self._save_state()
@@ -1616,9 +1658,7 @@ class ControlPanel:
         if remaining > 0:
             next_group = self.state.unread_groups[self.state.current_thread_index]
             self._log(f"Advanced to next group. {remaining} group(s) remaining.")
-            self._log(
-                f"Next group: {next_group.name}. Click 'Read Messages' to continue."
-            )
+            self._log(f"Next: {next_group.name}")
             messagebox.showinfo(
                 "Group Complete",
                 f"Finished processing current group.\n\n"
