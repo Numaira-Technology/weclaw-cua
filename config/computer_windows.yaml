@@ -6,10 +6,20 @@ timeout: 180
 telemetry_enabled: false
 screenshot_delay: 0.5
 
+# Screen and UI element positions for 2560x1440 display
+screen_width: 2560
+screen_height: 1440
+
+# WeChat UI fixed button positions (in pixels)
+wechat_three_dots_x: 2524
+wechat_three_dots_y: 48
+wechat_delete_button_x: 1346
+wechat_delete_button_y: 924
+
 # Human-like mouse movement settings
 human_mouse:
   enabled: true
-  speed_factor: 0.8  # Lower = faster movement (0.5-2.0 recommended)
-  curve_variance: 0.3  # How much the path curves (0.1-0.5)
-  zigzag_enabled: false  # Enable subtle zigzag patterns
-  base_delay_ms: 5.0  # Base delay between movement steps in milliseconds
+  speed_factor: 0.8 # Lower = faster movement (0.5-2.0 recommended)
+  curve_variance: 0.3 # How much the path curves (0.1-0.5)
+  zigzag_enabled: false # Enable subtle zigzag patterns
+  base_delay_ms: 5.0 # Base delay between movement steps in milliseconds

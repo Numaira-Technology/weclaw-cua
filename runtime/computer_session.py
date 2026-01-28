@@ -8,7 +8,7 @@ Usage:
   await computer.run()
 
 Input:
-  - config_path: Path to YAML file with use_host_computer_server, os_type, api_port, display, timeout, telemetry_enabled, screenshot_delay.
+  - config_path: Path to YAML file with use_host_computer_server, os_type, api_port, display, timeout, telemetry_enabled, screenshot_delay, screen dimensions, and wechat UI positions.
 
 Output:
   - ComputerSettings dataclass populated from config.
@@ -21,7 +21,7 @@ import asyncio
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR = ROOT / "vendor"
@@ -43,6 +43,10 @@ class ComputerSettings:
     timeout: int
     telemetry_enabled: bool
     screenshot_delay: float
+    screen_width: int
+    screen_height: int
+    wechat_three_dots: Tuple[int, int]
+    wechat_delete_button: Tuple[int, int]
 
 
 def _parse_simple_yaml(path: Path) -> Dict[str, str]:
@@ -68,13 +72,26 @@ def _parse_simple_yaml(path: Path) -> Dict[str, str]:
 def load_computer_settings(path: Path) -> ComputerSettings:
     data = _parse_simple_yaml(path)
     return ComputerSettings(
-        use_host_computer_server=str(data.get("use_host_computer_server", "true")).lower() == "true",
+        use_host_computer_server=str(
+            data.get("use_host_computer_server", "true")
+        ).lower()
+        == "true",
         os_type=data.get("os_type", "windows"),
         api_port=int(data.get("api_port", 8000)),
         display=data.get("display", "1280x720"),
         timeout=int(data.get("timeout", 120)),
         telemetry_enabled=str(data.get("telemetry_enabled", "false")).lower() == "true",
         screenshot_delay=float(data.get("screenshot_delay", 0.5)),
+        screen_width=int(data.get("screen_width", 2560)),
+        screen_height=int(data.get("screen_height", 1440)),
+        wechat_three_dots=(
+            int(data.get("wechat_three_dots_x", 2524)),
+            int(data.get("wechat_three_dots_y", 48)),
+        ),
+        wechat_delete_button=(
+            int(data.get("wechat_delete_button_x", 1346)),
+            int(data.get("wechat_delete_button_y", 924)),
+        ),
     )
 
 

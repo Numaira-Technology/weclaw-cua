@@ -4,6 +4,10 @@ Build removal instructions for the agent.
 Usage:
   prompt = removal_prompt(plan)
   prompt = removal_prompt_single(suspect)
+  prompt = removal_with_verify_prompt(suspect, is_first=True)
+  prompt = verify_panel_opened_prompt()
+  prompt = select_user_for_removal_prompt(user_name)
+  prompt = verify_removal_prompt(user_name)
 
 Input:
   - plan: RemovalPlan with confirmed flag and suspects list.
@@ -92,3 +96,98 @@ def removal_prompt_single(suspect: Suspect, is_first: bool = True) -> str:
         )
 
     return prompt
+
+
+def removal_with_verify_prompt(suspect: Suspect, is_first: bool = True) -> str:
+    """
+    Build prompt to remove a single user AND verify the removal succeeded.
+
+    This combines the removal action and verification into one agent turn,
+    eliminating the need for a separate verification API call.
+    """
+    user_name = suspect.sender_name
+
+    if is_first:
+        return (
+            f"任务：从群聊中移除用户「{user_name}」并验证\n\n"
+            "操作步骤：\n"
+            "1. 点击聊天窗口右上角的三个点(...) 打开群聊信息面板\n"
+            "2. 在成员头像区域右侧，找到并点击灰色圆形「-」减号按钮\n"
+            f"3. 在成员列表中找到「{user_name}」，点击其旁边的红色圆形选择框\n"
+            "4. 点击底部的「删除」按钮确认移除\n"
+            f"5. 验证：检查成员列表中是否还能看到「{user_name}」\n\n"
+            "重要提示：\n"
+            "- 完成后停留在成员列表界面，方便后续操作\n"
+            "- 每次点击后等待界面响应\n\n"
+            "完成后回复JSON：\n"
+            f'{{"user_removed": true, "user_name": "{user_name}"}} 如果已移除\n'
+            f'{{"user_removed": false, "user_name": "{user_name}", "reason": "原因"}} 如果失败'
+        )
+    else:
+        return (
+            f"继续任务：移除用户「{user_name}」并验证\n\n"
+            "当前应在成员管理界面。\n\n"
+            "操作步骤：\n"
+            "1. 如果不在删除模式，点击「-」减号按钮进入\n"
+            f"2. 在成员列表中找到「{user_name}」，点击其旁边的红色选择框\n"
+            "3. 点击「删除」按钮确认\n"
+            f"4. 验证成员列表中是否还有「{user_name}」\n\n"
+            "完成后回复JSON：\n"
+            f'{{"user_removed": true, "user_name": "{user_name}"}} 如果已移除\n'
+            f'{{"user_removed": false, "user_name": "{user_name}", "reason": "原因"}} 如果失败'
+        )
+
+
+def verify_panel_opened_prompt() -> str:
+    """Prompt to verify the group info panel is open after clicking three dots."""
+    return (
+        "刚才已点击了三个点按钮。\n\n"
+        "请查看当前屏幕：\n"
+        "- 群聊信息面板是否已打开？\n"
+        "- 能否看到成员头像区域？\n\n"
+        "回复JSON：\n"
+        '{"panel_opened": true} 如果面板已打开\n'
+        '{"panel_opened": false, "reason": "原因"} 如果未打开'
+    )
+
+
+def select_user_for_removal_prompt(user_name: str, is_first: bool = True) -> str:
+    """Prompt to click minus button and select user checkbox."""
+    if is_first:
+        return (
+            f"任务：选中用户「{user_name}」准备移除\n\n"
+            "操作步骤：\n"
+            "1. 在成员头像区域右侧，找到并点击灰色圆形「-」减号按钮进入删除模式\n"
+            f"2. 在成员列表中找到「{user_name}」，点击其旁边的红色圆形选择框\n\n"
+            "重要提示：\n"
+            "- 「-」减号按钮是小的灰色圆形按钮，在成员头像行的最右侧\n"
+            "- 选中用户后不要点击删除按钮，等待下一步指令\n\n"
+            "完成后回复JSON：\n"
+            f'{{"user_selected": true, "user_name": "{user_name}"}} 如果已选中\n'
+            f'{{"user_selected": false, "user_name": "{user_name}", "reason": "原因"}} 如果失败'
+        )
+    else:
+        return (
+            f"继续任务：选中用户「{user_name}」准备移除\n\n"
+            "当前应在成员管理界面。\n\n"
+            "操作步骤：\n"
+            "1. 如果不在删除模式，点击「-」减号按钮进入\n"
+            f"2. 在成员列表中找到「{user_name}」，点击其旁边的红色选择框\n\n"
+            "重要提示：\n"
+            "- 选中用户后不要点击删除按钮，等待下一步指令\n\n"
+            "完成后回复JSON：\n"
+            f'{{"user_selected": true, "user_name": "{user_name}"}} 如果已选中\n'
+            f'{{"user_selected": false, "user_name": "{user_name}", "reason": "原因"}} 如果失败'
+        )
+
+
+def verify_removal_prompt(user_name: str) -> str:
+    """Prompt to verify user was removed from member list after clicking delete."""
+    return (
+        f"刚才已点击了删除按钮。\n\n"
+        f"请验证：用户「{user_name}」是否已从成员列表中移除？\n\n"
+        "仔细检查当前屏幕上的成员列表。\n\n"
+        "回复JSON：\n"
+        f'{{"user_removed": true, "user_name": "{user_name}"}} 如果已移除\n'
+        f'{{"user_removed": false, "user_name": "{user_name}", "reason": "原因"}} 如果仍可见'
+    )
