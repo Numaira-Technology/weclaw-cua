@@ -24,6 +24,7 @@ class GroupThread:
     thread_id: str
     unread: bool
     is_group: bool = True
+    y: int = 0  # Y-coordinate in cropped chat list image (for clicking)
 
 
 @dataclass

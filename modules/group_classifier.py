@@ -23,17 +23,27 @@ from modules.task_types import GroupThread
 
 def classification_prompt() -> str:
     return (
-        "请仔细观察当前屏幕上的微信会话列表截图。"
-        "不要点击任何东西，只需要分析截图中可见的会话。"
-        "使用头像图标区分群聊（多人头像）与单聊（单人头像）。"
-        "记录每个会话的未读状态（是否有未读消息标记）。"
-        "直接输出JSON格式结果，不要执行任何点击操作。"
-        'JSON格式：{"threads": [{"thread_id": "会话名称", "name": "会话名称", "is_group": true/false, "unread": true/false}, ...]}'
+        "这是微信会话列表的裁剪截图（宽218像素，高1440像素，仅显示左侧聊天列表栏）。"
+        "分析截图中可见的每个会话，从上到下依次列出。"
+        "使用头像图标区分群聊（多人头像/九宫格）与单聊（单人头像）。"
+        "记录每个会话的未读状态（是否有红色未读消息标记）。"
+        "对于每个会话，估算其头像中心点的Y坐标（0-1000归一化值，0=顶部，1000=底部）。"
+        "提示：第一个会话的头像中心大约在y=97，每个会话间隔约35。"
+        "直接输出JSON格式结果。"
+        'JSON格式：{"threads": [{"name": "会话名称", "y": 97, "is_group": true/false, "unread": true/false}, ...]}'
         "只输出JSON，不要输出其他文字。"
     )
 
 
-def parse_classification(text_output: str) -> List[GroupThread]:
+def parse_classification(
+    text_output: str, image_height: int = 1440
+) -> List[GroupThread]:
+    """Parse classification output and convert normalized y to pixels.
+
+    Args:
+        text_output: JSON string from AI with y in 0-1000 normalized space
+        image_height: Height of the cropped image in pixels (default 1440)
+    """
     text = text_output.strip()
     if text.startswith("```"):
         lines = text.split("\n")
@@ -48,12 +58,20 @@ def parse_classification(text_output: str) -> List[GroupThread]:
         raw_threads = payload
     else:
         raw_threads = payload.get("threads", [])
-    return [
-        GroupThread(
-            name=str(item.get("name", "")),
-            thread_id=str(item.get("thread_id", "")),
-            unread=bool(item.get("unread", False)),
-            is_group=bool(item.get("is_group", False)),
+
+    threads = []
+    for item in raw_threads:
+        # Convert from 0-1000 normalized space to pixel space
+        normalized_y = item.get("y", 0)
+        pixel_y = int((normalized_y / 1000.0) * image_height)
+
+        threads.append(
+            GroupThread(
+                name=str(item.get("name", "")),
+                thread_id=str(item.get("thread_id", item.get("name", ""))),
+                unread=bool(item.get("unread", False)),
+                is_group=bool(item.get("is_group", False)),
+                y=pixel_y,
+            )
         )
-        for item in raw_threads
-    ]
+    return threads

@@ -34,9 +34,10 @@ for _pkg in [_VENDOR / "agent", _VENDOR / "computer", _VENDOR / "core"]:
     if str(_pkg) not in sys.path:
         sys.path.insert(0, str(_pkg))
 
+from modules.crop_utils import CHAT_LIST_REGION, CropRegion
 from modules.group_classifier import classification_prompt, parse_classification
 from modules.human_confirmation import require_confirmation
-from modules.message_reader import message_reader_prompt
+from modules.message_reader import message_reader_prompt, parse_reader_response
 from modules.removal_executor import (
     removal_prompt,
     select_user_for_removal_prompt,
@@ -95,9 +96,11 @@ async def run_vision_query(
 
     print(f"[run_vision_query] Starting: {task_label}")
     print(f"[run_vision_query] Prompt: {prompt[:100]}...")
+    sys.stdout.flush()
 
     # Step 1: Take screenshot
     print("[run_vision_query] Taking screenshot...")
+    sys.stdout.flush()
     start = time.time()
     screenshot_bytes = await computer.interface.screenshot()
     # Convert bytes to base64
@@ -105,11 +108,13 @@ async def run_vision_query(
     print(
         f"[run_vision_query] Screenshot captured: {len(screenshot_b64)} chars in {time.time() - start:.1f}s"
     )
+    sys.stdout.flush()
 
     # Save screenshot
     screenshot_path = _capture_path(capture_dir, task_label, 0)
     _save_screenshot(f"data:image/png;base64,{screenshot_b64}", screenshot_path)
     print(f"[run_vision_query] Saved to: {screenshot_path}")
+    sys.stdout.flush()
 
     # Step 2: Send to model with image
     messages = [
@@ -126,6 +131,7 @@ async def run_vision_query(
     ]
 
     print(f"[run_vision_query] Calling {model}...")
+    sys.stdout.flush()
     start = time.time()
 
     # Retry logic for transient API errors (502, 503, etc.)
@@ -136,22 +142,33 @@ async def run_vision_query(
     last_error = None
     for attempt in range(max_retries):
         try:
+            print(f"[run_vision_query] API attempt {attempt + 1}/{max_retries}...")
+            sys.stdout.flush()
             response = await litellm.acompletion(
-                model=model, messages=messages, timeout=60
+                model=model, messages=messages, timeout=120
             )
             break
         except Exception as e:
             last_error = e
             error_str = str(e)
+            print(f"[run_vision_query] API error: {error_str[:200]}")
+            sys.stdout.flush()
             if any(
                 x in error_str
-                for x in ["502", "503", "ServiceUnavailable", "server_error"]
+                for x in [
+                    "502",
+                    "503",
+                    "504",
+                    "ServiceUnavailable",
+                    "server_error",
+                    "Timeout",
+                    "Bad Gateway",
+                ]
             ):
                 if attempt < max_retries - 1:
                     wait_time = retry_delay * (attempt + 1)
-                    print(
-                        f"[run_vision_query] API error (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s..."
-                    )
+                    print(f"[run_vision_query] Retrying in {wait_time}s...")
+                    sys.stdout.flush()
                     await asyncio.sleep(wait_time)
                     continue
             raise
@@ -162,6 +179,7 @@ async def run_vision_query(
 
     elapsed = time.time() - start
     print(f"[run_vision_query] Response received in {elapsed:.1f}s")
+    sys.stdout.flush()
 
     # Step 3: Extract text response
     text_output = response.choices[0].message.content or ""  # type: ignore[union-attr]
@@ -170,6 +188,128 @@ async def run_vision_query(
     # Use ASCII-safe encoding for Windows console compatibility
     response_preview = text_output[:200].encode("ascii", "replace").decode("ascii")
     print(f"[run_vision_query] Response: {response_preview}...")
+
+    return text_output, [screenshot_path]
+
+
+async def run_cropped_vision_query(
+    computer,
+    model: str,
+    prompt: str,
+    capture_dir: Path,
+    task_label: str,
+    crop_region: CropRegion,
+) -> Tuple[str, List[Path]]:
+    """
+    Vision query with cropped screenshot for faster upload.
+    Takes full screenshot, crops to region, uploads cropped image to model.
+    """
+    import time
+
+    import litellm
+
+    print(f"[run_cropped_vision_query] Starting: {task_label}")
+    print(
+        f"[run_cropped_vision_query] Crop region: ({crop_region.x_start}, {crop_region.y_start}) to ({crop_region.x_end}, {crop_region.y_end})"
+    )
+    print(f"[run_cropped_vision_query] Prompt: {prompt[:100]}...")
+    sys.stdout.flush()
+
+    # Step 1: Take full screenshot
+    print("[run_cropped_vision_query] Taking screenshot...")
+    sys.stdout.flush()
+    start = time.time()
+    screenshot_bytes = await computer.interface.screenshot()
+    print(
+        f"[run_cropped_vision_query] Full screenshot: {len(screenshot_bytes)} bytes in {time.time() - start:.1f}s"
+    )
+    sys.stdout.flush()
+
+    # Step 2: Crop to region
+    start = time.time()
+    cropped_bytes = crop_region.crop_image(screenshot_bytes)
+    cropped_b64 = base64.b64encode(cropped_bytes).decode("utf-8")
+    print(
+        f"[run_cropped_vision_query] Cropped: {len(cropped_b64)} chars ({crop_region.width}x{crop_region.height}px) in {time.time() - start:.2f}s"
+    )
+    sys.stdout.flush()
+
+    # Save cropped screenshot
+    screenshot_path = _capture_path(capture_dir, task_label, 0)
+    _save_screenshot(f"data:image/png;base64,{cropped_b64}", screenshot_path)
+    print(f"[run_cropped_vision_query] Saved to: {screenshot_path}")
+    sys.stdout.flush()
+
+    # Step 3: Send cropped image to model
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{cropped_b64}"},
+                },
+                {"type": "text", "text": prompt},
+            ],
+        }
+    ]
+
+    print(f"[run_cropped_vision_query] Calling {model}...")
+    sys.stdout.flush()
+    start = time.time()
+
+    # Retry logic for transient API errors
+    max_retries = 3
+    retry_delay = 2.0
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            print(
+                f"[run_cropped_vision_query] API attempt {attempt + 1}/{max_retries}..."
+            )
+            sys.stdout.flush()
+            response = await litellm.acompletion(
+                model=model, messages=messages, timeout=120
+            )
+            break
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+            print(f"[run_cropped_vision_query] API error: {error_str[:200]}")
+            sys.stdout.flush()
+            if any(
+                x in error_str
+                for x in [
+                    "502",
+                    "503",
+                    "504",
+                    "ServiceUnavailable",
+                    "server_error",
+                    "Timeout",
+                    "Bad Gateway",
+                ]
+            ):
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (attempt + 1)
+                    print(f"[run_cropped_vision_query] Retrying in {wait_time}s...")
+                    sys.stdout.flush()
+                    await asyncio.sleep(wait_time)
+                    continue
+            raise
+    else:
+        if last_error:
+            raise last_error
+        raise RuntimeError("API call failed after all retries")
+
+    elapsed = time.time() - start
+    print(f"[run_cropped_vision_query] Response received in {elapsed:.1f}s")
+    sys.stdout.flush()
+
+    # Step 4: Extract text response
+    text_output = response.choices[0].message.content or ""  # type: ignore[union-attr]
+    text_output = _sanitize_surrogates(text_output)
+    response_preview = text_output[:200].encode("ascii", "replace").decode("ascii")
+    print(f"[run_cropped_vision_query] Response: {response_preview}...")
 
     return text_output, [screenshot_path]
 
@@ -338,15 +478,26 @@ class StepModeRunner:
         self.request_file.unlink(missing_ok=True)
 
     async def handle_classify(self, params: dict) -> None:
-        print("[StepModeRunner] Executing: classify threads (vision query)")
+        import time
+
+        total_start = time.time()
+        print("[StepModeRunner] Executing: classify threads (cropped vision query)")
+        sys.stdout.flush()
         prompt = classification_prompt()
         print(f"[StepModeRunner] Prompt length: {len(prompt)} chars")
-        text_output, screenshots = await run_vision_query(
-            self.computer, self.model, prompt, self.capture_dir, "classification"
+        sys.stdout.flush()
+        text_output, screenshots = await run_cropped_vision_query(
+            self.computer,
+            self.model,
+            prompt,
+            self.capture_dir,
+            "classification",
+            CHAT_LIST_REGION,
         )
         print(
-            f"[StepModeRunner] Vision query returned: {len(text_output)} chars, {len(screenshots)} screenshots"
+            f"[StepModeRunner] Cropped vision query returned: {len(text_output)} chars, {len(screenshots)} screenshots"
         )
+        print(f"[StepModeRunner] TOTAL classify time: {time.time() - total_start:.1f}s")
         self._write_result(
             {
                 "text": text_output,
@@ -358,28 +509,82 @@ class StepModeRunner:
     async def handle_read_messages(self, params: dict) -> None:
         thread_id = params.get("thread_id", "")
         thread_name = params.get("thread_name", "")
+        thread_y = params.get("y", 0)
         print(
-            f"[StepModeRunner] Executing: read messages from {thread_name} (id={thread_id})"
+            f"[StepModeRunner] Executing: read messages from {thread_name} (id={thread_id}, y={thread_y})"
         )
-        thread = GroupThread(
-            name=thread_name, thread_id=thread_id, unread=True, is_group=True
-        )
-        prompt = message_reader_prompt(thread)
-        print(f"[StepModeRunner] Prompt length: {len(prompt)} chars")
-        print("[StepModeRunner] Calling agent.run()...")
-        text_output, screenshots = await run_agent_task(
-            self.agent, prompt, self.capture_dir, f"reader_{thread_id}"
-        )
-        print(
-            f"[StepModeRunner] Agent returned: {len(text_output)} chars, {len(screenshots)} screenshots"
-        )
+        sys.stdout.flush()
+
+        max_attempts = 3
+        click_y = thread_y
+        all_screenshots: List[Path] = []
+
+        for attempt in range(max_attempts):
+            print(f"[StepModeRunner] Attempt {attempt + 1}/{max_attempts}")
+            sys.stdout.flush()
+
+            # Scaffolded click using y-coordinate
+            # Convert from cropped image coords to screen coords
+            click_x, screen_y = CHAT_LIST_REGION.to_screen_coords(
+                CHAT_LIST_REGION.width // 2,  # Center x within crop region
+                click_y,  # Y from AI (relative to cropped image)
+            )
+            print(
+                f"[StepModeRunner] AI y={click_y} -> screen coords ({click_x}, {screen_y})"
+            )
+            print(
+                f"[StepModeRunner] CHAT_LIST_REGION: x=({CHAT_LIST_REGION.x_start}, {CHAT_LIST_REGION.x_end}), y=({CHAT_LIST_REGION.y_start}, {CHAT_LIST_REGION.y_end})"
+            )
+            sys.stdout.flush()
+            await self.computer.interface.left_click(click_x, screen_y)
+            await asyncio.sleep(0.5)
+
+            # Vision query with verification
+            prompt = message_reader_prompt(thread_name, thread_id)
+            print(f"[StepModeRunner] Prompt length: {len(prompt)} chars")
+            sys.stdout.flush()
+            text_output, screenshots = await run_vision_query(
+                self.computer,
+                self.model,
+                prompt,
+                self.capture_dir,
+                f"reader_{thread_id}_attempt{attempt}",
+            )
+            all_screenshots.extend(screenshots)
+            print(f"[StepModeRunner] Vision query returned: {len(text_output)} chars")
+
+            # Parse response
+            result = parse_reader_response(text_output)
+
+            if result["success"]:
+                print(
+                    f"[StepModeRunner] Chat verified, found {len(result.get('suspects', []))} suspect(s)"
+                )
+                self._write_result(
+                    {
+                        "text": text_output,
+                        "screenshots": [str(p) for p in all_screenshots],
+                        "suspects": result.get("suspects", []),
+                    }
+                )
+                self._write_status("complete")
+                return
+
+            # Retry with new y-coordinate from AI
+            new_y = result.get("retry_y", 0)
+            print(f"[StepModeRunner] Verification failed, retrying with y={new_y}")
+            click_y = new_y
+
+        # All attempts failed
+        print(f"[StepModeRunner] Failed to open chat after {max_attempts} attempts")
         self._write_result(
             {
-                "text": text_output,
-                "screenshots": [str(p) for p in screenshots],
+                "text": "Failed to open chat after max attempts",
+                "screenshots": [str(p) for p in all_screenshots],
+                "error": "verification_failed",
             }
         )
-        self._write_status("complete")
+        self._write_status("error")
 
     async def handle_remove(self, params: dict) -> None:
         """Remove suspects using a single continuous agent session."""
@@ -576,29 +781,48 @@ class StepModeRunner:
                 self._write_error(f"{type(e).__name__}: {safe_error}\n\n{safe_tb}")
 
     async def run_loop(self, poll_interval: float = 0.5) -> None:
+        import time as time_module
+
         print("\n" + "=" * 60)
         print("STEP MODE ACTIVE")
         print("=" * 60)
-        print("Waiting for step requests from control panel...")
-        sys.stdout.flush()
         print(f"Request file: {self.request_file}")
         print(f"Artifacts dir: {self.artifacts_dir}")
-        print("Press Ctrl+C to exit.\n")
+        print("Press Ctrl+C to exit.")
 
         # Ensure artifacts directory exists
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
         print(
             f"[StepModeRunner] Artifacts directory ready: {self.artifacts_dir.exists()}"
         )
+        print("Waiting for step requests from control panel...")
+        sys.stdout.flush()
 
         loop_count = 0
+        last_loop_time = time_module.time()
         while True:
             loop_count += 1
+            current_time = time_module.time()
+            loop_duration = current_time - last_loop_time
+
+            # Log if loop took longer than expected (> 2 seconds)
+            if loop_duration > 2.0:
+                print(
+                    f"[StepModeRunner] WARNING: Loop {loop_count} took {loop_duration:.1f}s (expected ~{poll_interval}s)"
+                )
+                sys.stdout.flush()
+
             if loop_count % 60 == 0:  # Every 30 seconds
-                print(f"[StepModeRunner] Still polling... (loop {loop_count})")
+                print(
+                    f"[StepModeRunner] Still polling... (loop {loop_count}, last loop: {loop_duration:.2f}s)"
+                )
+                sys.stdout.flush()
+
+            last_loop_time = current_time
 
             if self.request_file.exists():
                 print("[StepModeRunner] Found request file!")
+                sys.stdout.flush()
                 try:
                     request_text = self.request_file.read_text(encoding="utf-8")
                     # Use ASCII-safe encoding for Windows console compatibility
@@ -613,8 +837,10 @@ class StepModeRunner:
                     )
                     await self.process_request(request)
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] Step complete.\n")
+                    sys.stdout.flush()
                 except json.JSONDecodeError as e:
                     print(f"[StepModeRunner] JSON decode error: {e}")
+                    sys.stdout.flush()
                     self._clear_request()
                     self._write_error(f"Invalid request JSON: {e}")
                 except Exception as e:
@@ -627,6 +853,7 @@ class StepModeRunner:
                     safe_tb = tb.encode("ascii", "replace").decode("ascii")
                     print(f"[StepModeRunner] Unexpected error: {safe_error}")
                     print(f"[StepModeRunner] Traceback:\n{safe_tb}")
+                    sys.stdout.flush()
                     self._clear_request()
                     try:
                         self._write_error(f"Unexpected error: {error_msg}\n\n{tb}")
@@ -641,6 +868,7 @@ class StepModeRunner:
 async def orchestrate_step_mode() -> None:
     print("[orchestrate_step_mode] Starting...")
     sys.stdout.flush()
+
     root = Path(__file__).resolve().parents[1]
     print(f"[orchestrate_step_mode] Root directory: {root}")
     sys.stdout.flush()
@@ -745,7 +973,7 @@ async def orchestrate() -> None:
         print(f"{'=' * 40}\n")
 
         # Stage 3: Read messages (per group)
-        reader_prompt = message_reader_prompt(thread)
+        reader_prompt = message_reader_prompt(thread.name, thread.thread_id)
         reader_output, reader_shots = await run_agent_task(
             agent, reader_prompt, capture_dir, f"reader_{thread.thread_id}"
         )

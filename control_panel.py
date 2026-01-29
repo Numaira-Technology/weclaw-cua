@@ -29,7 +29,6 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import Callable, Optional
 
-
 # Color palette - Minimalist White & Blue
 COLORS = {
     "bg": "#ffffff",
@@ -133,9 +132,9 @@ class LoadDataDialog:
         ttk.Button(btn_frame, text="Cancel", command=self._cancel).pack(
             side=tk.RIGHT, padx=5
         )
-        ttk.Button(btn_frame, text="Load", command=self._load, style="Primary.TButton").pack(
-            side=tk.RIGHT
-        )
+        ttk.Button(
+            btn_frame, text="Load", command=self._load, style="Primary.TButton"
+        ).pack(side=tk.RIGHT)
 
         self.dialog.wait_window()
 
@@ -179,7 +178,9 @@ class ControlPanel:
         self.workflow_process: Optional[subprocess.Popen] = None
         self._stop_requested: bool = False
         self._is_running: bool = False
-        self._system_status: str = "stopped"  # stopped, starting_server, starting_workflow, running
+        self._system_status: str = (
+            "stopped"  # stopped, starting_server, starting_workflow, running
+        )
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -223,7 +224,10 @@ class ControlPanel:
         )
         style.map(
             "Primary.TButton",
-            background=[("active", COLORS["primary_hover"]), ("disabled", COLORS["border"])],
+            background=[
+                ("active", COLORS["primary_hover"]),
+                ("disabled", COLORS["border"]),
+            ],
             foreground=[("disabled", COLORS["text_secondary"])],
         )
 
@@ -290,9 +294,9 @@ class ControlPanel:
         header_frame = ttk.Frame(main_frame)
         header_frame.pack(fill=tk.X, pady=(0, 24))
 
-        ttk.Label(
-            header_frame, text="WeChat Group Manager", style="Title.TLabel"
-        ).pack(anchor=tk.W)
+        ttk.Label(header_frame, text="WeChat Group Manager", style="Title.TLabel").pack(
+            anchor=tk.W
+        )
         ttk.Label(
             header_frame,
             text="Automated spam detection and removal workflow",
@@ -416,30 +420,53 @@ class ControlPanel:
         self.system_btn.pack(fill=tk.X)
 
     def _create_workflow_steps_card(self, parent: ttk.Frame) -> None:
-        """Create the workflow steps card."""
+        """Create the workflow steps card with collapsible debug section."""
         card = tk.Frame(parent, bg=COLORS["card"], padx=16, pady=16)
         card.pack(fill=tk.X, pady=(0, 16))
 
+        # Header with Debug toggle button
+        header_frame = tk.Frame(card, bg=COLORS["card"])
+        header_frame.pack(fill=tk.X, pady=(0, 8))
+
         tk.Label(
-            card,
+            header_frame,
             text="Workflow Steps",
             font=("Segoe UI", 12, "bold"),
             bg=COLORS["card"],
             fg=COLORS["text"],
-        ).pack(anchor=tk.W, pady=(0, 12))
+        ).pack(side=tk.LEFT)
+
+        self._debug_expanded = False
+        self.debug_toggle_btn = ttk.Button(
+            header_frame,
+            text="Debug \u25bc",
+            command=self._toggle_debug_steps,
+            style="Secondary.TButton",
+            width=8,
+        )
+        self.debug_toggle_btn.pack(side=tk.RIGHT)
+
+        # Container for step buttons (initially hidden)
+        self.steps_container = tk.Frame(card, bg=COLORS["card"])
+        # Don't pack initially - hidden by default
 
         self.step_buttons = {}
         steps = [
             ("1. Classify Threads", "classify", self._run_classify, None),
             ("2. Filter Unread", "filter", self._run_filter, self._load_threads),
             ("3. Read Messages", "read", self._run_read_messages, self._load_groups),
-            ("4. Extract Suspects", "extract", self._run_extract, self._load_read_results),
+            (
+                "4. Extract Suspects",
+                "extract",
+                self._run_extract,
+                self._load_read_results,
+            ),
             ("5. Build Plan", "plan", self._run_build_plan, self._load_suspects),
             ("6. Execute Removal", "remove", self._run_removal, self._load_plan),
         ]
 
         for i, (label, step_id, callback, load_callback) in enumerate(steps):
-            step_frame = tk.Frame(card, bg=COLORS["card"])
+            step_frame = tk.Frame(self.steps_container, bg=COLORS["card"])
             step_frame.pack(fill=tk.X, pady=2)
 
             btn = ttk.Button(
@@ -457,6 +484,16 @@ class ControlPanel:
                     style="Secondary.TButton",
                 )
                 load_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+    def _toggle_debug_steps(self) -> None:
+        """Toggle visibility of debug workflow steps."""
+        self._debug_expanded = not self._debug_expanded
+        if self._debug_expanded:
+            self.steps_container.pack(fill=tk.X, pady=(4, 0))
+            self.debug_toggle_btn.config(text="Debug \u25b2")
+        else:
+            self.steps_container.pack_forget()
+            self.debug_toggle_btn.config(text="Debug \u25bc")
 
     def _create_actions_card(self, parent: ttk.Frame) -> None:
         """Create the actions card."""
@@ -512,7 +549,55 @@ class ControlPanel:
             self._stop_workflow()
         if self.server_process:
             self._stop_server()
+        # Ensure port 8000 is released even if process tracking failed
+        self._kill_port_8000()
+        # Final cleanup of any orphaned workflow processes
+        self._kill_workflow_processes()
         self.root.destroy()
+
+    def _kill_port_8000(self) -> None:
+        """Kill any process using port 8000 to ensure clean shutdown."""
+        if sys.platform == "win32":
+            try:
+                # Find PID using port 8000
+                result = subprocess.run(
+                    ["netstat", "-ano"],
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                for line in result.stdout.splitlines():
+                    if ":8000" in line and "LISTENING" in line:
+                        parts = line.split()
+                        if parts:
+                            pid = parts[-1]
+                            try:
+                                subprocess.run(
+                                    ["taskkill", "/F", "/PID", pid],
+                                    capture_output=True,
+                                    creationflags=subprocess.CREATE_NO_WINDOW,
+                                )
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+        else:
+            # Unix-like systems
+            try:
+                result = subprocess.run(
+                    ["lsof", "-ti", ":8000"],
+                    capture_output=True,
+                    text=True,
+                )
+                pids = result.stdout.strip().split()
+                for pid in pids:
+                    if pid:
+                        try:
+                            subprocess.run(["kill", "-9", pid], capture_output=True)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
     def _log(self, message: str) -> None:
         timestamp = time.strftime("%H:%M:%S")
@@ -600,6 +685,9 @@ class ControlPanel:
         """Start the server, then automatically start the workflow."""
         self._update_system_status("starting_server", "Starting computer server...")
         self._log("Starting system...")
+
+        # Kill any orphaned workflow processes from previous runs
+        self._kill_workflow_processes()
 
         # Check if port 8000 is already in use
         import socket
@@ -756,7 +844,9 @@ class ControlPanel:
                                 )
                                 self.root.after(
                                     0,
-                                    lambda: self._log("System is ready for workflow steps."),
+                                    lambda: self._log(
+                                        "System is ready for workflow steps."
+                                    ),
                                 )
 
             threading.Thread(target=monitor_workflow, daemon=True).start()
@@ -817,8 +907,13 @@ class ControlPanel:
                 self.server_process.terminate()
                 self.server_process.wait(timeout=5)
             except Exception:
-                self.server_process.kill()
+                try:
+                    self.server_process.kill()
+                except Exception:
+                    pass
             self.server_process = None
+        # Also kill any orphaned process on port 8000
+        self._kill_port_8000()
 
     def _toggle_workflow(self) -> None:
         if self.workflow_process:
@@ -829,27 +924,76 @@ class ControlPanel:
     def _start_workflow(self) -> None:
         # Check if server is running first
         if not self._check_server_ready():
-            messagebox.showwarning(
-                "Server Not Running", "Start the system first."
-            )
+            messagebox.showwarning("Server Not Running", "Start the system first.")
             return
         self._start_workflow_after_server()
 
     def _stop_workflow(self) -> None:
         if self.workflow_process:
+            pid = self.workflow_process.pid
             try:
                 self.workflow_process.terminate()
-                self.workflow_process.wait(timeout=5)
+                self.workflow_process.wait(timeout=3)
             except Exception:
-                self.workflow_process.kill()
+                pass
+            # Force kill the process tree on Windows
+            self._kill_process_tree(pid)
             self.workflow_process = None
+        # Also kill any orphaned workflow processes
+        self._kill_workflow_processes()
+
+    def _kill_process_tree(self, pid: int) -> None:
+        """Kill a process and all its children on Windows."""
+        if sys.platform == "win32":
+            try:
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    capture_output=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            except Exception:
+                pass
+
+    def _kill_workflow_processes(self) -> None:
+        """Kill any Python processes running run_wechat_removal."""
+        if sys.platform == "win32":
+            try:
+                # Use WMIC to find Python processes with our script
+                result = subprocess.run(
+                    [
+                        "wmic",
+                        "process",
+                        "where",
+                        "name='python.exe'",
+                        "get",
+                        "processid,commandline",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                for line in result.stdout.splitlines():
+                    if "run_wechat_removal" in line:
+                        # Extract PID (last number in the line)
+                        parts = line.strip().split()
+                        for part in reversed(parts):
+                            if part.isdigit():
+                                try:
+                                    subprocess.run(
+                                        ["taskkill", "/F", "/T", "/PID", part],
+                                        capture_output=True,
+                                        creationflags=subprocess.CREATE_NO_WINDOW,
+                                    )
+                                except Exception:
+                                    pass
+                                break
+            except Exception:
+                pass
 
     def _run_all_steps(self) -> None:
         """Execute all workflow steps automatically in sequence."""
         if not self.workflow_process:
-            messagebox.showwarning(
-                "System Not Running", "Start the system first."
-            )
+            messagebox.showwarning("System Not Running", "Start the system first.")
             return
         self._stop_requested = False
         self._is_running = True
@@ -953,7 +1097,8 @@ class ControlPanel:
             f"[Run All] Step 3: Reading messages from {thread.name} ({idx + 1}/{len(self.state.unread_groups)})..."
         )
         self._request_agent_step(
-            "read_messages", {"thread_id": thread.thread_id, "thread_name": thread.name}
+            "read_messages",
+            {"thread_id": thread.thread_id, "thread_name": thread.name, "y": thread.y},
         )
         self._poll_agent_result(self._run_all_on_read_result)
 
@@ -1070,7 +1215,9 @@ class ControlPanel:
 
             if not all_removed:
                 failed_names = [
-                    r.get("sender_name") for r in removal_results if not r.get("success")
+                    r.get("sender_name")
+                    for r in removal_results
+                    if not r.get("success")
                 ]
                 self._log(f"  WARNING: Failed to remove: {', '.join(failed_names)}")
 
@@ -1143,7 +1290,12 @@ class ControlPanel:
                     "unread": True,
                     "is_group": True,
                 },
-                {"thread_id": "c1", "name": "Contact", "unread": False, "is_group": False},
+                {
+                    "thread_id": "c1",
+                    "name": "Contact",
+                    "unread": False,
+                    "is_group": False,
+                },
             ],
             ensure_ascii=False,
             indent=2,
@@ -1474,7 +1626,8 @@ class ControlPanel:
             f"[Group {idx + 1}/{len(self.state.unread_groups)}] Reading: {thread.name}"
         )
         self._request_agent_step(
-            "read_messages", {"thread_id": thread.thread_id, "thread_name": thread.name}
+            "read_messages",
+            {"thread_id": thread.thread_id, "thread_name": thread.name, "y": thread.y},
         )
         self._poll_agent_result(self._on_read_result)
 
@@ -1495,7 +1648,8 @@ class ControlPanel:
     def _run_extract(self) -> None:
         if not self.state.unread_groups:
             messagebox.showwarning(
-                "Missing Data", "Run 'Read Messages' first or load read results manually."
+                "Missing Data",
+                "Run 'Read Messages' first or load read results manually.",
             )
             return
         idx = self.state.current_thread_index
@@ -1621,7 +1775,9 @@ class ControlPanel:
 
             if not all_removed:
                 failed_names = [
-                    r.get("sender_name") for r in removal_results if not r.get("success")
+                    r.get("sender_name")
+                    for r in removal_results
+                    if not r.get("success")
                 ]
                 self._log(f"  WARNING: Failed to remove: {', '.join(failed_names)}")
 
