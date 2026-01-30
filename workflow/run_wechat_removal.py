@@ -34,19 +34,32 @@ for _pkg in [_VENDOR / "agent", _VENDOR / "computer", _VENDOR / "core"]:
     if str(_pkg) not in sys.path:
         sys.path.insert(0, str(_pkg))
 
-from modules.crop_utils import CHAT_LIST_REGION, CropRegion
+from modules.crop_utils import (
+    CHAT_LIST_REGION,
+    MEMBER_PANEL_REGION,
+    MEMBER_SELECT_REGION,
+    CropRegion,
+)
 from modules.group_classifier import classification_prompt, parse_classification
 from modules.human_confirmation import require_confirmation
 from modules.message_reader import message_reader_prompt, parse_reader_response
 from modules.removal_executor import (
+    find_minus_button_prompt,
+    parse_dialog_opened_response,
+    parse_minus_button_response,
+    parse_user_selection_response,
     removal_prompt,
     select_user_for_removal_prompt,
+    verify_member_dialog_opened_prompt,
     verify_panel_opened_prompt,
     verify_removal_prompt,
 )
 from modules.removal_precheck import build_removal_plan
 from modules.removal_verifier import parse_removal_response
-from modules.scaffolding_clicks import click_delete_confirm, click_three_dots
+from modules.scaffolding_clicks import (
+    click_delete_confirm,
+    click_three_dots,
+)
 from modules.suspicious_detector import extract_suspects
 from modules.task_types import GroupThread, RemovalPlan, RemovalResult, Suspect
 from modules.unread_scanner import filter_unread_groups
@@ -524,13 +537,14 @@ class StepModeRunner:
             sys.stdout.flush()
 
             # Scaffolded click using y-coordinate
-            # Convert from cropped image coords to screen coords
+            # click_y is in SCREEN PIXELS (already converted from normalized by parse_classification)
+            # Convert from CROP coords to SCREEN coords
             click_x, screen_y = CHAT_LIST_REGION.to_screen_coords(
-                CHAT_LIST_REGION.width // 2,  # Center x within crop region
-                click_y,  # Y from AI (relative to cropped image)
+                CHAT_LIST_REGION.width // 2,  # Center x within crop region (CROP)
+                click_y,  # Y in SCREEN pixels (from parse_classification)
             )
             print(
-                f"[StepModeRunner] AI y={click_y} -> screen coords ({click_x}, {screen_y})"
+                f"[StepModeRunner] CROP y={click_y} -> SCREEN coords ({click_x}, {screen_y})"
             )
             print(
                 f"[StepModeRunner] CHAT_LIST_REGION: x=({CHAT_LIST_REGION.x_start}, {CHAT_LIST_REGION.x_end}), y=({CHAT_LIST_REGION.y_start}, {CHAT_LIST_REGION.y_end})"
@@ -667,7 +681,7 @@ class StepModeRunner:
         is_first: bool,
         max_retries: int,
     ) -> Tuple[RemovalResult, List[Path]]:
-        """Remove a single suspect using scaffolding clicks + agent verification."""
+        """Remove a single suspect using scaffolding clicks + cropped vision queries."""
         all_screenshots: List[Path] = []
 
         for attempt in range(1, max_retries + 1):
@@ -682,32 +696,123 @@ class StepModeRunner:
                 print("[StepModeRunner] Scaffolding: clicking three dots")
                 await click_three_dots(self.computer, self.computer_settings)
 
-                text_output, screenshots = await session.run(
+                # Verify panel opened using cropped vision query (MEMBER_PANEL_REGION)
+                text_output, screenshots = await run_cropped_vision_query(
+                    self.computer,
+                    self.model,
                     verify_panel_opened_prompt(),
                     self.capture_dir,
                     f"verify_panel_{suspect.sender_id}",
+                    MEMBER_PANEL_REGION,
                 )
                 all_screenshots.extend(screenshots)
                 print(f"[StepModeRunner] Panel verification: {text_output[:100]}")
 
-            print(f"[StepModeRunner] Agent: selecting user {suspect.sender_name}")
-            text_output, screenshots = await session.run(
+                # Find minus button position using vision query (MEMBER_PANEL_REGION)
+                print("[StepModeRunner] Finding minus button position")
+                text_output, screenshots = await run_cropped_vision_query(
+                    self.computer,
+                    self.model,
+                    find_minus_button_prompt(),
+                    self.capture_dir,
+                    f"find_minus_{suspect.sender_id}",
+                    MEMBER_PANEL_REGION,
+                )
+                all_screenshots.extend(screenshots)
+                print(f"[StepModeRunner] Minus button response: {text_output[:100]}")
+
+                # Parse response to get click coordinates
+                minus_result = parse_minus_button_response(text_output)
+                if minus_result["button_found"]:
+                    # click_x, click_y are in NORMALIZED space (0-1000) from AI
+                    # Convert NORMALIZED → SCREEN for clicking
+                    click_x = minus_result["click_x"]  # NORMALIZED
+                    click_y = minus_result["click_y"]  # NORMALIZED
+                    screen_x, screen_y = MEMBER_PANEL_REGION.normalized_to_screen_coords(
+                        click_x, click_y
+                    )
+                    print(
+                        f"[StepModeRunner] Clicking minus button at NORMALIZED ({click_x}, {click_y}) "
+                        f"-> SCREEN ({screen_x}, {screen_y})"
+                    )
+                    await self.computer.interface.left_click(screen_x, screen_y)
+                    await asyncio.sleep(0.5)
+                else:
+                    print(
+                        f"[StepModeRunner] Minus button not found: {minus_result.get('reason', 'unknown')}"
+                    )
+                    # Continue to next attempt
+                    continue
+
+                # Verify member dialog opened using cropped vision query (MEMBER_SELECT_REGION)
+                text_output, screenshots = await run_cropped_vision_query(
+                    self.computer,
+                    self.model,
+                    verify_member_dialog_opened_prompt(),
+                    self.capture_dir,
+                    f"verify_dialog_{suspect.sender_id}",
+                    MEMBER_SELECT_REGION,
+                )
+                all_screenshots.extend(screenshots)
+                print(f"[StepModeRunner] Dialog verification: {text_output[:100]}")
+
+                dialog_result = parse_dialog_opened_response(text_output)
+                if not dialog_result["dialog_opened"]:
+                    print(
+                        f"[StepModeRunner] Dialog not opened: {dialog_result.get('reason', 'unknown')}"
+                    )
+                    # Continue to next attempt
+                    continue
+
+            # Find user position using cropped vision query (MEMBER_SELECT_REGION)
+            print(f"[StepModeRunner] Finding user {suspect.sender_name} position")
+            text_output, screenshots = await run_cropped_vision_query(
+                self.computer,
+                self.model,
                 select_user_for_removal_prompt(
                     suspect.sender_name, is_first=is_first_attempt
                 ),
                 self.capture_dir,
                 f"select_{suspect.sender_id}_attempt{attempt}",
+                MEMBER_SELECT_REGION,
             )
             all_screenshots.extend(screenshots)
             print(f"[StepModeRunner] User selection response: {text_output[:100]}")
 
+            # Parse response to get click coordinates
+            selection_result = parse_user_selection_response(text_output)
+            if selection_result["user_found"]:
+                # click_x, click_y are in NORMALIZED space (0-1000) from AI
+                # Convert NORMALIZED → SCREEN for clicking
+                click_x = selection_result["click_x"]  # NORMALIZED
+                click_y = selection_result["click_y"]  # NORMALIZED
+                screen_x, screen_y = MEMBER_SELECT_REGION.normalized_to_screen_coords(
+                    click_x, click_y
+                )
+                print(
+                    f"[StepModeRunner] Clicking user at NORMALIZED ({click_x}, {click_y}) "
+                    f"-> SCREEN ({screen_x}, {screen_y})"
+                )
+                await self.computer.interface.left_click(screen_x, screen_y)
+                await asyncio.sleep(0.5)
+            else:
+                print(
+                    f"[StepModeRunner] User not found: {selection_result.get('reason', 'unknown')}"
+                )
+                # Continue to next attempt
+                continue
+
             print("[StepModeRunner] Scaffolding: clicking delete button")
             await click_delete_confirm(self.computer, self.computer_settings)
 
-            text_output, screenshots = await session.run(
+            # Verify removal using cropped vision query (MEMBER_PANEL_REGION)
+            text_output, screenshots = await run_cropped_vision_query(
+                self.computer,
+                self.model,
                 verify_removal_prompt(suspect.sender_name),
                 self.capture_dir,
                 f"verify_removal_{suspect.sender_id}_attempt{attempt}",
+                MEMBER_PANEL_REGION,
             )
             all_screenshots.extend(screenshots)
 
@@ -1035,5 +1140,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
     main()

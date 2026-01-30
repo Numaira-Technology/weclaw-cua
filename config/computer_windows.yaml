@@ -10,11 +10,14 @@ screenshot_delay: 0.5
 screen_width: 2560
 screen_height: 1440
 
-# WeChat UI fixed button positions (in pixels)
-wechat_three_dots_x: 2524
+# WeChat UI fixed button positions (SCREEN COORDINATES - absolute pixels)
+# These are used directly for clicking, no conversion needed
+wechat_three_dots_x: 2525
 wechat_three_dots_y: 48
-wechat_delete_button_x: 1346
-wechat_delete_button_y: 924
+wechat_minus_button_x: 2525
+wechat_minus_button_y: 200
+wechat_delete_button_x: 1345
+wechat_delete_button_y: 920
 
 # Human-like mouse movement settings
 human_mouse:

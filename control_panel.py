@@ -553,6 +553,9 @@ class ControlPanel:
         self._kill_port_8000()
         # Final cleanup of any orphaned workflow processes
         self._kill_workflow_processes()
+        # Reset state on exit so next run starts fresh
+        self.state = PanelState()
+        self._save_state()
         self.root.destroy()
 
     def _kill_port_8000(self) -> None:

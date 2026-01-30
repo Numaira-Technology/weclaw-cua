@@ -6,6 +6,19 @@ The WeChat Removal Tool is an AI-powered agent that automates the detection and 
 
 ---
 
+## Table of Contents
+
+1. [Project Structure](#project-structure)
+2. [Execution Flow](#execution-flow)
+3. [Agent Vision System](#agent-vision-system)
+4. [Find-Click-Verify Workflow](#find-click-verify-workflow)
+5. [Coordinate Systems](#coordinate-systems)
+6. [Workflow Stages](#workflow-stages)
+7. [Configuration](#configuration)
+8. [Troubleshooting](#troubleshooting)
+
+---
+
 ## Project Structure
 
 ```
@@ -106,6 +119,306 @@ The WeChat Removal Tool is an AI-powered agent that automates the detection and 
 │  └─────────────────┘ └─────────────────┘ └─────────────────┘       │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Agent Vision System
+
+The agent uses a **hybrid approach** combining fixed-position clicks (scaffolding) with vision-based detection and verification. This provides reliability for known UI elements while maintaining flexibility for dynamic content.
+
+### Vision Query Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         VISION QUERY PIPELINE                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌───────────┐ │
+│  │  Screenshot  │───▶│    Crop      │───▶│   Vision     │───▶│   Parse   │ │
+│  │   (Full)     │    │   Region     │    │    LLM       │    │  Response │ │
+│  └──────────────┘    └──────────────┘    └──────────────┘    └───────────┘ │
+│        │                    │                   │                   │       │
+│        ▼                    ▼                   ▼                   ▼       │
+│   2560x1440px          Focused area       Claude/GPT-4o        JSON with   │
+│   full screen          for faster         analyzes image       coordinates │
+│                        upload                                   (0-1000)   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Crop Regions
+
+The system uses three predefined crop regions to focus vision queries on relevant UI areas:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        2560 x 1440 SCREEN                                    │
+│                                                                              │
+│  ┌────────┐                                                    ┌──────────┐ │
+│  │ CHAT   │                                                    │ MEMBER   │ │
+│  │ LIST   │                                                    │ PANEL    │ │
+│  │ REGION │              ┌─────────────────────┐               │ REGION   │ │
+│  │        │              │   MEMBER_SELECT     │               │          │ │
+│  │ 218x   │              │      REGION         │               │  260x    │ │
+│  │ 1440   │              │                     │               │  1440    │ │
+│  │        │              │     705 x 545       │               │          │ │
+│  │ x:58-  │              │                     │               │ x:2300-  │ │
+│  │   276  │              │   x:925-1630        │               │    2560  │ │
+│  │ y:0-   │              │   y:425-970         │               │ y:0-     │ │
+│  │   1440 │              │                     │               │    1440  │ │
+│  │        │              └─────────────────────┘               │          │ │
+│  │        │                                                    │          │ │
+│  │        │                                                    │          │ │
+│  └────────┘                                                    └──────────┘ │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Region Usage:
+├── CHAT_LIST_REGION (218x1440)    → Thread classification, clicking chats
+├── MEMBER_PANEL_REGION (260x1440) → Panel verification, removal verification
+└── MEMBER_SELECT_REGION (705x545) → Finding user checkboxes in removal dialog
+```
+
+---
+
+## Find-Click-Verify Workflow
+
+The core automation loop follows a **Find → Click → Verify** pattern for each action:
+
+### High-Level Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        FIND-CLICK-VERIFY LOOP                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│    ┌─────────┐         ┌─────────┐         ┌─────────┐                      │
+│    │  FIND   │────────▶│  CLICK  │────────▶│ VERIFY  │                      │
+│    └─────────┘         └─────────┘         └─────────┘                      │
+│         │                   │                   │                            │
+│         ▼                   ▼                   ▼                            │
+│   Vision query to      Execute click      Vision query to                   │
+│   locate element       at coordinates     confirm success                   │
+│                                                                              │
+│         │                   │                   │                            │
+│         ▼                   ▼                   ▼                            │
+│   ┌───────────┐       ┌───────────┐       ┌───────────┐                     │
+│   │ Cropped   │       │ Scaffolding│      │ Cropped   │                     │
+│   │ Screenshot│       │ (fixed) or │      │ Screenshot│                     │
+│   │ + Prompt  │       │ Vision-    │      │ + Verify  │                     │
+│   │           │       │ guided     │      │ Prompt    │                     │
+│   └───────────┘       └───────────┘       └───────────┘                     │
+│                                                                              │
+│                              │                                               │
+│                              ▼                                               │
+│                    ┌─────────────────┐                                      │
+│                    │  Success?       │                                      │
+│                    │                 │                                      │
+│                    │  Yes ──▶ Next   │                                      │
+│                    │  No  ──▶ Retry  │                                      │
+│                    └─────────────────┘                                      │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Detailed Removal Workflow
+
+The user removal process demonstrates the full find-click-verify pattern:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      USER REMOVAL WORKFLOW                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  STEP 1: Open Group Info Panel                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                                                                      │   │
+│  │  [SCAFFOLDING CLICK]              [VISION VERIFY]                   │   │
+│  │                                                                      │   │
+│  │  Click three dots (...)  ────────▶  Verify panel opened             │   │
+│  │  at fixed position                  using MEMBER_PANEL_REGION       │   │
+│  │  (2525, 48)                                                         │   │
+│  │                                                                      │   │
+│  │  Prompt: verify_panel_opened_prompt()                               │   │
+│  │  Response: {"panel_opened": true/false}                             │   │
+│  │                                                                      │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                              │
+│                              ▼                                              │
+│  STEP 2: Enter Removal Mode                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                                                                      │   │
+│  │  [VISION FIND]                       [VISION VERIFY]                │   │
+│  │                                                                      │   │
+│  │  Crop MEMBER_PANEL_REGION ──────────▶ AI returns coordinates ─────▶ │   │
+│  │  Send to LLM with prompt             in 0-1000 normalized           │   │
+│  │  "Find minus button"                 space                          │   │
+│  │                                                                      │   │
+│  │  Prompt: find_minus_button_prompt()                                 │   │
+│  │  Response: {"button_found": true, "click_x": 800, "click_y": 150}   │   │
+│  │                                                                      │   │
+│  │                    │                                                 │   │
+│  │                    ▼                                                 │   │
+│  │           Convert coordinates:                                       │   │
+│  │           NORMALIZED (0-1000) ──▶ SCREEN (pixels)                   │   │
+│  │           Using: MEMBER_PANEL_REGION.normalized_to_screen_coords()  │   │
+│  │                                                                      │   │
+│  │                    │                                                 │   │
+│  │                    ▼                                                 │   │
+│  │           Click at calculated screen position                        │   │
+│  │                                                                      │   │
+│  │                    │                                                 │   │
+│  │                    ▼                                                 │   │
+│  │           Verify dialog opened using MEMBER_SELECT_REGION           │   │
+│  │           Prompt: verify_member_dialog_opened_prompt()              │   │
+│  │           Response: {"dialog_opened": true/false}                   │   │
+│  │                                                                      │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                              │
+│                              ▼                                              │
+│  STEP 3: Find and Select User                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                                                                      │   │
+│  │  [VISION FIND]                    [VISION-GUIDED CLICK]             │   │
+│  │                                                                      │   │
+│  │  Crop MEMBER_SELECT_REGION ──────▶ AI returns coordinates ────────▶ │   │
+│  │  Send to LLM with prompt          in 0-1000 normalized              │   │
+│  │  "Find user checkbox"             space                              │   │
+│  │                                                                      │   │
+│  │  Prompt: select_user_for_removal_prompt(user_name)                  │   │
+│  │  Response: {"user_found": true, "click_x": 100, "click_y": 300}     │   │
+│  │                                                                      │   │
+│  │                    │                                                 │   │
+│  │                    ▼                                                 │   │
+│  │           Convert coordinates:                                       │   │
+│  │           NORMALIZED (0-1000) ──▶ SCREEN (pixels)                   │   │
+│  │           Using: MEMBER_SELECT_REGION.normalized_to_screen_coords() │   │
+│  │                                                                      │   │
+│  │                    │                                                 │   │
+│  │                    ▼                                                 │   │
+│  │           Click at calculated screen position                        │   │
+│  │                                                                      │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                              │
+│                              ▼                                              │
+│  STEP 4: Confirm Removal                                                    │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                                                                      │   │
+│  │  [SCAFFOLDING CLICK]              [VISION VERIFY]                   │   │
+│  │                                                                      │   │
+│  │  Click delete button  ───────────▶ Verify user removed              │   │
+│  │  at fixed position                 using MEMBER_PANEL_REGION        │   │
+│  │  (1345, 920)                                                        │   │
+│  │                                                                      │   │
+│  │  Prompt: verify_removal_prompt(user_name)                           │   │
+│  │  Response: {"user_removed": true/false}                             │   │
+│  │                                                                      │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                              │
+│                              ▼                                              │
+│                    ┌─────────────────┐                                     │
+│                    │ user_removed?   │                                     │
+│                    │                 │                                     │
+│                    │ Yes ──▶ Success │                                     │
+│                    │ No  ──▶ Retry   │                                     │
+│                    └─────────────────┘                                     │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Click Types
+
+The system uses two types of clicks:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           CLICK TYPES                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────────────────────┐    ┌─────────────────────────────────────┐│
+│  │    SCAFFOLDING CLICKS       │    │       VISION-GUIDED CLICKS          ││
+│  │    (Fixed Positions)        │    │       (Dynamic Positions)           ││
+│  ├─────────────────────────────┤    ├─────────────────────────────────────┤│
+│  │                             │    │                                      ││
+│  │  Used for:                  │    │  Used for:                          ││
+│  │  • Three dots button (...)  │    │  • Minus button (-) in member panel ││
+│  │  • Delete button (移出)     │    │  • User checkboxes in member list   ││
+│  │                             │    │  • Chat threads in sidebar          ││
+│  │                             │    │  • Any dynamic UI element           ││
+│  │  Coordinates:               │    │                                      ││
+│  │  • Hardcoded in config      │    │  Coordinates:                       ││
+│  │  • SCREEN space (pixels)    │    │  • AI returns 0-1000 normalized     ││
+│  │                             │    │  • Converted to SCREEN pixels       ││
+│  │  Reliability:               │    │                                      ││
+│  │  • 100% (position fixed)    │    │  Reliability:                       ││
+│  │  • Fast (no vision query)   │    │  • Depends on AI accuracy           ││
+│  │                             │    │  • Retry logic on failure           ││
+│  │  Source:                    │    │                                      ││
+│  │  • scaffolding_clicks.py    │    │  Source:                            ││
+│  │  • computer_windows.yaml    │    │  • removal_executor.py prompts      ││
+│  │                             │    │  • crop_utils.py conversion         ││
+│  └─────────────────────────────┘    └─────────────────────────────────────┘│
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Coordinate Systems
+
+The system uses three coordinate systems that must be carefully converted:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        COORDINATE SYSTEMS                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  1. SCREEN COORDINATES (Absolute Pixels)                                    │
+│     ┌───────────────────────────────────────────────────────────────────┐  │
+│     │  • Used for: Clicking on screen                                    │  │
+│     │  • Range: (0,0) to (2560,1440) for 2K display                     │  │
+│     │  • Origin: Top-left corner of screen                              │  │
+│     │  • Example: Three dots button at (2525, 48)                       │  │
+│     └───────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  2. CROP COORDINATES (Pixels within cropped image)                          │
+│     ┌───────────────────────────────────────────────────────────────────┐  │
+│     │  • Used for: Internal coordinate math                              │  │
+│     │  • Range: (0,0) to (width, height) of crop region                 │  │
+│     │  • Origin: Top-left corner of cropped image                       │  │
+│     │  • Example: MEMBER_SELECT_REGION is 705x545 pixels                │  │
+│     └───────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  3. NORMALIZED COORDINATES (0-1000 scale)                                   │
+│     ┌───────────────────────────────────────────────────────────────────┐  │
+│     │  • Used for: AI vision responses                                   │  │
+│     │  • Range: (0,0) to (1000,1000) regardless of image size           │  │
+│     │  • Origin: Top-left = (0,0), Bottom-right = (1000,1000)           │  │
+│     │  • Example: Center of image = (500, 500)                          │  │
+│     └───────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  CONVERSION FLOW:                                                           │
+│                                                                              │
+│     AI Response          crop_utils.py           Computer Interface         │
+│    ┌───────────┐       ┌─────────────────┐       ┌───────────────┐         │
+│    │ NORMALIZED│──────▶│ normalized_to_  │──────▶│    SCREEN     │         │
+│    │ (0-1000)  │       │ screen_coords() │       │   (pixels)    │         │
+│    └───────────┘       └─────────────────┘       └───────────────┘         │
+│                                                                              │
+│  Example conversion for MEMBER_SELECT_REGION (925-1630, 425-970):          │
+│                                                                              │
+│    NORMALIZED (500, 500)                                                    │
+│         │                                                                   │
+│         ▼                                                                   │
+│    CROP: x = 500/1000 * 705 = 352                                          │
+│          y = 500/1000 * 545 = 272                                          │
+│         │                                                                   │
+│         ▼                                                                   │
+│    SCREEN: x = 352 + 925 = 1277                                            │
+│            y = 272 + 425 = 697                                             │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -449,3 +762,313 @@ This enables independent testing of each step without running previous steps.
 - State is persisted to `artifacts/panel_state.json`
 - "Reset State" clears all workflow state
 - "Export Report" saves results to `artifacts/logs/panel_report.json`
+
+---
+
+## Complete Workflow Diagram
+
+The following diagram shows the entire workflow from start to finish:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                           COMPLETE WORKFLOW DIAGRAM                                  │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                      │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
+│  │                         INITIALIZATION                                       │   │
+│  │                                                                              │   │
+│  │   start.ps1 ──▶ Load .env ──▶ Launch control_panel.py                       │   │
+│  │                                     │                                        │   │
+│  │                     ┌───────────────┴───────────────┐                       │   │
+│  │                     ▼                               ▼                        │   │
+│  │            [Start Server]                  [Start Workflow]                  │   │
+│  │                     │                               │                        │   │
+│  │                     ▼                               ▼                        │   │
+│  │         computer-server:8000              workflow backend                   │   │
+│  │         (screenshots, clicks)             (step-mode, LLM)                   │   │
+│  │                                                                              │   │
+│  └─────────────────────────────────────────────────────────────────────────────┘   │
+│                                      │                                              │
+│                                      ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
+│  │                    STAGE 1: CLASSIFY THREADS                                 │   │
+│  │                                                                              │   │
+│  │   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                  │   │
+│  │   │ Crop chat    │───▶│ Send to LLM  │───▶│ Parse JSON   │                  │   │
+│  │   │ list region  │    │ with prompt  │    │ response     │                  │   │
+│  │   │ (218x1440)   │    │              │    │              │                  │   │
+│  │   └──────────────┘    └──────────────┘    └──────────────┘                  │   │
+│  │                                                  │                           │   │
+│  │   Output: List of threads with:                  ▼                           │   │
+│  │   • name, y-coordinate, is_group, unread    [GroupThread]                   │   │
+│  │                                                                              │   │
+│  └─────────────────────────────────────────────────────────────────────────────┘   │
+│                                      │                                              │
+│                                      ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
+│  │                    STAGE 2: FILTER UNREAD                                    │   │
+│  │                                                                              │   │
+│  │   All threads ──▶ Filter(is_group=True, unread=True) ──▶ Unread groups     │   │
+│  │                                                                              │   │
+│  └─────────────────────────────────────────────────────────────────────────────┘   │
+│                                      │                                              │
+│                                      ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
+│  │                    PER-GROUP PROCESSING LOOP                                 │   │
+│  │                                                                              │   │
+│  │   ┌─────────────────────────────────────────────────────────────────────┐   │   │
+│  │   │  For each unread group:                                             │   │   │
+│  │   │                                                                      │   │   │
+│  │   │  ┌───────────────────────────────────────────────────────────────┐  │   │   │
+│  │   │  │ STAGE 3: READ MESSAGES                                        │  │   │   │
+│  │   │  │                                                                │  │   │   │
+│  │   │  │  1. Click chat at y-coordinate (scaffolding)                  │  │   │   │
+│  │   │  │  2. Take full screenshot                                      │  │   │   │
+│  │   │  │  3. Send to LLM: "Read messages, identify spam"               │  │   │   │
+│  │   │  │  4. Parse response for suspects                               │  │   │   │
+│  │   │  │                                                                │  │   │   │
+│  │   │  └───────────────────────────────────────────────────────────────┘  │   │   │
+│  │   │                              │                                       │   │   │
+│  │   │                              ▼                                       │   │   │
+│  │   │  ┌───────────────────────────────────────────────────────────────┐  │   │   │
+│  │   │  │ STAGE 4: EXTRACT SUSPECTS                                     │  │   │   │
+│  │   │  │                                                                │  │   │   │
+│  │   │  │  Parse AI response ──▶ List of Suspect objects                │  │   │   │
+│  │   │  │  • sender_name, sender_id, evidence_text                      │  │   │   │
+│  │   │  │                                                                │  │   │   │
+│  │   │  └───────────────────────────────────────────────────────────────┘  │   │   │
+│  │   │                              │                                       │   │   │
+│  │   │                              ▼                                       │   │   │
+│  │   │  ┌───────────────────────────────────────────────────────────────┐  │   │   │
+│  │   │  │ STAGE 5: BUILD PLAN                                           │  │   │   │
+│  │   │  │                                                                │  │   │   │
+│  │   │  │  Suspects ──▶ RemovalPlan (requires human confirmation)       │  │   │   │
+│  │   │  │                                                                │  │   │   │
+│  │   │  └───────────────────────────────────────────────────────────────┘  │   │   │
+│  │   │                              │                                       │   │   │
+│  │   │                              ▼                                       │   │   │
+│  │   │  ┌───────────────────────────────────────────────────────────────┐  │   │   │
+│  │   │  │ STAGE 6: EXECUTE REMOVAL (Find-Click-Verify Loop)             │  │   │   │
+│  │   │  │                                                                │  │   │   │
+│  │   │  │  For each suspect in plan:                                    │  │   │   │
+│  │   │  │                                                                │  │   │   │
+│  │   │  │    ┌─────────────────────────────────────────────────────┐   │  │   │   │
+│  │   │  │    │ STEP 1: Open Panel (first suspect only)             │   │  │   │   │
+│  │   │  │    │                                                      │   │  │   │   │
+│  │   │  │    │  [CLICK] Three dots at (2525, 48)                   │   │  │   │   │
+│  │   │  │    │  [VERIFY] Crop MEMBER_PANEL_REGION                  │   │  │   │   │
+│  │   │  │    │           LLM: "Is panel open?"                     │   │  │   │   │
+│  │   │  │    │           Response: {"panel_opened": true}          │   │  │   │   │
+│  │   │  │    │                                                      │   │  │   │   │
+│  │   │  │    └─────────────────────────────────────────────────────┘   │  │   │   │
+│  │   │  │                          │                                    │  │   │   │
+│  │   │  │                          ▼                                    │  │   │   │
+│  │   │  │    ┌─────────────────────────────────────────────────────┐   │  │   │   │
+│  │   │  │    │ STEP 2: Enter Removal Mode (first suspect only)     │   │  │   │   │
+│  │   │  │    │                                                      │   │  │   │   │
+│  │   │  │    │  [CLICK] Minus button at (2525, 200)                │   │  │   │   │
+│  │   │  │    │                                                      │   │  │   │   │
+│  │   │  │    └─────────────────────────────────────────────────────┘   │  │   │   │
+│  │   │  │                          │                                    │  │   │   │
+│  │   │  │                          ▼                                    │  │   │   │
+│  │   │  │    ┌─────────────────────────────────────────────────────┐   │  │   │   │
+│  │   │  │    │ STEP 3: Find User Checkbox                          │   │  │   │   │
+│  │   │  │    │                                                      │   │  │   │   │
+│  │   │  │    │  [FIND] Crop MEMBER_SELECT_REGION (705x545)         │   │  │   │   │
+│  │   │  │    │         LLM: "Find checkbox for 'username'"         │   │  │   │   │
+│  │   │  │    │         Response: {"click_x": 100, "click_y": 300}  │   │  │   │   │
+│  │   │  │    │                                                      │   │  │   │   │
+│  │   │  │    │  [CONVERT] Normalized → Screen coordinates          │   │  │   │   │
+│  │   │  │    │            (100, 300) → (995, 588)                  │   │  │   │   │
+│  │   │  │    │                                                      │   │  │   │   │
+│  │   │  │    │  [CLICK] User checkbox at calculated position       │   │  │   │   │
+│  │   │  │    │                                                      │   │  │   │   │
+│  │   │  │    └─────────────────────────────────────────────────────┘   │  │   │   │
+│  │   │  │                          │                                    │  │   │   │
+│  │   │  │                          ▼                                    │  │   │   │
+│  │   │  │    ┌─────────────────────────────────────────────────────┐   │  │   │   │
+│  │   │  │    │ STEP 4: Confirm Removal                             │   │  │   │   │
+│  │   │  │    │                                                      │   │  │   │   │
+│  │   │  │    │  [CLICK] Delete button at (1345, 920)               │   │  │   │   │
+│  │   │  │    │  [VERIFY] Crop MEMBER_PANEL_REGION                  │   │  │   │   │
+│  │   │  │    │           LLM: "Is user removed?"                   │   │  │   │   │
+│  │   │  │    │           Response: {"user_removed": true}          │   │  │   │   │
+│  │   │  │    │                                                      │   │  │   │   │
+│  │   │  │    │  If failed: Retry from STEP 3 (max 2 retries)       │   │  │   │   │
+│  │   │  │    │                                                      │   │  │   │   │
+│  │   │  │    └─────────────────────────────────────────────────────┘   │  │   │   │
+│  │   │  │                                                                │  │   │   │
+│  │   │  │  Next suspect ──▶ Loop back to STEP 3                         │  │   │   │
+│  │   │  │                                                                │  │   │   │
+│  │   │  └───────────────────────────────────────────────────────────────┘  │   │   │
+│  │   │                                                                      │   │   │
+│  │   │  ──▶ Next group (loop back to STAGE 3)                              │   │   │
+│  │   │                                                                      │   │   │
+│  │   └─────────────────────────────────────────────────────────────────────┘   │   │
+│  │                                                                              │   │
+│  └─────────────────────────────────────────────────────────────────────────────┘   │
+│                                      │                                              │
+│                                      ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
+│  │                         EXPORT REPORT                                        │   │
+│  │                                                                              │   │
+│  │   Save to artifacts/logs/report.json:                                       │   │
+│  │   • All threads classified                                                   │   │
+│  │   • All suspects found                                                       │   │
+│  │   • Removal results per suspect                                              │   │
+│  │                                                                              │   │
+│  └─────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                      │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Module Interaction Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                           MODULE INTERACTIONS                                        │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                      │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
+│  │                          CONTROL LAYER                                       │   │
+│  │                                                                              │   │
+│  │  control_panel.py ◄──────────────────────────────────────────────────────┐  │   │
+│  │       │                                                                   │  │   │
+│  │       │ Step requests (.step_request)                                    │  │   │
+│  │       ▼                                                                   │  │   │
+│  │  workflow/run_wechat_removal.py                                          │  │   │
+│  │       │                                                                   │  │   │
+│  │       │ StepModeRunner                                                   │  │   │
+│  │       │    ├── handle_classify()                                         │  │   │
+│  │       │    ├── handle_read_messages()                                    │  │   │
+│  │       │    └── handle_remove()                                           │  │   │
+│  │       │                                                                   │  │   │
+│  │       │ Step results (.step_result, .step_status)                        │  │   │
+│  │       └──────────────────────────────────────────────────────────────────┘  │   │
+│  │                                                                              │   │
+│  └─────────────────────────────────────────────────────────────────────────────┘   │
+│                                      │                                              │
+│                                      ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
+│  │                          MODULES LAYER                                       │   │
+│  │                                                                              │   │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────┐  │   │
+│  │  │ group_classifier │  │ message_reader   │  │ removal_executor         │  │   │
+│  │  │                  │  │                  │  │                          │  │   │
+│  │  │ • Prompt builder │  │ • Prompt builder │  │ • Prompt builders:       │  │   │
+│  │  │ • Response parser│  │ • Response parser│  │   - verify_panel_opened  │  │   │
+│  │  │                  │  │                  │  │   - select_user_for_     │  │   │
+│  │  │                  │  │                  │  │     removal              │  │   │
+│  │  │                  │  │                  │  │   - verify_removal       │  │   │
+│  │  │                  │  │                  │  │ • Response parsers       │  │   │
+│  │  └──────────────────┘  └──────────────────┘  └──────────────────────────┘  │   │
+│  │                                                                              │   │
+│  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────┐  │   │
+│  │  │ crop_utils       │  │ scaffolding_     │  │ task_types              │  │   │
+│  │  │                  │  │ clicks           │  │                          │  │   │
+│  │  │ • CropRegion     │  │                  │  │ • GroupThread           │  │   │
+│  │  │ • CHAT_LIST_     │  │ • click_three_   │  │ • Suspect               │  │   │
+│  │  │   REGION         │  │   dots()         │  │ • RemovalPlan           │  │   │
+│  │  │ • MEMBER_PANEL_  │  │ • click_minus_   │  │ • RemovalResult         │  │   │
+│  │  │   REGION         │  │   button()       │  │                          │  │   │
+│  │  │ • MEMBER_SELECT_ │  │ • click_delete_  │  │                          │  │   │
+│  │  │   REGION         │  │   confirm()      │  │                          │  │   │
+│  │  │ • normalized_to_ │  │                  │  │                          │  │   │
+│  │  │   screen_coords()│  │                  │  │                          │  │   │
+│  │  └──────────────────┘  └──────────────────┘  └──────────────────────────┘  │   │
+│  │                                                                              │   │
+│  └─────────────────────────────────────────────────────────────────────────────┘   │
+│                                      │                                              │
+│                                      ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
+│  │                          RUNTIME LAYER                                       │   │
+│  │                                                                              │   │
+│  │  ┌──────────────────────────┐    ┌──────────────────────────────────────┐  │   │
+│  │  │ computer_session.py      │    │ model_session.py                     │  │   │
+│  │  │                          │    │                                      │  │   │
+│  │  │ • load_computer_settings │    │ • load_model_settings               │  │   │
+│  │  │ • build_computer()       │    │ • build_agent()                     │  │   │
+│  │  │ • ComputerSettings       │    │ • ModelSettings                     │  │   │
+│  │  │   (button positions)     │    │   (LLM config)                      │  │   │
+│  │  │                          │    │                                      │  │   │
+│  │  └──────────────────────────┘    └──────────────────────────────────────┘  │   │
+│  │                                                                              │   │
+│  └─────────────────────────────────────────────────────────────────────────────┘   │
+│                                      │                                              │
+│                                      ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
+│  │                          VENDOR LAYER (CUA)                                  │   │
+│  │                                                                              │   │
+│  │  ┌────────────────┐  ┌────────────────┐  ┌────────────────────────────────┐│   │
+│  │  │ vendor/agent   │  │ vendor/computer│  │ vendor/computer-server        ││   │
+│  │  │                │  │                │  │                                ││   │
+│  │  │ ComputerAgent  │  │ Computer       │  │ HTTP API (port 8000)          ││   │
+│  │  │ AgentSession   │  │ interface:     │  │ • screenshot()                ││   │
+│  │  │                │  │ • screenshot() │  │ • left_click(x, y)            ││   │
+│  │  │                │  │ • left_click() │  │ • type()                      ││   │
+│  │  │                │  │ • type()       │  │                                ││   │
+│  │  └────────────────┘  └────────────────┘  └────────────────────────────────┘│   │
+│  │                                                                              │   │
+│  └─────────────────────────────────────────────────────────────────────────────┘   │
+│                                      │                                              │
+│                                      ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐   │
+│  │                          EXTERNAL SERVICES                                   │   │
+│  │                                                                              │   │
+│  │  ┌────────────────────────────┐    ┌────────────────────────────────────┐  │   │
+│  │  │ LLM Provider (OpenRouter)  │    │ WeChat Desktop Application         │  │   │
+│  │  │                            │    │                                    │  │   │
+│  │  │ • Claude Sonnet 4          │    │ • Running on host machine          │  │   │
+│  │  │ • GPT-4o                   │    │ • Logged in with groups            │  │   │
+│  │  │ • Gemini                   │    │ • Visible on screen                │  │   │
+│  │  │                            │    │                                    │  │   │
+│  │  └────────────────────────────┘    └────────────────────────────────────┘  │   │
+│  │                                                                              │   │
+│  └─────────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                      │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Vision Prompt Examples
+
+### Thread Classification Prompt
+
+```
+这是微信会话列表的裁剪截图（宽218像素，高1440像素）。
+分析截图中可见的每个会话，从上到下依次列出。
+使用头像图标区分群聊（多人头像/九宫格）与单聊（单人头像）。
+
+Response format:
+{"threads": [{"name": "群名", "y": 73, "is_group": true, "unread": true}, ...]}
+```
+
+### User Selection Prompt
+
+```
+这是成员选择对话框的裁剪截图（宽705像素，高545像素）。
+任务：找到用户「代写论文」的灰色圆形选择框位置
+
+坐标说明：
+- 使用0-1000归一化坐标系
+- x=0表示截图最左边，x=1000表示最右边
+- y=0表示截图最上边，y=1000表示最下边
+
+Response format:
+{"user_found": true, "user_name": "代写论文", "click_x": 100, "click_y": 300}
+```
+
+### Removal Verification Prompt
+
+```
+这是屏幕右侧边缘的裁剪截图（宽260像素，高1440像素）。
+刚才已点击了移出按钮。
+
+请验证：用户「代写论文」是否已从成员列表中移除？
+
+Response format:
+{"user_removed": true, "user_name": "代写论文"}
+```

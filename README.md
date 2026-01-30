@@ -1,47 +1,64 @@
 # WeChat Removal Tool
 
-An AI-powered agent that automates the detection and removal of spam/scam users from WeChat groups. Built on the [CUA (Computer Use Agents)](https://github.com/trycua/cua) platform and runs inside a Windows Sandbox for isolation.
+An AI-powered agent that automates the detection and removal of spam/scam users from WeChat groups. Built on the [CUA (Computer Use Agents)](https://github.com/trycua/cua) platform and runs directly on the host desktop.
 
 ## Features
 
 - Automated spam/scam user detection in WeChat group chats
 - Human-in-the-loop confirmation before removal
-- Runs in isolated Windows Sandbox environment
-- Supports multiple LLM providers via OpenRouter
+- Hybrid automation: fixed-position clicks + vision-guided detection
+- Supports multiple LLM providers via OpenRouter (Claude, GPT-4o, Gemini)
+- Visual control panel for step-by-step workflow management
+
+## How It Works
+
+The agent uses a **Find-Click-Verify** pattern combining:
+
+1. **Scaffolding Clicks**: Fixed-position clicks for known UI elements (menu buttons)
+2. **Vision Queries**: Cropped screenshots sent to LLM for dynamic element detection
+3. **Verification**: Vision-based confirmation after each action
+
+```
+┌─────────┐         ┌─────────┐         ┌─────────┐
+│  FIND   │────────▶│  CLICK  │────────▶│ VERIFY  │
+└─────────┘         └─────────┘         └─────────┘
+     │                   │                   │
+     ▼                   ▼                   ▼
+Vision query to     Execute click      Vision query to
+locate element      at coordinates     confirm success
+```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed workflow diagrams.
 
 ## Prerequisites
 
-- Windows 10/11 Pro (with Windows Sandbox enabled)
-- Python 3.12+
+- Windows 10/11 Pro
+- Python 3.11+ (3.12 recommended)
 - OpenRouter API key (or other supported LLM provider)
 
 ## Quick Start
 
-1. **Enable Windows Sandbox** (if not already enabled):
-   ```powershell
-   Enable-WindowsOptionalFeature -FeatureName "Containers-DisposableClientVM" -All -Online
+1. **Set your API key** in `.env` file:
+   ```
+   OPENROUTER_API_KEY=sk-or-v1-...
    ```
 
-2. **Set your API key**:
-   ```powershell
-   $env:OPENROUTER_API_KEY = "sk-or-v1-..."
-   ```
-
-3. **Install dependencies**:
+2. **Install dependencies**:
    ```bash
-   pip install httpx aiohttp pydantic litellm pywinsandbox pillow rich
+   pip install httpx aiohttp pydantic litellm pillow
    ```
 
-4. **Run the workflow**:
+3. **Launch the Control Panel**:
    ```bash
-   python -m workflow.run_wechat_removal
+   # Double-click start.bat or run:
+   .\start.ps1
    ```
 
-5. **Follow the prompts**:
-   - Wait for the sandbox to start
-   - Install WeChat from the shared folder (`Desktop/cua/WeChatWin_4.1.6.exe`)
-   - Log in and wait for messages to sync
-   - Type `ready` to start the automated workflow
+4. **Start the workflow**:
+   - Click "Start Server" to launch the computer-server
+   - Click "Start Workflow" to launch the workflow backend
+   - Make sure WeChat is open and visible on screen
+   - Click through workflow steps: Classify → Filter → Read → Extract → Plan → Remove
 
 ## Project Structure
 
@@ -114,7 +131,12 @@ Results are saved to `artifacts/logs/report.json`:
 
 ## Documentation
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
+- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Complete architecture documentation including:
+  - Agent vision system and crop regions
+  - Find-Click-Verify workflow diagrams
+  - Coordinate system conversions
+  - Module interaction diagrams
+  - Vision prompt examples
 
 ## Upstream Reference
 

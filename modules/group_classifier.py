@@ -22,15 +22,26 @@ from modules.task_types import GroupThread
 
 
 def classification_prompt() -> str:
+    """Build prompt for classifying WeChat threads.
+
+    Coordinate system: AI returns y in 0-1000 NORMALIZED space.
+    - 0 = top of cropped image
+    - 1000 = bottom of cropped image
+    - Cropped image is 218x1440 pixels (CHAT_LIST_REGION)
+
+    Reference (normalized coords):
+    - First chat center: y ≈ 73 (screen ~105px / 1440px * 1000)
+    - Chat spacing: ~49 (screen ~70px / 1440px * 1000)
+    """
     return (
         "这是微信会话列表的裁剪截图（宽218像素，高1440像素，仅显示左侧聊天列表栏）。"
         "分析截图中可见的每个会话，从上到下依次列出。"
         "使用头像图标区分群聊（多人头像/九宫格）与单聊（单人头像）。"
         "记录每个会话的未读状态（是否有红色未读消息标记）。"
         "对于每个会话，估算其头像中心点的Y坐标（0-1000归一化值，0=顶部，1000=底部）。"
-        "提示：第一个会话的头像中心大约在y=97，每个会话间隔约35。"
+        "提示：第一个会话的头像中心大约在y=73，每个会话间隔约49。"
         "直接输出JSON格式结果。"
-        'JSON格式：{"threads": [{"name": "会话名称", "y": 97, "is_group": true/false, "unread": true/false}, ...]}'
+        'JSON格式：{"threads": [{"name": "会话名称", "y": 73, "is_group": true/false, "unread": true/false}, ...]}'
         "只输出JSON，不要输出其他文字。"
     )
 
@@ -38,11 +49,18 @@ def classification_prompt() -> str:
 def parse_classification(
     text_output: str, image_height: int = 1440
 ) -> List[GroupThread]:
-    """Parse classification output and convert normalized y to pixels.
+    """Parse classification output and convert normalized y to pixel coords.
+
+    Coordinate conversion:
+    - Input: y in 0-1000 NORMALIZED space (from AI)
+    - Output: y in SCREEN PIXELS (for clicking)
 
     Args:
         text_output: JSON string from AI with y in 0-1000 normalized space
         image_height: Height of the cropped image in pixels (default 1440)
+
+    Example:
+        AI returns y=73 (normalized) → pixel_y = 73/1000 * 1440 = 105 (screen)
     """
     text = text_output.strip()
     if text.startswith("```"):

@@ -36,6 +36,12 @@ from computer import Computer  # type: ignore  # noqa: E402
 
 @dataclass
 class ComputerSettings:
+    """Computer and WeChat UI configuration.
+
+    All wechat_* position fields are in SCREEN COORDINATES (absolute pixels).
+    These are used directly for clicking without any conversion.
+    """
+
     use_host_computer_server: bool
     os_type: str
     api_port: int
@@ -43,10 +49,11 @@ class ComputerSettings:
     timeout: int
     telemetry_enabled: bool
     screenshot_delay: float
-    screen_width: int
-    screen_height: int
-    wechat_three_dots: Tuple[int, int]
-    wechat_delete_button: Tuple[int, int]
+    screen_width: int  # SCREEN: display width in pixels (e.g., 2560)
+    screen_height: int  # SCREEN: display height in pixels (e.g., 1440)
+    wechat_three_dots: Tuple[int, int]  # SCREEN: (x, y) for three dots button
+    wechat_minus_button: Tuple[int, int]  # SCREEN: (x, y) for minus button
+    wechat_delete_button: Tuple[int, int]  # SCREEN: (x, y) for delete/移出 button
 
 
 def _parse_simple_yaml(path: Path) -> Dict[str, str]:
@@ -87,6 +94,10 @@ def load_computer_settings(path: Path) -> ComputerSettings:
         wechat_three_dots=(
             int(data.get("wechat_three_dots_x", 2524)),
             int(data.get("wechat_three_dots_y", 48)),
+        ),
+        wechat_minus_button=(
+            int(data.get("wechat_minus_button_x", 2524)),
+            int(data.get("wechat_minus_button_y", 200)),
         ),
         wechat_delete_button=(
             int(data.get("wechat_delete_button_x", 1346)),
