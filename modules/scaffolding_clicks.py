@@ -38,7 +38,7 @@ async def click_three_dots(computer, settings: "ComputerSettings") -> None:
     """
     x, y = settings.wechat_three_dots  # SCREEN coordinates
     print(f"[scaffolding] Clicking three dots at SCREEN ({x}, {y})")
-    await computer.interface.left_click(x, y)
+    await computer.interface.left_c"""  """lick(x, y)
     await asyncio.sleep(0.5)
 
 

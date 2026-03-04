@@ -60,6 +60,7 @@ from modules.scaffolding_clicks import (
     click_delete_confirm,
     click_three_dots,
 )
+from modules.scroll_actions import scroll_chat_list_down
 from modules.suspicious_detector import extract_suspects
 from modules.task_types import GroupThread, RemovalPlan, RemovalResult, Suspect
 from modules.unread_scanner import filter_unread_groups
@@ -490,6 +491,17 @@ class StepModeRunner:
         print("[StepModeRunner] Clearing request file")
         self.request_file.unlink(missing_ok=True)
 
+    async def handle_scroll_chat_list(self, params: dict) -> None:
+        """Scroll the left chat list panel down by one viewport."""
+        clicks = params.get(
+            "clicks", self.computer_settings.scroll_chat_list_clicks_per_scroll
+        )
+        print(f"[StepModeRunner] Scrolling chat list down by {clicks} clicks")
+        sys.stdout.flush()
+        await scroll_chat_list_down(self.computer, clicks)
+        self._write_result({"text": f"Scrolled chat list down by {clicks} clicks"})
+        self._write_status("complete")
+
     async def handle_classify(self, params: dict) -> None:
         import time
 
@@ -520,6 +532,8 @@ class StepModeRunner:
         self._write_status("complete")
 
     async def handle_read_messages(self, params: dict) -> None:
+        from workflow.chat_scroll_reader import read_messages_with_scroll
+
         thread_id = params.get("thread_id", "")
         thread_name = params.get("thread_name", "")
         thread_y = params.get("y", 0)
@@ -553,9 +567,9 @@ class StepModeRunner:
             await self.computer.interface.left_click(click_x, screen_y)
             await asyncio.sleep(0.5)
 
-            # Vision query with verification
+            # Single verification query to confirm the correct chat is open
             prompt = message_reader_prompt(thread_name, thread_id)
-            print(f"[StepModeRunner] Prompt length: {len(prompt)} chars")
+            print(f"[StepModeRunner] Verification prompt length: {len(prompt)} chars")
             sys.stdout.flush()
             text_output, screenshots = await run_vision_query(
                 self.computer,
@@ -565,20 +579,48 @@ class StepModeRunner:
                 f"reader_{thread_id}_attempt{attempt}",
             )
             all_screenshots.extend(screenshots)
-            print(f"[StepModeRunner] Vision query returned: {len(text_output)} chars")
+            print(f"[StepModeRunner] Verification query returned: {len(text_output)} chars")
 
-            # Parse response
             result = parse_reader_response(text_output)
 
             if result["success"]:
                 print(
-                    f"[StepModeRunner] Chat verified, found {len(result.get('suspects', []))} suspect(s)"
+                    f"[StepModeRunner] Chat verified — starting scroll read for '{thread_name}'"
+                )
+                # Chat is confirmed open; run multi-pass scroll reader
+                scroll_suspects, scroll_screenshots = await read_messages_with_scroll(
+                    self.computer,
+                    self.model,
+                    thread_name,
+                    thread_id,
+                    self.capture_dir,
+                    self.computer_settings,
+                    max_passes=self.computer_settings.scroll_max_chat_window_passes,
+                    scroll_clicks=self.computer_settings.scroll_chat_window_clicks_per_pass,
+                )
+                all_screenshots.extend(scroll_screenshots)
+
+                # Merge initial suspects (from verification pass) with scroll suspects
+                initial_suspects = result.get("suspects", [])
+                merged: dict = {
+                    s["sender_id"]: s
+                    for s in initial_suspects
+                    if s.get("sender_id")
+                }
+                for s in scroll_suspects:
+                    sid = s.get("sender_id", "")
+                    if sid and sid not in merged:
+                        merged[sid] = s
+                final_suspects = list(merged.values())
+
+                print(
+                    f"[StepModeRunner] Total suspects after merge: {len(final_suspects)}"
                 )
                 self._write_result(
                     {
                         "text": text_output,
                         "screenshots": [str(p) for p in all_screenshots],
-                        "suspects": result.get("suspects", []),
+                        "suspects": final_suspects,
                     }
                 )
                 self._write_status("complete")
@@ -865,6 +907,8 @@ class StepModeRunner:
                 await self.handle_read_messages(params)
             elif step == "remove":
                 await self.handle_remove(params)
+            elif step == "scroll_chat_list":
+                await self.handle_scroll_chat_list(params)
             else:
                 print(f"[StepModeRunner] Unknown step: {step}")
                 self._write_error(f"Unknown step: {step}")
@@ -1058,60 +1102,80 @@ async def orchestrate() -> None:
 
     agent = build_agent(model_settings, computer)
 
-    # Stage 1-2: Classification and filtering (global)
-    classification_output, _ = await run_agent_task(
-        agent, classification_prompt(), capture_dir, "classification"
-    )
-    threads = parse_classification(classification_output)
-    unread_groups = filter_unread_groups(threads)
-
-    print(f"\nFound {len(unread_groups)} unread group(s) to process.\n")
-
-    # Accumulated results across all groups
+    # Accumulated results across all groups and viewports
     all_suspects: List[Suspect] = []
     all_plans: List[RemovalPlan] = []
+    all_threads: List[GroupThread] = []
+    viewport_index = 0
 
-    # Stage 3-6: Per-group processing loop
-    for i, thread in enumerate(unread_groups):
+    # Outer scroll loop: process each viewport of the left chat list panel
+    while True:
+        viewport_index += 1
         print(f"\n{'=' * 40}")
-        print(f"Processing group {i + 1}/{len(unread_groups)}: {thread.name}")
+        print(f"Chat list viewport {viewport_index}: classifying...")
         print(f"{'=' * 40}\n")
 
-        # Stage 3: Read messages (per group)
-        reader_prompt = message_reader_prompt(thread.name, thread.thread_id)
-        reader_output, reader_shots = await run_agent_task(
-            agent, reader_prompt, capture_dir, f"reader_{thread.thread_id}"
+        # Stage 1-2: Classification and filtering for this viewport
+        classification_output, _ = await run_agent_task(
+            agent, classification_prompt(), capture_dir, f"classification_v{viewport_index}"
         )
+        threads = parse_classification(classification_output)
+        all_threads.extend(threads)
+        unread_groups = filter_unread_groups(threads)
 
-        # Stage 4: Extract suspects (per group)
-        group_suspects = extract_suspects(thread, reader_output, reader_shots)
-        print(f"Found {len(group_suspects)} suspect(s) in {thread.name}")
+        print(f"\nViewport {viewport_index}: found {len(unread_groups)} unread group(s).\n")
 
-        if not group_suspects:
-            print(f"No suspects in {thread.name}, skipping removal.")
-            continue
+        if not unread_groups:
+            print("No unread groups in current viewport. Workflow complete.")
+            break
 
-        # Stage 5: Build plan (per group)
-        group_plan = build_removal_plan(group_suspects)
-        group_plan = require_confirmation(group_plan)
+        # Stage 3-6: Per-group processing loop for this viewport
+        for i, thread in enumerate(unread_groups):
+            print(f"\n{'=' * 40}")
+            print(f"Processing group {i + 1}/{len(unread_groups)}: {thread.name}")
+            print(f"{'=' * 40}\n")
 
-        # Stage 6: Execute removal (per group)
-        if group_plan.confirmed:
-            removal_output, _ = await run_agent_task(
-                agent,
-                removal_prompt(group_plan),
-                capture_dir,
-                f"removal_{thread.thread_id}",
+            # Stage 3: Read messages (per group)
+            reader_prompt = message_reader_prompt(thread.name, thread.thread_id)
+            reader_output, reader_shots = await run_agent_task(
+                agent, reader_prompt, capture_dir, f"reader_{thread.thread_id}"
             )
-            group_plan.note = removal_output or group_plan.note
 
-        # Accumulate results
-        all_suspects.extend(group_suspects)
-        all_plans.append(group_plan)
+            # Stage 4: Extract suspects (per group)
+            group_suspects = extract_suspects(thread, reader_output, reader_shots)
+            print(f"Found {len(group_suspects)} suspect(s) in {thread.name}")
+
+            if not group_suspects:
+                print(f"No suspects in {thread.name}, skipping removal.")
+                continue
+
+            # Stage 5: Build plan (per group)
+            group_plan = build_removal_plan(group_suspects)
+            group_plan = require_confirmation(group_plan)
+
+            # Stage 6: Execute removal (per group)
+            if group_plan.confirmed:
+                removal_output, _ = await run_agent_task(
+                    agent,
+                    removal_prompt(group_plan),
+                    capture_dir,
+                    f"removal_{thread.thread_id}",
+                )
+                group_plan.note = removal_output or group_plan.note
+
+            # Accumulate results
+            all_suspects.extend(group_suspects)
+            all_plans.append(group_plan)
+
+        # Scroll the chat list down one viewport before re-scanning
+        print(f"\n[Viewport {viewport_index}] All groups processed. Scrolling chat list...")
+        await scroll_chat_list_down(
+            computer, computer_settings.scroll_chat_list_clicks_per_scroll
+        )
 
     print(f"\n{'=' * 40}")
     print("Workflow complete!")
-    print(f"Total groups processed: {len(unread_groups)}")
+    print(f"Viewports scanned: {viewport_index}")
     print(f"Total suspects found: {len(all_suspects)}")
     print(f"{'=' * 40}\n")
 
@@ -1119,9 +1183,9 @@ async def orchestrate() -> None:
     combined_plan = RemovalPlan(
         suspects=all_suspects,
         confirmed=any(p.confirmed for p in all_plans),
-        note=f"Processed {len(all_plans)} group(s)",
+        note=f"Processed {len(all_plans)} group(s) across {viewport_index} viewport(s)",
     )
-    _persist_report(root, threads, all_suspects, combined_plan)
+    _persist_report(root, all_threads, all_suspects, combined_plan)
 
 
 def main() -> None:

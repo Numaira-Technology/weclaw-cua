@@ -119,14 +119,21 @@ class CropRegion:
 # Chat list sidebar: left side of WeChat window
 # SCREEN coords: x=(58, 276), y=(0, 1440) → 218x1440 pixels
 # Used for: Thread classification, clicking on chats
-CHAT_LIST_REGION = CropRegion(x_start=58, x_end=276, y_start=0, y_end=1440)
+CHAT_LIST_REGION = CropRegion(x_start=60, x_end=310, y_start=0, y_end=1030)
 
 # Member panel right strip: right side info panel
 # SCREEN coords: x=(2300, 2560), y=(0, 1440) → 260x1440 pixels
 # Used for: Verifying panel opened, minus button, removal verification
-MEMBER_PANEL_REGION = CropRegion(x_start=2300, x_end=2560, y_start=0, y_end=1440)
+MEMBER_PANEL_REGION = CropRegion(x_start=2300, x_end=2560, y_start=0, y_end=1030)
 
 # Member selection dialog: center popup for selecting users to remove
 # SCREEN coords: x=(925, 1630), y=(425, 970) → 705x545 pixels
 # Used for: Finding and clicking user checkboxes in removal dialog
 MEMBER_SELECT_REGION = CropRegion(x_start=925, x_end=1630, y_start=425, y_end=970)
+
+
+# Message content strip for PIL scroll diff — narrower than CHAT_WINDOW_REGION to avoid
+# false positives from the title bar (top) and input box / toolbar (bottom).
+# SCREEN coords: x=(300, 1920), y=(70, 880) → 1620x810 pixels
+# Used for: chat_scroll_reader.py — compare before/after crop to detect scroll-at-bottom
+CHAT_CONTENT_REGION = CropRegion(x_start=300, x_end=1920, y_start=70, y_end=880)

@@ -54,6 +54,10 @@ class ComputerSettings:
     wechat_three_dots: Tuple[int, int]  # SCREEN: (x, y) for three dots button
     wechat_minus_button: Tuple[int, int]  # SCREEN: (x, y) for minus button
     wechat_delete_button: Tuple[int, int]  # SCREEN: (x, y) for delete/移出 button
+    wechat_banner: Tuple[int, int]  # SCREEN: (x, y) to click the unread-messages banner
+    scroll_chat_window_clicks_per_pass: int  # scroll notches per pass in step 5
+    scroll_max_chat_window_passes: int  # max scroll iterations before stopping
+    scroll_chat_list_clicks_per_scroll: int  # wheel notches to advance one chat list viewport
 
 
 def _parse_simple_yaml(path: Path) -> Dict[str, str]:
@@ -102,6 +106,19 @@ def load_computer_settings(path: Path) -> ComputerSettings:
         wechat_delete_button=(
             int(data.get("wechat_delete_button_x", 1346)),
             int(data.get("wechat_delete_button_y", 924)),
+        ),
+        wechat_banner=(
+            int(data.get("wechat_banner_x", 1840)),
+            int(data.get("wechat_banner_y", 85)),
+        ),
+        scroll_chat_window_clicks_per_pass=int(
+            data.get("scroll_chat_window_clicks_per_pass", 5)
+        ),
+        scroll_max_chat_window_passes=int(
+            data.get("scroll_max_chat_window_passes", 4)
+        ),
+        scroll_chat_list_clicks_per_scroll=int(
+            data.get("scroll_chat_list_clicks_per_scroll", 15)
         ),
     )
 
