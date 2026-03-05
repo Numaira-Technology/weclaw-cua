@@ -7,12 +7,14 @@ Usage:
   prompt = removal_with_verify_prompt(suspect, is_first=True)
   prompt = verify_panel_opened_prompt()
   prompt = find_minus_button_prompt()
+  prompt = verify_panel_and_find_minus_prompt()
   prompt = verify_member_dialog_opened_prompt()
   prompt = select_user_for_removal_prompt(user_name)
   prompt = verify_removal_prompt(user_name)
   result = parse_user_selection_response(text)
   result = parse_minus_button_response(text)
   result = parse_dialog_opened_response(text)
+  result = parse_panel_and_minus_response(text)
 
 Input:
   - plan: RemovalPlan with confirmed flag and suspects list.
@@ -24,22 +26,50 @@ Output:
   - parse_user_selection_response: dict with user_found, click_x, click_y (0-1000 normalized).
   - parse_minus_button_response: dict with button_found, click_x, click_y (0-1000 normalized).
   - parse_dialog_opened_response: dict with dialog_opened bool.
+  - parse_panel_and_minus_response: dict with panel_opened, button_found, click_x, click_y.
 
 Cropped regions used:
   - verify_panel_opened_prompt: MEMBER_PANEL_REGION (260x1440)
   - find_minus_button_prompt: MEMBER_PANEL_REGION (260x1440)
+  - verify_panel_and_find_minus_prompt: MEMBER_PANEL_REGION (260x1440)
   - verify_member_dialog_opened_prompt: MEMBER_SELECT_REGION (705x545)
   - select_user_for_removal_prompt: MEMBER_SELECT_REGION (705x545)
   - verify_removal_prompt: MEMBER_PANEL_REGION (260x1440)
+
+Skills:
+  Prompts optionally load skills/wechat_removal.md via load_skill(). The skill
+  text is injected as a reference section at the end of action prompts. Missing
+  skill files are silently ignored so callers need not manage the path.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any, Dict
 
 from modules.task_types import RemovalPlan, Suspect
+
+# Path to the skill file, relative to the package root (two levels up from here).
+_SKILL_PATH = Path(__file__).resolve().parents[1] / "skills" / "wechat_removal.md"
+
+
+def load_skill(path: Path = _SKILL_PATH) -> str:
+    """Load skill markdown content, stripping YAML frontmatter.
+
+    Returns the body text, or an empty string if the file is missing.
+    This function is intentionally lenient so prompts degrade gracefully.
+    """
+    if not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    # Strip YAML frontmatter (--- ... ---)
+    if text.startswith("---"):
+        end = text.find("---", 3)
+        if end != -1:
+            text = text[end + 3:].lstrip("\n")
+    return text.strip()
 
 
 def removal_prompt(plan: RemovalPlan) -> str:
@@ -202,6 +232,86 @@ def find_minus_button_prompt() -> str:
     )
 
 
+def verify_panel_and_find_minus_prompt() -> str:
+    """Combined prompt: verify panel is open AND find minus button position.
+
+    Merges verify_panel_opened_prompt + find_minus_button_prompt into one LLM
+    call since both inspect MEMBER_PANEL_REGION with no state change between them.
+
+    This prompt is used with MEMBER_PANEL_REGION (260x1440 cropped image).
+    The AI returns coordinates in NORMALIZED space (0-1000).
+
+    Coordinate system:
+    - AI returns click_x/click_y in NORMALIZED space (0-1000)
+    - These must be converted to SCREEN coords using:
+      MEMBER_PANEL_REGION.normalized_to_screen_coords(click_x, click_y)
+    """
+    skill = load_skill()
+    skill_section = f"\n\n参考操作指南：\n{skill}" if skill else ""
+    return (
+        "这是屏幕右侧群聊信息面板的裁剪截图（宽260像素，高1440像素）。\n"
+        "刚才已点击了三个点按钮。\n\n"
+        "请同时回答两个问题：\n"
+        "1. 群聊信息面板是否已打开（能看到成员头像区域）？\n"
+        "2. 如果已打开，找到灰色方形「-」减号按钮的位置。\n"
+        "   减号按钮位于成员头像行的最右侧，是一个小的灰色方形按钮。\n\n"
+        "坐标说明（仅在找到按钮时填写）：\n"
+        "- 使用0-1000归一化坐标系\n"
+        "- x=0表示截图最左边，x=1000表示最右边\n"
+        "- y=0表示截图最上边，y=1000表示最下边\n\n"
+        "回复JSON（只输出JSON，不要其他文字）：\n"
+        '{"panel_opened": true, "button_found": true, "click_x": 800, "click_y": 150} 如果面板已开且找到按钮\n'
+        '{"panel_opened": true, "button_found": false, "reason": "原因"} 如果面板已开但未找到按钮\n'
+        '{"panel_opened": false, "button_found": false, "reason": "原因"} 如果面板未打开'
+        + skill_section
+    )
+
+
+def parse_panel_and_minus_response(text: str) -> Dict[str, Any]:
+    """Parse response from verify_panel_and_find_minus_prompt.
+
+    Returns:
+        dict with keys:
+        - panel_opened: bool
+        - button_found: bool
+        - click_x: int (NORMALIZED 0-1000, only if button_found=True)
+        - click_y: int (NORMALIZED 0-1000, only if button_found=True)
+        - reason: str (if panel_opened=False or button_found=False)
+
+    Note: click_x/click_y are in NORMALIZED space and must be converted
+    to SCREEN coords before clicking using:
+        MEMBER_PANEL_REGION.normalized_to_screen_coords(click_x, click_y)
+    """
+    text = text.strip()
+
+    if text.startswith("```"):
+        lines = text.split("\n")
+        lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines)
+
+    json_match = re.search(r'\{[^}]*"panel_opened"\s*:\s*(true|false)[^}]*\}', text, re.I)
+    if json_match:
+        json_str = json_match.group()
+        data = json.loads(json_str)
+        return {
+            "panel_opened": data.get("panel_opened", False),
+            "button_found": data.get("button_found", False),
+            "click_x": data.get("click_x", 0),
+            "click_y": data.get("click_y", 0),
+            "reason": data.get("reason", ""),
+        }
+
+    return {
+        "panel_opened": False,
+        "button_found": False,
+        "click_x": 0,
+        "click_y": 0,
+        "reason": "Could not parse response",
+    }
+
+
 def verify_member_dialog_opened_prompt() -> str:
     """Prompt to verify the member selection dialog is open after clicking minus button.
 
@@ -229,32 +339,38 @@ def select_user_for_removal_prompt(user_name: str, is_first: bool = True) -> str
     - These must be converted to SCREEN coords using:
       MEMBER_SELECT_REGION.normalized_to_screen_coords(click_x, click_y)
     """
+    skill = load_skill()
+    skill_section = f"\n\n参考操作指南：\n{skill}" if skill else ""
+    coord_note = (
+        "坐标说明：\n"
+        "- 使用0-1000归一化坐标系\n"
+        "- x=0表示截图最左边，x=1000表示最右边\n"
+        "- y=0表示截图最上边，y=1000表示最下边\n"
+        "- 例如：截图中心点为 x=500, y=500\n\n"
+    )
+    json_reply = (
+        f'{{"user_found": true, "user_name": "{user_name}", "click_x": 100, "click_y": 300}} 如果找到\n'
+        f'{{"user_found": false, "user_name": "{user_name}", "reason": "原因"}} 如果未找到'
+    )
     if is_first:
         return (
             "这是成员选择对话框的裁剪截图（宽705像素，高545像素）。\n"
             f"任务：找到用户「{user_name}」的灰色圆形选择框位置\n\n"
             "请在截图中找到该用户名，并确定其旁边红色选择框的中心位置。\n\n"
-            "坐标说明：\n"
-            "- 使用0-1000归一化坐标系\n"
-            "- x=0表示截图最左边，x=1000表示最右边\n"
-            "- y=0表示截图最上边，y=1000表示最下边\n"
-            "- 例如：截图中心点为 x=500, y=500\n\n"
-            "回复JSON（只输出JSON，不要其他文字）：\n"
-            f'{{"user_found": true, "user_name": "{user_name}", "click_x": 100, "click_y": 300}} 如果找到\n'
-            f'{{"user_found": false, "user_name": "{user_name}", "reason": "原因"}} 如果未找到'
+            + coord_note
+            + "回复JSON（只输出JSON，不要其他文字）：\n"
+            + json_reply
+            + skill_section
         )
     else:
         return (
             "这是成员选择对话框的裁剪截图（宽705像素，高545像素）。\n"
             f"继续任务：找到用户「{user_name}」的灰色圆形选择框位置\n\n"
             "请在截图中找到该用户名，并确定其旁边红色选择框的中心位置。\n\n"
-            "坐标说明：\n"
-            "- 使用0-1000归一化坐标系\n"
-            "- x=0表示截图最左边，x=1000表示最右边\n"
-            "- y=0表示截图最上边，y=1000表示最下边\n\n"
-            "回复JSON（只输出JSON，不要其他文字）：\n"
-            f'{{"user_found": true, "user_name": "{user_name}", "click_x": 100, "click_y": 300}} 如果找到\n'
-            f'{{"user_found": false, "user_name": "{user_name}", "reason": "原因"}} 如果未找到'
+            + coord_note
+            + "回复JSON（只输出JSON，不要其他文字）：\n"
+            + json_reply
+            + skill_section
         )
 
 

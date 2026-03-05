@@ -47,10 +47,12 @@ from modules.removal_executor import (
     find_minus_button_prompt,
     parse_dialog_opened_response,
     parse_minus_button_response,
+    parse_panel_and_minus_response,
     parse_user_selection_response,
     removal_prompt,
     select_user_for_removal_prompt,
     verify_member_dialog_opened_prompt,
+    verify_panel_and_find_minus_prompt,
     verify_panel_opened_prompt,
     verify_removal_prompt,
 )
@@ -69,6 +71,7 @@ from runtime.computer_session import (
     build_computer,
     load_computer_settings,
 )
+from runtime.llm_utils import llm_call_with_retry
 from runtime.model_session import build_agent, load_model_settings
 
 # Fix Windows console encoding for emoji/unicode characters
@@ -105,31 +108,25 @@ async def run_vision_query(
     """
     import time
 
-    import litellm
-
     print(f"[run_vision_query] Starting: {task_label}")
     print(f"[run_vision_query] Prompt: {prompt[:100]}...")
     sys.stdout.flush()
 
-    # Step 1: Take screenshot
     print("[run_vision_query] Taking screenshot...")
     sys.stdout.flush()
     start = time.time()
     screenshot_bytes = await computer.interface.screenshot()
-    # Convert bytes to base64
     screenshot_b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
     print(
         f"[run_vision_query] Screenshot captured: {len(screenshot_b64)} chars in {time.time() - start:.1f}s"
     )
     sys.stdout.flush()
 
-    # Save screenshot
     screenshot_path = _capture_path(capture_dir, task_label, 0)
     _save_screenshot(f"data:image/png;base64,{screenshot_b64}", screenshot_path)
     print(f"[run_vision_query] Saved to: {screenshot_path}")
     sys.stdout.flush()
 
-    # Step 2: Send to model with image
     messages = [
         {
             "role": "user",
@@ -146,59 +143,12 @@ async def run_vision_query(
     print(f"[run_vision_query] Calling {model}...")
     sys.stdout.flush()
     start = time.time()
-
-    # Retry logic for transient API errors (502, 503, etc.)
-    import asyncio
-
-    max_retries = 3
-    retry_delay = 2.0
-    last_error = None
-    for attempt in range(max_retries):
-        try:
-            print(f"[run_vision_query] API attempt {attempt + 1}/{max_retries}...")
-            sys.stdout.flush()
-            response = await litellm.acompletion(
-                model=model, messages=messages, timeout=120
-            )
-            break
-        except Exception as e:
-            last_error = e
-            error_str = str(e)
-            print(f"[run_vision_query] API error: {error_str[:200]}")
-            sys.stdout.flush()
-            if any(
-                x in error_str
-                for x in [
-                    "502",
-                    "503",
-                    "504",
-                    "ServiceUnavailable",
-                    "server_error",
-                    "Timeout",
-                    "Bad Gateway",
-                ]
-            ):
-                if attempt < max_retries - 1:
-                    wait_time = retry_delay * (attempt + 1)
-                    print(f"[run_vision_query] Retrying in {wait_time}s...")
-                    sys.stdout.flush()
-                    await asyncio.sleep(wait_time)
-                    continue
-            raise
-    else:
-        if last_error:
-            raise last_error
-        raise RuntimeError("API call failed after all retries")
-
+    text_output = await llm_call_with_retry(model, messages)
     elapsed = time.time() - start
     print(f"[run_vision_query] Response received in {elapsed:.1f}s")
     sys.stdout.flush()
 
-    # Step 3: Extract text response
-    text_output = response.choices[0].message.content or ""  # type: ignore[union-attr]
-    # Sanitize surrogate characters that cause UTF-8 encoding errors
     text_output = _sanitize_surrogates(text_output)
-    # Use ASCII-safe encoding for Windows console compatibility
     response_preview = text_output[:200].encode("ascii", "replace").decode("ascii")
     print(f"[run_vision_query] Response: {response_preview}...")
 
@@ -219,8 +169,6 @@ async def run_cropped_vision_query(
     """
     import time
 
-    import litellm
-
     print(f"[run_cropped_vision_query] Starting: {task_label}")
     print(
         f"[run_cropped_vision_query] Crop region: ({crop_region.x_start}, {crop_region.y_start}) to ({crop_region.x_end}, {crop_region.y_end})"
@@ -228,7 +176,6 @@ async def run_cropped_vision_query(
     print(f"[run_cropped_vision_query] Prompt: {prompt[:100]}...")
     sys.stdout.flush()
 
-    # Step 1: Take full screenshot
     print("[run_cropped_vision_query] Taking screenshot...")
     sys.stdout.flush()
     start = time.time()
@@ -238,7 +185,6 @@ async def run_cropped_vision_query(
     )
     sys.stdout.flush()
 
-    # Step 2: Crop to region
     start = time.time()
     cropped_bytes = crop_region.crop_image(screenshot_bytes)
     cropped_b64 = base64.b64encode(cropped_bytes).decode("utf-8")
@@ -247,13 +193,11 @@ async def run_cropped_vision_query(
     )
     sys.stdout.flush()
 
-    # Save cropped screenshot
     screenshot_path = _capture_path(capture_dir, task_label, 0)
     _save_screenshot(f"data:image/png;base64,{cropped_b64}", screenshot_path)
     print(f"[run_cropped_vision_query] Saved to: {screenshot_path}")
     sys.stdout.flush()
 
-    # Step 3: Send cropped image to model
     messages = [
         {
             "role": "user",
@@ -270,56 +214,11 @@ async def run_cropped_vision_query(
     print(f"[run_cropped_vision_query] Calling {model}...")
     sys.stdout.flush()
     start = time.time()
-
-    # Retry logic for transient API errors
-    max_retries = 3
-    retry_delay = 2.0
-    last_error = None
-    for attempt in range(max_retries):
-        try:
-            print(
-                f"[run_cropped_vision_query] API attempt {attempt + 1}/{max_retries}..."
-            )
-            sys.stdout.flush()
-            response = await litellm.acompletion(
-                model=model, messages=messages, timeout=120
-            )
-            break
-        except Exception as e:
-            last_error = e
-            error_str = str(e)
-            print(f"[run_cropped_vision_query] API error: {error_str[:200]}")
-            sys.stdout.flush()
-            if any(
-                x in error_str
-                for x in [
-                    "502",
-                    "503",
-                    "504",
-                    "ServiceUnavailable",
-                    "server_error",
-                    "Timeout",
-                    "Bad Gateway",
-                ]
-            ):
-                if attempt < max_retries - 1:
-                    wait_time = retry_delay * (attempt + 1)
-                    print(f"[run_cropped_vision_query] Retrying in {wait_time}s...")
-                    sys.stdout.flush()
-                    await asyncio.sleep(wait_time)
-                    continue
-            raise
-    else:
-        if last_error:
-            raise last_error
-        raise RuntimeError("API call failed after all retries")
-
+    text_output = await llm_call_with_retry(model, messages)
     elapsed = time.time() - start
     print(f"[run_cropped_vision_query] Response received in {elapsed:.1f}s")
     sys.stdout.flush()
 
-    # Step 4: Extract text response
-    text_output = response.choices[0].message.content or ""  # type: ignore[union-attr]
     text_output = _sanitize_surrogates(text_output)
     response_preview = text_output[:200].encode("ascii", "replace").decode("ascii")
     print(f"[run_cropped_vision_query] Response: {response_preview}...")
@@ -452,11 +351,15 @@ class StepModeRunner:
         model: str,
         capture_dir: Path,
         computer_settings: ComputerSettings,
+        verify_model: str = "",
     ):
         self.root = root
         self.agent = agent
         self.computer = computer
         self.model = model
+        # verify_model is used for pure yes/no checks (cheaper, faster).
+        # Falls back to the main model when not configured.
+        self.verify_model = verify_model or model
         self.capture_dir = capture_dir
         self.computer_settings = computer_settings
         self.artifacts_dir = root / "artifacts"
@@ -696,58 +599,49 @@ class StepModeRunner:
                 print("[StepModeRunner] Scaffolding: clicking three dots")
                 await click_three_dots(self.computer, self.computer_settings)
 
-                # Verify panel opened using cropped vision query (MEMBER_PANEL_REGION)
+                # Combined: verify panel opened AND find minus button position
+                # (same region, no state change between them → single LLM call)
                 text_output, screenshots = await run_cropped_vision_query(
                     self.computer,
                     self.model,
-                    verify_panel_opened_prompt(),
+                    verify_panel_and_find_minus_prompt(),
                     self.capture_dir,
-                    f"verify_panel_{suspect.sender_id}",
+                    f"verify_panel_and_minus_{suspect.sender_id}",
                     MEMBER_PANEL_REGION,
                 )
                 all_screenshots.extend(screenshots)
-                print(f"[StepModeRunner] Panel verification: {text_output[:100]}")
+                print(f"[StepModeRunner] Panel+minus response: {text_output[:100]}")
 
-                # Find minus button position using vision query (MEMBER_PANEL_REGION)
-                print("[StepModeRunner] Finding minus button position")
-                text_output, screenshots = await run_cropped_vision_query(
-                    self.computer,
-                    self.model,
-                    find_minus_button_prompt(),
-                    self.capture_dir,
-                    f"find_minus_{suspect.sender_id}",
-                    MEMBER_PANEL_REGION,
-                )
-                all_screenshots.extend(screenshots)
-                print(f"[StepModeRunner] Minus button response: {text_output[:100]}")
-
-                # Parse response to get click coordinates
-                minus_result = parse_minus_button_response(text_output)
-                if minus_result["button_found"]:
-                    # click_x, click_y are in NORMALIZED space (0-1000) from AI
-                    # Convert NORMALIZED → SCREEN for clicking
-                    click_x = minus_result["click_x"]  # NORMALIZED
-                    click_y = minus_result["click_y"]  # NORMALIZED
-                    screen_x, screen_y = MEMBER_PANEL_REGION.normalized_to_screen_coords(
-                        click_x, click_y
-                    )
+                panel_minus_result = parse_panel_and_minus_response(text_output)
+                if not panel_minus_result["panel_opened"]:
                     print(
-                        f"[StepModeRunner] Clicking minus button at NORMALIZED ({click_x}, {click_y}) "
-                        f"-> SCREEN ({screen_x}, {screen_y})"
+                        f"[StepModeRunner] Panel not opened: {panel_minus_result.get('reason', 'unknown')}"
                     )
-                    await self.computer.interface.left_click(screen_x, screen_y)
-                    await asyncio.sleep(0.5)
-                else:
-                    print(
-                        f"[StepModeRunner] Minus button not found: {minus_result.get('reason', 'unknown')}"
-                    )
-                    # Continue to next attempt
                     continue
 
-                # Verify member dialog opened using cropped vision query (MEMBER_SELECT_REGION)
+                if not panel_minus_result["button_found"]:
+                    print(
+                        f"[StepModeRunner] Minus button not found: {panel_minus_result.get('reason', 'unknown')}"
+                    )
+                    continue
+
+                # click_x, click_y are in NORMALIZED space (0-1000) from AI
+                click_x = panel_minus_result["click_x"]
+                click_y = panel_minus_result["click_y"]
+                screen_x, screen_y = MEMBER_PANEL_REGION.normalized_to_screen_coords(
+                    click_x, click_y
+                )
+                print(
+                    f"[StepModeRunner] Clicking minus button at NORMALIZED ({click_x}, {click_y}) "
+                    f"-> SCREEN ({screen_x}, {screen_y})"
+                )
+                await self.computer.interface.left_click(screen_x, screen_y)
+                await asyncio.sleep(0.5)
+
+                # Verify member dialog opened (MEMBER_SELECT_REGION)
                 text_output, screenshots = await run_cropped_vision_query(
                     self.computer,
-                    self.model,
+                    self.verify_model,
                     verify_member_dialog_opened_prompt(),
                     self.capture_dir,
                     f"verify_dialog_{suspect.sender_id}",
@@ -761,7 +655,6 @@ class StepModeRunner:
                     print(
                         f"[StepModeRunner] Dialog not opened: {dialog_result.get('reason', 'unknown')}"
                     )
-                    # Continue to next attempt
                     continue
 
             # Find user position using cropped vision query (MEMBER_SELECT_REGION)
@@ -794,12 +687,12 @@ class StepModeRunner:
                     f"-> SCREEN ({screen_x}, {screen_y})"
                 )
                 await self.computer.interface.left_click(screen_x, screen_y)
-                await asyncio.sleep(0.5)
+                # No sleep here — delete button is at a fixed scaffolding position,
+                # so we pipeline both clicks before taking a verification screenshot.
             else:
                 print(
                     f"[StepModeRunner] User not found: {selection_result.get('reason', 'unknown')}"
                 )
-                # Continue to next attempt
                 continue
 
             print("[StepModeRunner] Scaffolding: clicking delete button")
@@ -808,7 +701,7 @@ class StepModeRunner:
             # Verify removal using cropped vision query (MEMBER_PANEL_REGION)
             text_output, screenshots = await run_cropped_vision_query(
                 self.computer,
-                self.model,
+                self.verify_model,
                 verify_removal_prompt(suspect.sender_name),
                 self.capture_dir,
                 f"verify_removal_{suspect.sender_id}_attempt{attempt}",
@@ -1028,7 +921,8 @@ async def orchestrate_step_mode() -> None:
 
     print("[orchestrate_step_mode] Creating StepModeRunner...")
     runner = StepModeRunner(
-        root, agent, computer, model_settings.model, capture_dir, computer_settings
+        root, agent, computer, model_settings.model, capture_dir, computer_settings,
+        verify_model=model_settings.verify_model,
     )
 
     print("[orchestrate_step_mode] Starting run_loop...")
