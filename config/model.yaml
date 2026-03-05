@@ -1,4 +1,12 @@
 model: openrouter/qwen/qwen3-vl-32b-instruct
+# Fast model for yes/no verification queries (verify panel, dialog, removal).
+# Uses fewer tokens and lower latency than the main model.
+# Falls back to `model` if left empty or omitted.
+verify_model: openrouter/qwen/qwen-2.5-vl-7b-instruct
+# Directory containing skill markdown files (relative to project root).
+# Skill content is injected into relevant prompts at call time.
+# Leave empty or omit to disable skills.
+skills_dir: skills
 max_trajectory_budget: 5.0
 instructions: |
   你是一个专门处理微信群违规信息的助手。界面语言是中文。
