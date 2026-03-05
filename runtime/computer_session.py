@@ -8,7 +8,9 @@ Usage:
   await computer.run()
 
 Input:
-  - config_path: Path to YAML file with use_host_computer_server, os_type, api_port, display, timeout, telemetry_enabled, screenshot_delay, screen dimensions, and wechat UI positions.
+  - config_path: Path to YAML file with use_host_computer_server, os_type,
+    api_port, display, timeout, telemetry_enabled, screenshot_delay, screen
+    dimensions, and (Windows only) wechat UI positions.
 
 Output:
   - ComputerSettings dataclass populated from config.
@@ -19,9 +21,9 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR = ROOT / "vendor"
@@ -38,8 +40,9 @@ from computer import Computer  # type: ignore  # noqa: E402
 class ComputerSettings:
     """Computer and WeChat UI configuration.
 
-    All wechat_* position fields are in SCREEN COORDINATES (absolute pixels).
-    These are used directly for clicking without any conversion.
+    wechat_* position fields are in SCREEN COORDINATES (absolute pixels).
+    They are only used on Windows; on macOS the AX accessibility tree is used
+    instead and these fields default to (0, 0).
     """
 
     use_host_computer_server: bool
@@ -49,11 +52,11 @@ class ComputerSettings:
     timeout: int
     telemetry_enabled: bool
     screenshot_delay: float
-    screen_width: int  # SCREEN: display width in pixels (e.g., 2560)
+    screen_width: int   # SCREEN: display width in pixels (e.g., 2560)
     screen_height: int  # SCREEN: display height in pixels (e.g., 1440)
-    wechat_three_dots: Tuple[int, int]  # SCREEN: (x, y) for three dots button
-    wechat_minus_button: Tuple[int, int]  # SCREEN: (x, y) for minus button
-    wechat_delete_button: Tuple[int, int]  # SCREEN: (x, y) for delete/移出 button
+    wechat_three_dots: Tuple[int, int] = field(default=(0, 0))   # Windows only
+    wechat_minus_button: Tuple[int, int] = field(default=(0, 0)) # Windows only
+    wechat_delete_button: Tuple[int, int] = field(default=(0, 0))# Windows only
 
 
 def _parse_simple_yaml(path: Path) -> Dict[str, str]:
@@ -91,17 +94,18 @@ def load_computer_settings(path: Path) -> ComputerSettings:
         screenshot_delay=float(data.get("screenshot_delay", 0.5)),
         screen_width=int(data.get("screen_width", 2560)),
         screen_height=int(data.get("screen_height", 1440)),
+        # wechat_* coords are Windows-only; default to (0,0) for macOS configs
         wechat_three_dots=(
-            int(data.get("wechat_three_dots_x", 2524)),
-            int(data.get("wechat_three_dots_y", 48)),
+            int(data.get("wechat_three_dots_x", 0)),
+            int(data.get("wechat_three_dots_y", 0)),
         ),
         wechat_minus_button=(
-            int(data.get("wechat_minus_button_x", 2524)),
-            int(data.get("wechat_minus_button_y", 200)),
+            int(data.get("wechat_minus_button_x", 0)),
+            int(data.get("wechat_minus_button_y", 0)),
         ),
         wechat_delete_button=(
-            int(data.get("wechat_delete_button_x", 1346)),
-            int(data.get("wechat_delete_button_y", 924)),
+            int(data.get("wechat_delete_button_x", 0)),
+            int(data.get("wechat_delete_button_y", 0)),
         ),
     )
 

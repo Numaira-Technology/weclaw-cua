@@ -1,0 +1,21 @@
+use_host_computer_server: true
+os_type: macos
+api_port: 8000
+display: "1280x720"
+timeout: 180
+telemetry_enabled: false
+screenshot_delay: 0.5
+
+# Screen dimensions — used for normalized coord conversion in vision queries.
+# WeChat Mac typically runs on a 2560x1440 or 2560x1600 Retina display.
+# Update these to match your actual display resolution.
+screen_width: 2560
+screen_height: 1600
+
+# Human-like mouse movement settings
+human_mouse:
+  enabled: true
+  speed_factor: 0.8
+  curve_variance: 0.3
+  zigzag_enabled: false
+  base_delay_ms: 5.0

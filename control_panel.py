@@ -789,14 +789,17 @@ class ControlPanel:
         self._log("Starting workflow backend...")
 
         try:
+            cmd = [
+                sys.executable,
+                "-u",
+                "-m",
+                "workflow.run_wechat_removal",
+                "--step-mode",
+            ]
+            if sys.platform == "darwin":
+                cmd.append("--mac")
             self.workflow_process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-u",
-                    "-m",
-                    "workflow.run_wechat_removal",
-                    "--step-mode",
-                ],
+                cmd,
                 cwd=str(self.root_dir),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

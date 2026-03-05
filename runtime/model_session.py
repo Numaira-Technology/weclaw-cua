@@ -4,7 +4,10 @@ Model session lifecycle for Cua VLM router.
 Usage:
   from pathlib import Path
   from runtime.computer_session import build_computer, load_computer_settings
+  # Windows:
   settings = load_computer_settings(Path("config/computer_windows.yaml"))
+  # macOS:
+  settings = load_computer_settings(Path("config/computer_mac.yaml"))
   computer = build_computer(settings)
   model_settings = load_model_settings(Path("config/model.yaml"))
   agent = build_agent(model_settings, computer)
