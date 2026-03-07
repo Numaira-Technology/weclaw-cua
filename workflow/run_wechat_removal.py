@@ -44,7 +44,11 @@ from modules.human_confirmation import require_confirmation
 from modules.message_reader import message_reader_prompt, parse_reader_response
 from modules.removal_executor import (
     find_minus_button_prompt,
+    mac_find_confirm_removal_prompt,
+    mac_find_minus_button_prompt,
+    mac_find_three_dots_prompt,
     parse_dialog_opened_response,
+    parse_mac_button_response,
     parse_minus_button_response,
     parse_panel_and_minus_response,
     parse_user_selection_response,
@@ -367,10 +371,60 @@ class StepModeRunner:
         self.request_file = self.artifacts_dir / ".step_request"
         self.result_file = self.artifacts_dir / ".step_result"
         self.status_file = self.artifacts_dir / ".step_status"
+        # Populated by _calibrate_scale() at startup (Mac only).
+        # Holds the physical pixel dimensions of the screenshot the server returns.
+        # Used as parse_height for normalised-coord → pixel conversions.
+        self._img_w: int = 0
+        self._img_h: int = 0
         print("[StepModeRunner] Initialized")
         print(f"  Request file: {self.request_file}")
         print(f"  Result file: {self.result_file}")
         print(f"  Status file: {self.status_file}")
+
+    async def _calibrate_scale(self) -> None:
+        """Take one screenshot to confirm the image dimensions match screen_width/height.
+
+        The screenshot from ImageGrab.grab() is in physical pixels (e.g. 3024×1964 on
+        a 16" Retina MBP).  CGEventPost operates in logical points (e.g. 1512×982), so
+        macos.py's left_click() divides all incoming physical-pixel coordinates by the
+        retina scale factor (_get_retina_scale()) before posting.
+
+        This method records the actual screenshot size so parse_height calculations use
+        the real physical dimensions, not the config defaults.
+        """
+        if not self.is_mac:
+            return
+        screenshot_bytes = await self.computer.interface.screenshot()
+        import io as _io
+        from PIL import Image as _Image
+        img = _Image.open(_io.BytesIO(screenshot_bytes))
+        self._img_w, self._img_h = img.width, img.height
+        cfg_w = self.computer_settings.screen_width
+        cfg_h = self.computer_settings.screen_height
+        if self._img_w != cfg_w or self._img_h != cfg_h:
+            print(
+                f"[StepModeRunner] WARNING: screenshot size {self._img_w}x{self._img_h} "
+                f"differs from config {cfg_w}x{cfg_h}. "
+                f"Update screen_width/screen_height in computer_mac.yaml."
+            )
+        else:
+            print(
+                f"[StepModeRunner] Screenshot size confirmed: {self._img_w}x{self._img_h} "
+                f"(matches config)"
+            )
+
+    def _to_logical(self, img_x: int, img_y: int) -> Tuple[int, int]:
+        """Return click coordinates for the given image-pixel position.
+
+        The coordinates returned here are physical pixels (from the AI's normalized
+        output scaled back to the screenshot dimensions).  macos.py's left_click()
+        handles the final conversion from physical pixels to Quartz logical points by
+        dividing by _get_retina_scale() before CGEventPost.
+
+        This method is kept as a pass-through so call sites remain explicit about the
+        coordinate space they're working in.
+        """
+        return img_x, img_y
 
     async def _vision_query(
         self,
@@ -387,9 +441,18 @@ class StepModeRunner:
         can locate the dialog anywhere on screen without any tuning.
         """
         if self.is_mac:
-            return await run_vision_query(
+            result = await run_vision_query(
                 self.computer, model, prompt, self.capture_dir, task_label
             )
+            # Record image dimensions for parse_height calculations
+            if self._img_w == 0 and result[1]:
+                from PIL import Image as _Image
+                img = _Image.open(result[1][0])
+                self._img_w, self._img_h = img.width, img.height
+                print(
+                    f"[StepModeRunner] Image size from first screenshot: {self._img_w}x{self._img_h}"
+                )
+            return result
         return await run_cropped_vision_query(
             self.computer, model, prompt, self.capture_dir, task_label, region
         )
@@ -422,7 +485,7 @@ class StepModeRunner:
         total_start = time.time()
         print("[StepModeRunner] Executing: classify threads")
         sys.stdout.flush()
-        prompt = classification_prompt()
+        prompt = classification_prompt(self.computer_settings.os_type)
         print(f"[StepModeRunner] Prompt length: {len(prompt)} chars")
         sys.stdout.flush()
         regions = get_regions(self.computer_settings.os_type)
@@ -430,13 +493,18 @@ class StepModeRunner:
             prompt, "classification", regions.chat_list, self.model
         )
         print(
-            f"[StepModeRunner] Cropped vision query returned: {len(text_output)} chars, {len(screenshots)} screenshots"
+            f"[StepModeRunner] Vision query returned: {len(text_output)} chars, {len(screenshots)} screenshots"
         )
         print(f"[StepModeRunner] TOTAL classify time: {time.time() - total_start:.1f}s")
+        # parse_height = the pixel height of the image the AI saw.
+        # Use the calibrated value if available; fall back to the configured
+        # screen_height (correct for both Mac 1964 and Windows 1440).
+        parse_height = self._img_h if self._img_h > 0 else self.computer_settings.screen_height
         self._write_result(
             {
                 "text": text_output,
                 "screenshots": [str(p) for p in screenshots],
+                "parse_height": parse_height,
             }
         )
         self._write_status("complete")
@@ -458,23 +526,33 @@ class StepModeRunner:
             print(f"[StepModeRunner] Attempt {attempt + 1}/{max_attempts}")
             sys.stdout.flush()
 
-            regions = get_regions(self.computer_settings.os_type)
-            click_x, screen_y = regions.chat_list.to_screen_coords(
-                regions.chat_list.width // 2,
-                click_y,
-            )
-            print(
-                f"[StepModeRunner] CROP y={click_y} -> SCREEN coords ({click_x}, {screen_y})"
-            )
-            print(
-                f"[StepModeRunner] chat_list region: x=({regions.chat_list.x_start}, {regions.chat_list.x_end}), y=({regions.chat_list.y_start}, {regions.chat_list.y_end})"
-            )
+            if self.is_mac:
+                # On Mac, click_y is already in physical pixels (from parse_classification).
+                # Use the midpoint of the chat-list column for x.
+                regions = get_regions(self.computer_settings.os_type)
+                img_x = (regions.chat_list.x_start + regions.chat_list.x_end) // 2
+                click_x, screen_y = self._to_logical(img_x, click_y)
+                print(
+                    f"[StepModeRunner] Mac click: ({click_x}, {screen_y}) physical pixels"
+                )
+            else:
+                regions = get_regions(self.computer_settings.os_type)
+                click_x, screen_y = regions.chat_list.to_screen_coords(
+                    regions.chat_list.width // 2,
+                    click_y,
+                )
+                print(
+                    f"[StepModeRunner] CROP y={click_y} -> SCREEN coords ({click_x}, {screen_y})"
+                )
+                print(
+                    f"[StepModeRunner] chat_list region: x=({regions.chat_list.x_start}, {regions.chat_list.x_end}), y=({regions.chat_list.y_start}, {regions.chat_list.y_end})"
+                )
             sys.stdout.flush()
             await self.computer.interface.left_click(click_x, screen_y)
             await asyncio.sleep(0.5)
 
             # Vision query with verification
-            prompt = message_reader_prompt(thread_name, thread_id)
+            prompt = message_reader_prompt(thread_name, thread_id, self.computer_settings.os_type)
             print(f"[StepModeRunner] Prompt length: {len(prompt)} chars")
             sys.stdout.flush()
             text_output, screenshots = await run_vision_query(
@@ -487,8 +565,10 @@ class StepModeRunner:
             all_screenshots.extend(screenshots)
             print(f"[StepModeRunner] Vision query returned: {len(text_output)} chars")
 
-            # Parse response
-            result = parse_reader_response(text_output)
+            # reader_height = the pixel height of the image the AI saw.
+            # Fall back to configured screen_height (correct for both platforms).
+            reader_height = self._img_h if self._img_h > 0 else self.computer_settings.screen_height
+            result = parse_reader_response(text_output, screen_height=reader_height)
 
             if result["success"]:
                 print(
@@ -504,7 +584,8 @@ class StepModeRunner:
                 self._write_status("complete")
                 return
 
-            # Retry with new y-coordinate from AI
+            # Retry with new y-coordinate from AI (already converted to pixels
+            # inside parse_reader_response using the correct height)
             new_y = result.get("retry_y", 0)
             print(f"[StepModeRunner] Verification failed, retrying with y={new_y}")
             click_y = new_y
@@ -601,16 +682,16 @@ class StepModeRunner:
         is_first: bool,
         max_retries: int,
     ) -> Tuple[RemovalResult, List[Path]]:
-        """Remove a single suspect using scaffolding clicks + cropped vision queries.
+        """Remove a single suspect using vision queries + scaffolding clicks.
 
-        On macOS the three-dots, minus, and confirm buttons are located via the
-        AX accessibility tree (click_three_dots / click_minus_button /
-        click_delete_confirm dispatch to ax_clicks.py).  The vision queries for
-        panel/dialog verification are skipped because the AX click is either
-        confirmed to succeed (element found) or raises immediately.
+        On macOS: WeChat uses a web-based UI (Electron/flue) that exposes no
+        AXButton elements in the Accessibility tree.  All three button clicks
+        (three-dots, minus, confirm) use vision queries to locate the button in
+        the full screenshot, then convert the normalized coords to physical px
+        for left_click().
 
-        On Windows the original flow is unchanged: hard-coded SCREEN coords for
-        three-dots and confirm; vision-guided minus-button click.
+        On Windows: hard-coded SCREEN coords for three-dots and confirm;
+        vision-guided minus-button click; all queries use cropped regions.
         """
         all_screenshots: List[Path] = []
 
@@ -625,24 +706,64 @@ class StepModeRunner:
 
             if is_first_attempt:
                 # ── Open group info panel ────────────────────────────────────
-                print("[StepModeRunner] Clicking three dots (open group panel)")
-                await click_three_dots(self.computer, self.computer_settings)
-
                 if self.is_mac:
-                    # AX tree finds the minus button directly — no vision call needed
-                    print("[StepModeRunner] Mac: clicking minus button via AX tree")
-                    await click_minus_button(self.computer, self.computer_settings)
+                    # WeChat Mac uses a web-based UI (Electron/flue) — the AX
+                    # accessibility tree has no AXButton elements.  Use vision
+                    # queries to locate each button in the full screenshot.
 
-                    # Verify the member-selection dialog appeared
+                    # Step 1: find and click the three-dots button
+                    print("[StepModeRunner] Mac: vision-find three-dots button")
                     text_output, screenshots = await self._vision_query(
-                        verify_member_dialog_opened_prompt(),
-                        f"verify_dialog_{suspect.sender_id}",
+                        mac_find_three_dots_prompt(),
+                        f"find_three_dots_{suspect.sender_id}_attempt{attempt}",
+                        regions.chat_list,  # region arg ignored on Mac (full screenshot)
+                        self.model,
+                    )
+                    all_screenshots.extend(screenshots)
+                    three_dots_result = parse_mac_button_response(text_output)
+                    if not three_dots_result["button_found"]:
+                        print(
+                            f"[StepModeRunner] Three-dots button not found: "
+                            f"{three_dots_result.get('reason', 'unknown')}"
+                        )
+                        continue
+                    td_x = round(three_dots_result["click_x"] / 1000.0 * self._img_w)
+                    td_y = round(three_dots_result["click_y"] / 1000.0 * self._img_h)
+                    print(f"[StepModeRunner] Clicking three-dots at ({td_x}, {td_y}) physical px")
+                    await self.computer.interface.left_click(td_x, td_y)
+                    await asyncio.sleep(1.0)
+
+                    # Step 2: find and click the minus button
+                    print("[StepModeRunner] Mac: vision-find minus button")
+                    text_output, screenshots = await self._vision_query(
+                        mac_find_minus_button_prompt(),
+                        f"find_minus_{suspect.sender_id}_attempt{attempt}",
+                        regions.member_panel,
+                        self.model,
+                    )
+                    all_screenshots.extend(screenshots)
+                    minus_result = parse_mac_button_response(text_output)
+                    if not minus_result["button_found"]:
+                        print(
+                            f"[StepModeRunner] Minus button not found: "
+                            f"{minus_result.get('reason', 'unknown')}"
+                        )
+                        continue
+                    m_x = round(minus_result["click_x"] / 1000.0 * self._img_w)
+                    m_y = round(minus_result["click_y"] / 1000.0 * self._img_h)
+                    print(f"[StepModeRunner] Clicking minus at ({m_x}, {m_y}) physical px")
+                    await self.computer.interface.left_click(m_x, m_y)
+                    await asyncio.sleep(1.0)
+
+                    # Step 3: verify member selection dialog appeared
+                    text_output, screenshots = await self._vision_query(
+                        verify_member_dialog_opened_prompt(self.computer_settings.os_type),
+                        f"verify_dialog_{suspect.sender_id}_attempt{attempt}",
                         regions.member_select,
                         self.verify_model,
                     )
                     all_screenshots.extend(screenshots)
                     print(f"[StepModeRunner] Dialog verification: {text_output[:100]}")
-
                     dialog_result = parse_dialog_opened_response(text_output)
                     if not dialog_result["dialog_opened"]:
                         print(
@@ -651,9 +772,11 @@ class StepModeRunner:
                         continue
 
                 else:
-                    # Windows: combined verify panel + find minus button (single LLM call)
+                    # ── Windows: open panel + find minus (single LLM call) ────
+                    print("[StepModeRunner] Clicking three dots (open group panel)")
+                    await click_three_dots(self.computer, self.computer_settings)
                     text_output, screenshots = await self._vision_query(
-                        verify_panel_and_find_minus_prompt(),
+                        verify_panel_and_find_minus_prompt(self.computer_settings.os_type),
                         f"verify_panel_and_minus_{suspect.sender_id}",
                         regions.member_panel,
                         self.model,
@@ -688,7 +811,7 @@ class StepModeRunner:
 
                     # Verify member dialog opened
                     text_output, screenshots = await self._vision_query(
-                        verify_member_dialog_opened_prompt(),
+                        verify_member_dialog_opened_prompt(self.computer_settings.os_type),
                         f"verify_dialog_{suspect.sender_id}",
                         regions.member_select,
                         self.verify_model,
@@ -707,7 +830,8 @@ class StepModeRunner:
             print(f"[StepModeRunner] Finding user {suspect.sender_name} position")
             text_output, screenshots = await self._vision_query(
                 select_user_for_removal_prompt(
-                    suspect.sender_name, is_first=is_first_attempt
+                    suspect.sender_name, is_first=is_first_attempt,
+                    os_type=self.computer_settings.os_type,
                 ),
                 f"select_{suspect.sender_id}_attempt{attempt}",
                 regions.member_select,
@@ -720,12 +844,12 @@ class StepModeRunner:
             if selection_result["user_found"]:
                 click_x = selection_result["click_x"]
                 click_y = selection_result["click_y"]
-                # On Mac coords are normalized against the full screenshot;
-                # on Windows they're normalized against the crop region.
+                # On Mac coords are normalized (0-1000) against the image dimensions.
+                # Convert to image pixels first, then to logical points for clicking.
                 if self.is_mac:
-                    screen_size = self.computer_settings
-                    screen_x = int((click_x / 1000.0) * screen_size.screen_width)
-                    screen_y = int((click_y / 1000.0) * screen_size.screen_height)
+                    img_x = round(click_x / 1000.0 * self._img_w)
+                    img_y = round(click_y / 1000.0 * self._img_h)
+                    screen_x, screen_y = self._to_logical(img_x, img_y)
                 else:
                     screen_x, screen_y = regions.member_select.normalized_to_screen_coords(
                         click_x, click_y
@@ -735,6 +859,7 @@ class StepModeRunner:
                     f"-> SCREEN ({screen_x}, {screen_y})"
                 )
                 await self.computer.interface.left_click(screen_x, screen_y)
+                await asyncio.sleep(0.8)  # wait for UI to register selection and activate 移出 button
             else:
                 print(
                     f"[StepModeRunner] User not found: {selection_result.get('reason', 'unknown')}"
@@ -742,12 +867,35 @@ class StepModeRunner:
                 continue
 
             # ── Confirm removal ──────────────────────────────────────────────
-            print("[StepModeRunner] Clicking delete/confirm button")
-            await click_delete_confirm(self.computer, self.computer_settings)
+            if self.is_mac:
+                # Vision-find the 移出/confirm button (no AX tree on WeChat Mac)
+                print("[StepModeRunner] Mac: vision-find confirm/移出 button")
+                text_output, screenshots = await self._vision_query(
+                    mac_find_confirm_removal_prompt(suspect.sender_name),
+                    f"find_confirm_{suspect.sender_id}_attempt{attempt}",
+                    regions.member_select,
+                    self.model,
+                )
+                all_screenshots.extend(screenshots)
+                confirm_result = parse_mac_button_response(text_output)
+                if not confirm_result["button_found"]:
+                    print(
+                        f"[StepModeRunner] Confirm button not found: "
+                        f"{confirm_result.get('reason', 'unknown')}"
+                    )
+                    continue
+                c_x = round(confirm_result["click_x"] / 1000.0 * self._img_w)
+                c_y = round(confirm_result["click_y"] / 1000.0 * self._img_h)
+                print(f"[StepModeRunner] Clicking confirm at ({c_x}, {c_y}) physical px")
+                await self.computer.interface.left_click(c_x, c_y)
+                await asyncio.sleep(0.8)
+            else:
+                print("[StepModeRunner] Clicking delete/confirm button")
+                await click_delete_confirm(self.computer, self.computer_settings)
 
             # ── Verify removal ───────────────────────────────────────────────
             text_output, screenshots = await self._vision_query(
-                verify_removal_prompt(suspect.sender_name),
+                verify_removal_prompt(suspect.sender_name, self.computer_settings.os_type),
                 f"verify_removal_{suspect.sender_id}_attempt{attempt}",
                 regions.member_panel,
                 self.verify_model,
@@ -971,6 +1119,10 @@ async def orchestrate_step_mode(use_mac: bool = False) -> None:
         verify_model=model_settings.verify_model,
     )
 
+    print("[orchestrate_step_mode] Calibrating screenshot scale...")
+    sys.stdout.flush()
+    await runner._calibrate_scale()
+
     print("[orchestrate_step_mode] Starting run_loop...")
     sys.stdout.flush()
     await runner.run_loop()
@@ -1001,9 +1153,9 @@ async def orchestrate(use_mac: bool = False) -> None:
 
     # Stage 1-2: Classification and filtering (global)
     classification_output, _ = await run_agent_task(
-        agent, classification_prompt(), capture_dir, "classification"
+        agent, classification_prompt(computer_settings.os_type), capture_dir, "classification"
     )
-    threads = parse_classification(classification_output)
+    threads = parse_classification(classification_output, image_height=computer_settings.screen_height)
     unread_groups = filter_unread_groups(threads)
 
     print(f"\nFound {len(unread_groups)} unread group(s) to process.\n")
@@ -1019,7 +1171,7 @@ async def orchestrate(use_mac: bool = False) -> None:
         print(f"{'=' * 40}\n")
 
         # Stage 3: Read messages (per group)
-        reader_prompt = message_reader_prompt(thread.name, thread.thread_id)
+        reader_prompt = message_reader_prompt(thread.name, thread.thread_id, computer_settings.os_type)
         reader_output, reader_shots = await run_agent_task(
             agent, reader_prompt, capture_dir, f"reader_{thread.thread_id}"
         )

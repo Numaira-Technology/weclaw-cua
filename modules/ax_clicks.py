@@ -11,6 +11,11 @@ WeChat Mac button titles (verified against WeChat 3.x macOS):
 - Minus (remove member):   role AXButton, title "-" or description contains "删除"
 - Confirm removal (移出):  role AXButton, title "移出" or "确定"
 
+AX tree coordinates are in macOS logical points (kAXPositionAttribute space,
+e.g. 0–1512 × 0–982 on a Retina MBP).  This module calls left_click_logical()
+rather than left_click() so that macos.py does not apply the Retina scale
+division a second time.
+
 If a button cannot be found in the AX tree the function raises RuntimeError so
 the caller can fall back or surface the failure explicitly — consistent with the
 project's no-silent-fallback policy.
@@ -22,7 +27,7 @@ Usage:
 
 Input:
     - computer: Computer instance with interface.get_accessibility_tree()
-      and interface.left_click(x, y)
+      and interface.left_click_logical(x, y)
 
 Output:
     - Clicks the matched button centre; raises RuntimeError if not found.
@@ -112,8 +117,14 @@ async def _click_ax_button(
     )
 
     x, y = _bbox_centre(element)
-    print(f"[ax_clicks] Clicking '{label}' at ({x}, {y}) via AX tree")
-    await computer.interface.left_click(x, y)
+    print(f"[ax_clicks] Clicking '{label}' at ({x}, {y}) via AX tree (logical points)")
+    # AX tree bbox is in macOS logical points (kAXPositionAttribute space).
+    # Use left_click_logical to post directly in that space — left_click() would
+    # incorrectly divide by the Retina scale factor a second time.
+    if hasattr(computer.interface, "left_click_logical"):
+        await computer.interface.left_click_logical(x, y)
+    else:
+        await computer.interface.left_click(x, y)
     await asyncio.sleep(0.5)
 
 

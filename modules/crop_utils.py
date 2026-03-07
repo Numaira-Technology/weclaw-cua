@@ -27,20 +27,19 @@ Output:
     - normalized_to_screen_coords: (screen_x, screen_y) from 0-1000 space
     - get_regions: ScreenRegions dataclass with platform-appropriate CropRegion instances
 
-Region reference (all SCREEN coordinates, absolute pixels):
+Region reference:
 
-  Windows 2560x1440:
-    chat_list:      x=(58, 276),   y=(0, 1440)   → 218x1440px sidebar
-    member_panel:   x=(2300, 2560), y=(0, 1440)  → 260x1440px right panel
-    member_select:  x=(925, 1630),  y=(425, 970) → 705x545px  centre dialog
+  Windows — SCREEN coordinates, absolute pixels (2560×1440):
+    chat_list:      x=(58, 276),   y=(0, 1440)   → 218×1440px sidebar
+    member_panel:   x=(2300, 2560), y=(0, 1440)  → 260×1440px right panel
+    member_select:  x=(925, 1630),  y=(425, 970) → 705×545px  centre dialog
 
-  macOS 2560x1600 (WeChat Mac full-screen):
-    chat_list:      x=(70, 310),   y=(0, 1600)   → 240x1600px sidebar
-    member_panel:   x=(1980, 2560), y=(0, 1600)  → 580x1600px right panel
-    member_select:  x=(830, 1730),  y=(430, 1050) → 900x620px centre dialog
-
-  macOS coordinates are tuned for a 2560x1600 Retina display with WeChat Mac
-  filling most of the screen.  Adjust in get_regions() if your layout differs.
+  macOS — PHYSICAL PIXEL coordinates (3024×1964 on a 16" MacBook Pro).
+           Screenshots are captured at native Retina resolution (ImageGrab.grab())
+           and clicks use Quartz CGEventPost — both in physical pixel space.
+    chat_list:      x=(70, 310),   y=(0, 1964)   → 240×1964px sidebar
+    member_panel:   x=(1980, 2560), y=(0, 1964)  → 580×1964px right panel
+    member_select:  x=(830, 1730),  y=(430, 1050) → 900×620px centre dialog
 """
 
 from __future__ import annotations
@@ -145,12 +144,18 @@ _WINDOWS_REGIONS = ScreenRegions(
 )
 
 # =============================================================================
-# macOS 2560x1600 regions  (WeChat Mac near-full-screen layout)
-# Adjust these values if your WeChat window position or display differs.
+# macOS regions — in PHYSICAL PIXEL space (3024×1964 on a 16" MacBook Pro).
+#
+# The macOS server captures at native Retina resolution via ImageGrab.grab()
+# and clicks via Quartz CGEventPost — both operate in physical pixel space.
+# No coordinate conversion is needed between screenshot and click coordinates.
+#
+# Measured against WeChat Mac running near-full-screen on a 3024×1964 display.
+# Adjust these values if your display or WeChat window position differs.
 # =============================================================================
 _MACOS_REGIONS = ScreenRegions(
-    chat_list=CropRegion(x_start=70, x_end=310, y_start=0, y_end=1600),
-    member_panel=CropRegion(x_start=1980, x_end=2560, y_start=0, y_end=1600),
+    chat_list=CropRegion(x_start=70, x_end=310, y_start=0, y_end=1964),
+    member_panel=CropRegion(x_start=1980, x_end=2560, y_start=0, y_end=1964),
     member_select=CropRegion(x_start=830, x_end=1730, y_start=430, y_end=1050),
 )
 
@@ -170,9 +175,16 @@ def get_regions(os_type: str) -> ScreenRegions:
 
 
 # ---------------------------------------------------------------------------
-# Legacy module-level constants — kept for backward compatibility.
-# New code should use get_regions(os_type) instead.
+# Legacy module-level constants — Windows only.
+# These exist purely for backward compatibility with old call sites.
+# All new code must use get_regions(os_type) instead.
 # ---------------------------------------------------------------------------
-CHAT_LIST_REGION = _WINDOWS_REGIONS.chat_list
-MEMBER_PANEL_REGION = _WINDOWS_REGIONS.member_panel
-MEMBER_SELECT_REGION = _WINDOWS_REGIONS.member_select
+WINDOWS_CHAT_LIST_REGION = _WINDOWS_REGIONS.chat_list
+WINDOWS_MEMBER_PANEL_REGION = _WINDOWS_REGIONS.member_panel
+WINDOWS_MEMBER_SELECT_REGION = _WINDOWS_REGIONS.member_select
+
+# Keep old names as aliases so any remaining references still work,
+# but they visibly point to WINDOWS_ prefixed names in diffs/searches.
+CHAT_LIST_REGION = WINDOWS_CHAT_LIST_REGION
+MEMBER_PANEL_REGION = WINDOWS_MEMBER_PANEL_REGION
+MEMBER_SELECT_REGION = WINDOWS_MEMBER_SELECT_REGION

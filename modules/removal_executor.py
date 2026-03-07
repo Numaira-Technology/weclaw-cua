@@ -5,12 +5,12 @@ Usage:
   prompt = removal_prompt(plan)
   prompt = removal_prompt_single(suspect)
   prompt = removal_with_verify_prompt(suspect, is_first=True)
-  prompt = verify_panel_opened_prompt()
-  prompt = find_minus_button_prompt()
-  prompt = verify_panel_and_find_minus_prompt()
-  prompt = verify_member_dialog_opened_prompt()
-  prompt = select_user_for_removal_prompt(user_name)
-  prompt = verify_removal_prompt(user_name)
+  prompt = verify_panel_opened_prompt(os_type)
+  prompt = find_minus_button_prompt(os_type)
+  prompt = verify_panel_and_find_minus_prompt(os_type)
+  prompt = verify_member_dialog_opened_prompt(os_type)
+  prompt = select_user_for_removal_prompt(user_name, is_first, os_type)
+  prompt = verify_removal_prompt(user_name, os_type)
   result = parse_user_selection_response(text)
   result = parse_minus_button_response(text)
   result = parse_dialog_opened_response(text)
@@ -20,6 +20,7 @@ Input:
   - plan: RemovalPlan with confirmed flag and suspects list.
   - suspect: Single Suspect to remove.
   - text: AI response text to parse.
+  - os_type: "windows" or "macos" — controls prompt wording and coordinate system.
 
 Output:
   - Prompt strings for various removal steps.
@@ -28,13 +29,24 @@ Output:
   - parse_dialog_opened_response: dict with dialog_opened bool.
   - parse_panel_and_minus_response: dict with panel_opened, button_found, click_x, click_y.
 
-Cropped regions used:
-  - verify_panel_opened_prompt: MEMBER_PANEL_REGION (260x1440)
-  - find_minus_button_prompt: MEMBER_PANEL_REGION (260x1440)
-  - verify_panel_and_find_minus_prompt: MEMBER_PANEL_REGION (260x1440)
-  - verify_member_dialog_opened_prompt: MEMBER_SELECT_REGION (705x545)
-  - select_user_for_removal_prompt: MEMBER_SELECT_REGION (705x545)
-  - verify_removal_prompt: MEMBER_PANEL_REGION (260x1440)
+Coordinate systems:
+  Windows prompts: AI sees a cropped region; coordinates are 0-1000 normalized
+  relative to that crop, then converted via:
+    get_regions("windows").member_panel.normalized_to_screen_coords(click_x, click_y)
+    get_regions("windows").member_select.normalized_to_screen_coords(click_x, click_y)
+
+  macOS prompts: AI sees the full screenshot; coordinates are 0-1000 normalized
+  relative to the full screen (physical pixels), then converted via:
+    screen_x = click_x / 1000 * img_w
+    screen_y = click_y / 1000 * img_h
+
+Cropped regions (Windows only, 2560×1440):
+  - verify_panel_opened_prompt:         member_panel  (260×1440)
+  - find_minus_button_prompt:           member_panel  (260×1440)
+  - verify_panel_and_find_minus_prompt: member_panel  (260×1440)
+  - verify_member_dialog_opened_prompt: member_select (705×545)
+  - select_user_for_removal_prompt:     member_select (705×545)
+  - verify_removal_prompt:              member_panel  (260×1440)
 
 Skills:
   Prompts optionally load skills/wechat_removal.md via load_skill(). The skill
@@ -188,11 +200,18 @@ def removal_with_verify_prompt(suspect: Suspect, is_first: bool = True) -> str:
         )
 
 
-def verify_panel_opened_prompt() -> str:
-    """Prompt to verify the group info panel is open after clicking three dots.
-
-    This prompt is used with MEMBER_PANEL_REGION (260x1440 cropped image).
-    """
+def verify_panel_opened_prompt(os_type: str = "windows") -> str:
+    """Prompt to verify the group info panel is open after clicking three dots."""
+    if os_type == "macos":
+        return (
+            "这是完整的桌面截图。刚才已点击了三个点按钮。\n\n"
+            "请查看截图右侧区域：\n"
+            "- 群聊信息面板是否已打开？\n"
+            "- 能否看到成员头像区域和灰色「-」减号按钮？\n\n"
+            "回复JSON：\n"
+            '{"panel_opened": true} 如果面板已打开\n'
+            '{"panel_opened": false, "reason": "原因"} 如果未打开'
+        )
     return (
         "这是屏幕右侧边缘的裁剪截图（宽260像素，高1440像素）。\n"
         "刚才已点击了三个点按钮。\n\n"
@@ -205,17 +224,28 @@ def verify_panel_opened_prompt() -> str:
     )
 
 
-def find_minus_button_prompt() -> str:
+def find_minus_button_prompt(os_type: str = "windows") -> str:
     """Prompt to find the minus button position in the member panel.
 
-    This prompt is used with MEMBER_PANEL_REGION (260x1440 cropped image).
-    The AI should return coordinates in NORMALIZED space (0-1000).
-
-    Coordinate system:
-    - AI returns coordinates in NORMALIZED space (0-1000)
-    - These must be converted to SCREEN coords using:
-      MEMBER_PANEL_REGION.normalized_to_screen_coords(click_x, click_y)
+    On Windows the AI sees a cropped 260x1440 member panel; coordinates are
+    normalized (0-1000) relative to that crop.
+    On macOS the AI sees the full screenshot; coordinates are normalized
+    (0-1000) relative to the full screen.
     """
+    if os_type == "macos":
+        return (
+            "这是完整的桌面截图。\n"
+            "任务：在右侧群聊信息面板中找到灰色方形「-」减号按钮的位置\n\n"
+            "这个减号按钮用于进入成员移出模式，通常位于成员头像区域的右侧。\n"
+            "它是一个小的灰色方形按钮，可能带有减号符号。\n\n"
+            "坐标说明：\n"
+            "- 使用0-1000归一化坐标系，相对于整个截图\n"
+            "- x=0表示截图最左边，x=1000表示最右边\n"
+            "- y=0表示截图最上边，y=1000表示最下边\n\n"
+            "回复JSON（只输出JSON，不要其他文字）：\n"
+            '{"button_found": true, "click_x": 800, "click_y": 150} 如果找到\n'
+            '{"button_found": false, "reason": "原因"} 如果未找到'
+        )
     return (
         "这是屏幕右侧群聊信息面板的裁剪截图（宽260像素，高1440像素）。\n"
         "任务：找到灰色方形「-」减号按钮的位置\n\n"
@@ -232,22 +262,32 @@ def find_minus_button_prompt() -> str:
     )
 
 
-def verify_panel_and_find_minus_prompt() -> str:
-    """Combined prompt: verify panel is open AND find minus button position.
+def verify_panel_and_find_minus_prompt(os_type: str = "windows") -> str:
+    """Combined: verify panel is open AND find minus button position.
 
-    Merges verify_panel_opened_prompt + find_minus_button_prompt into one LLM
-    call since both inspect MEMBER_PANEL_REGION with no state change between them.
-
-    This prompt is used with MEMBER_PANEL_REGION (260x1440 cropped image).
-    The AI returns coordinates in NORMALIZED space (0-1000).
-
-    Coordinate system:
-    - AI returns click_x/click_y in NORMALIZED space (0-1000)
-    - These must be converted to SCREEN coords using:
-      MEMBER_PANEL_REGION.normalized_to_screen_coords(click_x, click_y)
+    On Windows: AI sees the cropped 260x1440 member panel region.
+    On macOS: AI sees the full screenshot; coordinates are normalized
+    (0-1000) relative to the full screen.
     """
     skill = load_skill()
     skill_section = f"\n\n参考操作指南：\n{skill}" if skill else ""
+    if os_type == "macos":
+        return (
+            "这是完整的桌面截图。刚才已点击了三个点按钮。\n\n"
+            "请同时回答两个问题：\n"
+            "1. 右侧群聊信息面板是否已打开（能看到成员头像区域）？\n"
+            "2. 如果已打开，找到灰色方形「-」减号按钮的位置。\n"
+            "   减号按钮位于成员头像行的最右侧，是一个小的灰色方形按钮。\n\n"
+            "坐标说明（仅在找到按钮时填写，相对于整个截图）：\n"
+            "- 使用0-1000归一化坐标系\n"
+            "- x=0表示截图最左边，x=1000表示最右边\n"
+            "- y=0表示截图最上边，y=1000表示最下边\n\n"
+            "回复JSON（只输出JSON，不要其他文字）：\n"
+            '{"panel_opened": true, "button_found": true, "click_x": 800, "click_y": 150} 如果面板已开且找到按钮\n'
+            '{"panel_opened": true, "button_found": false, "reason": "原因"} 如果面板已开但未找到按钮\n'
+            '{"panel_opened": false, "button_found": false, "reason": "原因"} 如果面板未打开'
+            + skill_section
+        )
     return (
         "这是屏幕右侧群聊信息面板的裁剪截图（宽260像素，高1440像素）。\n"
         "刚才已点击了三个点按钮。\n\n"
@@ -278,9 +318,10 @@ def parse_panel_and_minus_response(text: str) -> Dict[str, Any]:
         - click_y: int (NORMALIZED 0-1000, only if button_found=True)
         - reason: str (if panel_opened=False or button_found=False)
 
-    Note: click_x/click_y are in NORMALIZED space and must be converted
-    to SCREEN coords before clicking using:
-        MEMBER_PANEL_REGION.normalized_to_screen_coords(click_x, click_y)
+    Note: click_x/click_y are in NORMALIZED space (0-1000) and must be
+    converted to screen coords before clicking.
+    Windows: get_regions("windows").member_panel.normalized_to_screen_coords(click_x, click_y)
+    Mac:     screen_x = click_x / 1000 * img_w;  screen_y = click_y / 1000 * img_h
     """
     text = text.strip()
 
@@ -312,11 +353,18 @@ def parse_panel_and_minus_response(text: str) -> Dict[str, Any]:
     }
 
 
-def verify_member_dialog_opened_prompt() -> str:
-    """Prompt to verify the member selection dialog is open after clicking minus button.
-
-    This prompt is used with MEMBER_SELECT_REGION (705x545 cropped image).
-    """
+def verify_member_dialog_opened_prompt(os_type: str = "windows") -> str:
+    """Prompt to verify the member selection dialog is open after clicking minus."""
+    if os_type == "macos":
+        return (
+            "这是完整的桌面截图。刚才已点击了「-」减号按钮。\n\n"
+            "请查看截图中央区域：\n"
+            "- 成员选择对话框是否已打开？\n"
+            "- 能否看到成员列表和灰色圆形选择框？\n\n"
+            "回复JSON：\n"
+            '{"dialog_opened": true} 如果对话框已打开\n'
+            '{"dialog_opened": false, "reason": "原因"} 如果未打开'
+        )
     return (
         "这是屏幕中央区域的裁剪截图（宽705像素，高545像素）。\n"
         "刚才已点击了「-」减号按钮。\n\n"
@@ -329,19 +377,23 @@ def verify_member_dialog_opened_prompt() -> str:
     )
 
 
-def select_user_for_removal_prompt(user_name: str, is_first: bool = True) -> str:
+def select_user_for_removal_prompt(user_name: str, is_first: bool = True, os_type: str = "windows") -> str:
     """Prompt to find user checkbox and return click coordinates.
 
-    This prompt is used with MEMBER_SELECT_REGION (705x545 cropped image).
-
-    Coordinate system:
-    - AI returns coordinates in NORMALIZED space (0-1000)
-    - These must be converted to SCREEN coords using:
-      MEMBER_SELECT_REGION.normalized_to_screen_coords(click_x, click_y)
+    On Windows: AI sees the cropped 705x545 member-select region; coordinates
+    are normalized (0-1000) relative to that crop.
+    On macOS: AI sees the full screenshot; coordinates are normalized (0-1000)
+    relative to the full screen.
     """
     skill = load_skill()
     skill_section = f"\n\n参考操作指南：\n{skill}" if skill else ""
-    coord_note = (
+    coord_note_mac = (
+        "坐标说明：\n"
+        "- 使用0-1000归一化坐标系，相对于整个截图\n"
+        "- x=0表示截图最左边，x=1000表示最右边\n"
+        "- y=0表示截图最上边，y=1000表示最下边\n\n"
+    )
+    coord_note_win = (
         "坐标说明：\n"
         "- 使用0-1000归一化坐标系\n"
         "- x=0表示截图最左边，x=1000表示最右边\n"
@@ -352,33 +404,50 @@ def select_user_for_removal_prompt(user_name: str, is_first: bool = True) -> str
         f'{{"user_found": true, "user_name": "{user_name}", "click_x": 100, "click_y": 300}} 如果找到\n'
         f'{{"user_found": false, "user_name": "{user_name}", "reason": "原因"}} 如果未找到'
     )
+    if os_type == "macos":
+        action = "找到" if is_first else "继续找到"
+        return (
+            f"这是完整的桌面截图。\n"
+            f"任务：{action}成员选择对话框中用户「{user_name}」的灰色圆形选择框位置\n\n"
+            "请在截图中央的成员选择对话框中找到该用户名，并确定其旁边选择框的中心位置。\n\n"
+            + coord_note_mac
+            + "回复JSON（只输出JSON，不要其他文字）：\n"
+            + json_reply
+            + skill_section
+        )
     if is_first:
         return (
             "这是成员选择对话框的裁剪截图（宽705像素，高545像素）。\n"
             f"任务：找到用户「{user_name}」的灰色圆形选择框位置\n\n"
             "请在截图中找到该用户名，并确定其旁边红色选择框的中心位置。\n\n"
-            + coord_note
+            + coord_note_win
             + "回复JSON（只输出JSON，不要其他文字）：\n"
             + json_reply
             + skill_section
         )
-    else:
+    return (
+        "这是成员选择对话框的裁剪截图（宽705像素，高545像素）。\n"
+        f"继续任务：找到用户「{user_name}」的灰色圆形选择框位置\n\n"
+        "请在截图中找到该用户名，并确定其旁边红色选择框的中心位置。\n\n"
+        + coord_note_win
+        + "回复JSON（只输出JSON，不要其他文字）：\n"
+        + json_reply
+        + skill_section
+    )
+
+
+def verify_removal_prompt(user_name: str, os_type: str = "windows") -> str:
+    """Prompt to verify user was removed from member list after clicking delete."""
+    if os_type == "macos":
         return (
-            "这是成员选择对话框的裁剪截图（宽705像素，高545像素）。\n"
-            f"继续任务：找到用户「{user_name}」的灰色圆形选择框位置\n\n"
-            "请在截图中找到该用户名，并确定其旁边红色选择框的中心位置。\n\n"
-            + coord_note
-            + "回复JSON（只输出JSON，不要其他文字）：\n"
-            + json_reply
-            + skill_section
+            "这是完整的桌面截图。"
+            f"刚才已点击了移出按钮。\n\n"
+            f"请验证：用户「{user_name}」是否已从右侧群聊信息面板的成员列表中移除？\n\n"
+            "仔细检查截图右侧的成员列表区域。\n\n"
+            "回复JSON：\n"
+            f'{{"user_removed": true, "user_name": "{user_name}"}} 如果已移除\n'
+            f'{{"user_removed": false, "user_name": "{user_name}", "reason": "原因"}} 如果仍可见'
         )
-
-
-def verify_removal_prompt(user_name: str) -> str:
-    """Prompt to verify user was removed from member list after clicking delete.
-
-    This prompt is used with MEMBER_PANEL_REGION (260x1440 cropped image).
-    """
     return (
         "这是屏幕右侧边缘的裁剪截图（宽260像素，高1440像素）。\n"
         f"刚才已点击了移出按钮。\n\n"
@@ -401,9 +470,10 @@ def parse_user_selection_response(text: str) -> Dict[str, Any]:
         - click_y: int (NORMALIZED 0-1000, only if user_found=True)
         - reason: str (only if user_found=False)
 
-    Note: click_x/click_y are in NORMALIZED space and must be converted
-    to SCREEN coords before clicking using:
-        MEMBER_SELECT_REGION.normalized_to_screen_coords(click_x, click_y)
+    Note: click_x/click_y are in NORMALIZED space (0-1000) and must be
+    converted to screen coords before clicking.
+    Windows: get_regions("windows").member_select.normalized_to_screen_coords(click_x, click_y)
+    Mac:     screen_x = click_x / 1000 * img_w;  screen_y = click_y / 1000 * img_h
     """
     text = text.strip()
 
@@ -448,9 +518,10 @@ def parse_minus_button_response(text: str) -> Dict[str, Any]:
         - click_y: int (NORMALIZED 0-1000, only if button_found=True)
         - reason: str (only if button_found=False)
 
-    Note: click_x/click_y are in NORMALIZED space and must be converted
-    to SCREEN coords before clicking using:
-        MEMBER_PANEL_REGION.normalized_to_screen_coords(click_x, click_y)
+    Note: click_x/click_y are in NORMALIZED space (0-1000) and must be
+    converted to screen coords before clicking.
+    Windows: get_regions("windows").member_panel.normalized_to_screen_coords(click_x, click_y)
+    Mac:     screen_x = click_x / 1000 * img_w;  screen_y = click_y / 1000 * img_h
     """
     text = text.strip()
 
@@ -518,3 +589,152 @@ def parse_dialog_opened_response(text: str) -> Dict[str, Any]:
         "dialog_opened": False,
         "reason": "Could not parse response",
     }
+
+
+# ---------------------------------------------------------------------------
+# macOS-only: vision-based button location prompts
+# ---------------------------------------------------------------------------
+# WeChat Mac uses a web-based UI (Electron/flue) that exposes no AXButton
+# elements in the macOS Accessibility tree.  These prompts ask the AI to
+# locate each button visually in the full screenshot and return click coords.
+# ---------------------------------------------------------------------------
+
+def mac_find_three_dots_prompt() -> str:
+    """Ask AI to locate the three-dots / group-info button in the full screenshot.
+
+    Returns:
+        Prompt string. AI should respond with JSON containing button coords.
+    """
+    return (
+        "这是完整的桌面截图。\n"
+        "任务：找到微信聊天窗口右上角的「···」三个点按钮（用于打开群聊信息面板）。\n\n"
+        "这个按钮通常是一个带有三个点的小图标，位于聊天窗口标题栏的右侧。\n"
+        "它可能显示为「···」、「···」或三个点排列的图标。\n\n"
+        "坐标说明：\n"
+        "- 使用0-1000归一化坐标系，相对于整个截图\n"
+        "- x=0表示截图最左边，x=1000表示最右边\n"
+        "- y=0表示截图最上边，y=1000表示最下边\n\n"
+        "回复JSON（只输出JSON，不要其他文字）：\n"
+        '{"button_found": true, "click_x": 850, "click_y": 30} 如果找到\n'
+        '{"button_found": false, "reason": "原因"} 如果未找到'
+    )
+
+
+def mac_find_minus_button_prompt() -> str:
+    """Ask AI to locate the minus / remove-member button after panel is open.
+
+    Returns:
+        Prompt string. AI should respond with JSON containing button coords.
+    """
+    return (
+        "这是完整的桌面截图。群聊信息面板应该已经打开（在右侧）。\n"
+        "任务：找到群聊信息面板中的「-」减号按钮的位置。\n\n"
+        "这个减号按钮用于进入成员移出模式，通常位于成员头像区域的右下角。\n"
+        "它是一个小的灰色虚线轮廓的方形按钮，带有减号「-」符号，方形按钮和成员头像一样大，紧贴成员头像网格的右侧。\n\n"
+        "坐标说明：\n"
+        "- 使用0-1000归一化坐标系，相对于整个截图\n"
+        "- x=0表示截图最左边，x=1000表示最右边\n"
+        "- y=0表示截图最上边，y=1000表示最下边\n\n"
+        "回复JSON（只输出JSON，不要其他文字）：\n"
+        '{"button_found": true, "click_x": 820, "click_y": 200} 如果找到\n'
+        '{"button_found": false, "reason": "原因"} 如果未找到'
+    )
+
+
+def mac_find_confirm_removal_prompt(user_name: str = "") -> str:
+    """Ask AI to locate the 移出/confirm button after the user has been selected.
+
+    At this point the user's checkbox has already been ticked — the 移出 button
+    at the bottom of the member-selection dialog should now be active (blue/red).
+
+    Args:
+        user_name: Optional name of the user being removed, used in the prompt.
+
+    Returns:
+        Prompt string. AI should respond with JSON containing button coords.
+    """
+    name_hint = f"「{user_name}」的" if user_name else ""
+    return (
+        f"这是完整的桌面截图。{name_hint}成员的选择框已经被勾选。\n"
+        "任务：找到成员选择对话框底部的「移出」或「确定」按钮位置，点击它来确认移除。\n\n"
+        "这个按钮通常出现在成员列表底部，在至少一个成员被勾选后会变为可点击状态（蓝色或红色）。\n"
+        "请仔细查找对话框底部区域的确认按钮。\n\n"
+        "坐标说明：\n"
+        "- 使用0-1000归一化坐标系，相对于整个截图\n"
+        "- x=0表示截图最左边，x=1000表示最右边\n"
+        "- y=0表示截图最上边，y=1000表示最下边\n\n"
+        "回复JSON（只输出JSON，不要其他文字）：\n"
+        '{"button_found": true, "click_x": 500, "click_y": 800} 如果找到\n'
+        '{"button_found": false, "reason": "原因"} 如果未找到'
+    )
+
+
+def parse_mac_button_response(text: str) -> dict:
+    """Parse response from any mac_find_*_prompt function.
+
+    Handles common AI formatting issues:
+    - Markdown code fences (```json ... ```)
+    - Malformed JSON where click_y value is missing its key name,
+      e.g. {"button_found": true, "click_x": 432, 254}
+
+    Returns:
+        dict with keys:
+        - button_found: bool
+        - click_x: int (0-1000 normalized, physical pixel space)
+        - click_y: int (0-1000 normalized, physical pixel space)
+        - reason: str (if button_found=False)
+    """
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    json_match = re.search(r'\{[^}]*"button_found"\s*:\s*(true|false)[^}]*\}', text, re.I | re.S)
+    if json_match:
+        raw = json_match.group()
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            # Attempt regex extraction for each field individually so that
+            # malformed JSON (e.g. missing "click_y": key) still yields coords.
+            found_match = re.search(r'"button_found"\s*:\s*(true|false)', raw, re.I)
+            x_match = re.search(r'"click_x"\s*:\s*(\d+)', raw)
+            # click_y may appear as "click_y": NNN  OR as a bare trailing number
+            y_match = re.search(r'"click_y"\s*:\s*(\d+)', raw)
+            if y_match is None:
+                # Fallback: last standalone integer in the blob that isn't click_x
+                x_val = x_match.group(1) if x_match else None
+                for m in re.finditer(r'\b(\d+)\b', raw):
+                    if m.group(1) != x_val:
+                        y_match = m
+            if found_match and x_match and y_match:
+                button_found = found_match.group(1).lower() == "true"
+                return {
+                    "button_found": button_found,
+                    "click_x": int(x_match.group(1)),
+                    "click_y": int(y_match.group(1)),
+                    "reason": "",
+                }
+            return {
+                "button_found": False,
+                "click_x": 0,
+                "click_y": 0,
+                "reason": "Could not parse response",
+            }
+
+        return {
+            "button_found": bool(data.get("button_found", False)),
+            "click_x": int(data.get("click_x", 0)),
+            "click_y": int(data.get("click_y", 0)),
+            "reason": data.get("reason", ""),
+        }
+
+    return {
+        "button_found": False,
+        "click_x": 0,
+        "click_y": 0,
+        "reason": "Could not parse response",
+    }
+

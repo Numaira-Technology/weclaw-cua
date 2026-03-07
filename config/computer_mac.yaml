@@ -6,16 +6,10 @@ timeout: 180
 telemetry_enabled: false
 screenshot_delay: 0.5
 
-# Screen dimensions — used for normalized coord conversion in vision queries.
-# WeChat Mac typically runs on a 2560x1440 or 2560x1600 Retina display.
-# Update these to match your actual display resolution.
-screen_width: 2560
-screen_height: 1600
-
-# Human-like mouse movement settings
-human_mouse:
-  enabled: true
-  speed_factor: 0.8
-  curve_variance: 0.3
-  zigzag_enabled: false
-  base_delay_ms: 5.0
+# Physical pixel dimensions of the display.
+# The macOS server captures screenshots at native Retina resolution (ImageGrab.grab())
+# and clicks via Quartz CGEventPost — both work in physical pixel space.
+# Run: python3 -c "from PIL import ImageGrab; img=ImageGrab.grab(); print(img.width, img.height)"
+# to confirm the actual capture size.
+screen_width: 3024
+screen_height: 1964
