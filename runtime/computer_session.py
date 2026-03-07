@@ -62,6 +62,7 @@ class ComputerSettings:
     wechat_three_dots: Tuple[int, int] = field(default=(0, 0))
     wechat_minus_button: Tuple[int, int] = field(default=(0, 0))
     wechat_delete_button: Tuple[int, int] = field(default=(0, 0))
+    wechat_banner: Tuple[int, int] = field(default=(0, 0))
     # Scroll tuning — shared across platforms
     scroll_chat_window_clicks_per_pass: int = field(default=5)
     scroll_max_chat_window_passes: int = field(default=4)
@@ -115,6 +116,10 @@ def load_computer_settings(path: Path) -> ComputerSettings:
         wechat_delete_button=(
             int(data.get("wechat_delete_button_x", 0)),
             int(data.get("wechat_delete_button_y", 0)),
+        ),
+        wechat_banner=(
+            int(data.get("wechat_banner_x", 0)),
+            int(data.get("wechat_banner_y", 0)),
         ),
         scroll_chat_window_clicks_per_pass=int(
             data.get("scroll_chat_window_clicks_per_pass", 5)

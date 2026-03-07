@@ -1143,10 +1143,8 @@ class ControlPanel:
         for g in self.state.unread_groups:
             self._log(f"  - {g.name} (id={g.thread_id})")
         if not self.state.unread_groups:
-            self._log("[Run All] No unread groups found. Workflow complete.")
-            self._set_status("Ready")
-            self._finish_run_all()
-            messagebox.showinfo("Run All Complete", "No unread groups found.")
+            self._log("[Run All] No unread groups in current viewport. Workflow complete.")
+            self._run_all_complete()
             return
         self._run_all_read_messages()
 
@@ -1324,20 +1322,40 @@ class ControlPanel:
         remaining = len(self.state.unread_groups) - self.state.current_thread_index
         if remaining > 0:
             next_group = self.state.unread_groups[self.state.current_thread_index]
-            self._log(
-                f"[Run All] Advanced to next group. {remaining} group(s) remaining."
-            )
+            self._log(f"[Run All] Advanced to next group. {remaining} group(s) remaining.")
             self._log(f"[Run All] Processing: {next_group.name}")
             self._run_all_read_messages()
         else:
-            self._run_all_complete()
+            self._run_all_scroll_and_reclassify()
+
+    def _run_all_scroll_and_reclassify(self) -> None:
+        """Scroll the left chat list panel down one viewport, then re-classify."""
+        if self._check_stop_requested():
+            return
+        self._set_status("Run All: Scroll Chat List")
+        self._log("[Run All] All groups in viewport processed. Scrolling chat list down...")
+        self._request_agent_step("scroll_chat_list", {})
+        self._poll_agent_result(self._run_all_on_scroll_result)
+
+    def _run_all_on_scroll_result(self, result: dict) -> None:
+        """After scroll, reset per-viewport state and re-classify."""
+        if self._check_stop_requested():
+            return
+        self._log("[Run All] Chat list scrolled. Re-classifying for new unread groups...")
+        self.state.threads = []
+        self.state.unread_groups = []
+        self.state.current_thread_index = 0
+        self._save_state()
+        self._run_all_classify()
 
     def _run_all_complete(self) -> None:
         """Run all workflow complete."""
+        total_groups = len(self.state.all_plans)
+        total_suspects = len(self.state.all_suspects)
         self._log("=" * 50)
         self._log("[Run All] Workflow complete!")
-        self._log(f"Total groups processed: {len(self.state.unread_groups)}")
-        self._log(f"Total suspects found: {len(self.state.all_suspects)}")
+        self._log(f"Total groups processed: {total_groups}")
+        self._log(f"Total suspects found: {total_suspects}")
         self._log(f"Total plans executed: {len(self.state.all_plans)}")
         self._log("=" * 50)
         self._set_status("Ready")
@@ -1345,8 +1363,8 @@ class ControlPanel:
         messagebox.showinfo(
             "Run All Complete",
             f"Automated workflow complete!\n\n"
-            f"Groups processed: {len(self.state.unread_groups)}\n"
-            f"Total suspects: {len(self.state.all_suspects)}\n\n"
+            f"Groups processed: {total_groups}\n"
+            f"Total suspects: {total_suspects}\n\n"
             f"Click 'Export Report' to save results.",
         )
 
