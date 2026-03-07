@@ -4,13 +4,18 @@ Model session lifecycle for Cua VLM router.
 Usage:
   from pathlib import Path
   from runtime.computer_session import build_computer, load_computer_settings
+  # Windows:
   settings = load_computer_settings(Path("config/computer_windows.yaml"))
+  # macOS:
+  settings = load_computer_settings(Path("config/computer_mac.yaml"))
   computer = build_computer(settings)
   model_settings = load_model_settings(Path("config/model.yaml"))
   agent = build_agent(model_settings, computer)
 
 Input:
-  - config_path: Path to YAML file with model, max_trajectory_budget, instructions, use_prompt_caching, screenshot_delay, telemetry_enabled.
+  - config_path: Path to YAML file with model, max_trajectory_budget, instructions,
+    use_prompt_caching, screenshot_delay, telemetry_enabled, and optionally
+    verify_model (fast model for yes/no checks; defaults to model if absent).
 
 Output:
   - ModelSettings dataclass populated from config.
@@ -46,6 +51,7 @@ class ModelSettings:
     screenshot_delay: float
     telemetry_enabled: bool
     api_key: Optional[str]
+    verify_model: str = ""  # Fast model for yes/no checks; falls back to model if empty
 
 
 def _parse_simple_yaml(path: Path) -> Dict[str, str]:
@@ -99,6 +105,7 @@ def load_model_settings(path: Path) -> ModelSettings:
         screenshot_delay=float(data.get("screenshot_delay", 0.5)),
         telemetry_enabled=str(data.get("telemetry_enabled", "false")).lower() == "true",
         api_key=data.get("api_key"),
+        verify_model=data.get("verify_model", ""),
     )
 
 

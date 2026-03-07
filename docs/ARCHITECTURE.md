@@ -15,7 +15,12 @@ The WeChat Removal Tool is an AI-powered agent that automates the detection and 
 5. [Coordinate Systems](#coordinate-systems)
 6. [Workflow Stages](#workflow-stages)
 7. [Configuration](#configuration)
-8. [Troubleshooting](#troubleshooting)
+8. [Performance Architecture](#performance-architecture)
+9. [Skills System](#skills-system)
+10. [Adding New Actions](#adding-new-actions)
+11. [Troubleshooting](#troubleshooting)
+
+> **Platform differences (Windows vs macOS)** — screenshot strategy, coordinate spaces, click delivery, AX tree vs scaffolding, and per-platform prompt wording are documented separately in [PLATFORM_GUIDE.md](PLATFORM_GUIDE.md).
 
 ---
 
@@ -24,12 +29,13 @@ The WeChat Removal Tool is an AI-powered agent that automates the detection and 
 ```
 .
 ├── config/                          # Configuration files
-│   ├── computer_windows.yaml        # Desktop mode settings
-│   └── model.yaml                   # AI model settings (OpenRouter)
+│   ├── computer_windows.yaml        # Desktop mode settings (screen coords, button positions)
+│   └── model.yaml                   # AI model settings (model, verify_model, skills_dir)
 │
 ├── runtime/                         # Session lifecycle managers
 │   ├── computer_session.py          # Builds Computer from config
-│   └── model_session.py             # Builds ComputerAgent from config
+│   ├── model_session.py             # Builds ComputerAgent from config (ModelSettings)
+│   └── llm_utils.py                 # Shared LLM retry utility (llm_call_with_retry)
 │
 ├── modules/                         # Workflow components (stateless)
 │   ├── task_types.py                # Data classes: GroupThread, Suspect, RemovalPlan
@@ -39,7 +45,10 @@ The WeChat Removal Tool is an AI-powered agent that automates the detection and 
 │   ├── suspicious_detector.py       # Extracts suspects from output
 │   ├── removal_precheck.py          # Builds removal plan
 │   ├── human_confirmation.py        # Requires operator confirmation
-│   └── removal_executor.py          # Executes removals
+│   └── removal_executor.py          # Executes removals (load_skill, merged prompts)
+│
+├── skills/                          # Skill markdown playbooks
+│   └── wechat_removal.md            # WeChat UI rules, injected into action prompts
 │
 ├── workflow/                        # Main orchestration
 │   └── run_wechat_removal.py        # Entry point (step-mode backend)
@@ -224,60 +233,46 @@ The core automation loop follows a **Find → Click → Verify** pattern for eac
 
 ### Detailed Removal Workflow
 
-The user removal process demonstrates the full find-click-verify pattern:
+The user removal process demonstrates the full find-click-verify pattern. Steps 1 and 2 are merged into a single LLM call (same region, no state change between them):
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                      USER REMOVAL WORKFLOW                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  STEP 1: Open Group Info Panel                                              │
+│  STEP 1+2: Open Panel AND Find Minus Button (merged — single LLM call)      │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                                                                      │   │
-│  │  [SCAFFOLDING CLICK]              [VISION VERIFY]                   │   │
+│  │  [SCAFFOLDING CLICK]         [COMBINED VISION QUERY]                │   │
 │  │                                                                      │   │
-│  │  Click three dots (...)  ────────▶  Verify panel opened             │   │
-│  │  at fixed position                  using MEMBER_PANEL_REGION       │   │
-│  │  (2525, 48)                                                         │   │
+│  │  Click three dots (...)  ──▶  Single call to heavy model:           │   │
+│  │  at fixed position             Crop MEMBER_PANEL_REGION             │   │
+│  │  (2525, 48)                    "Is panel open? Find minus button"   │   │
 │  │                                                                      │   │
-│  │  Prompt: verify_panel_opened_prompt()                               │   │
-│  │  Response: {"panel_opened": true/false}                             │   │
+│  │  Prompt: verify_panel_and_find_minus_prompt()                       │   │
+│  │  Response: {"panel_opened": true, "button_found": true,             │   │
+│  │             "click_x": 800, "click_y": 150}                         │   │
+│  │                                                                      │   │
+│  │  → Convert NORMALIZED (800, 150) → SCREEN coords                    │   │
+│  │  → Click minus button at calculated position                        │   │
 │  │                                                                      │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                              │                                              │
 │                              ▼                                              │
-│  STEP 2: Enter Removal Mode                                                 │
+│  STEP 3: Verify Dialog Opened  (fast verify_model)                          │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                                                                      │   │
-│  │  [VISION FIND]                       [VISION VERIFY]                │   │
+│  │  [VISION VERIFY — fast model]                                        │   │
 │  │                                                                      │   │
-│  │  Crop MEMBER_PANEL_REGION ──────────▶ AI returns coordinates ─────▶ │   │
-│  │  Send to LLM with prompt             in 0-1000 normalized           │   │
-│  │  "Find minus button"                 space                          │   │
+│  │  Crop MEMBER_SELECT_REGION ──▶ "Is member selection dialog open?"   │   │
 │  │                                                                      │   │
-│  │  Prompt: find_minus_button_prompt()                                 │   │
-│  │  Response: {"button_found": true, "click_x": 800, "click_y": 150}   │   │
-│  │                                                                      │   │
-│  │                    │                                                 │   │
-│  │                    ▼                                                 │   │
-│  │           Convert coordinates:                                       │   │
-│  │           NORMALIZED (0-1000) ──▶ SCREEN (pixels)                   │   │
-│  │           Using: MEMBER_PANEL_REGION.normalized_to_screen_coords()  │   │
-│  │                                                                      │   │
-│  │                    │                                                 │   │
-│  │                    ▼                                                 │   │
-│  │           Click at calculated screen position                        │   │
-│  │                                                                      │   │
-│  │                    │                                                 │   │
-│  │                    ▼                                                 │   │
-│  │           Verify dialog opened using MEMBER_SELECT_REGION           │   │
-│  │           Prompt: verify_member_dialog_opened_prompt()              │   │
-│  │           Response: {"dialog_opened": true/false}                   │   │
+│  │  Prompt: verify_member_dialog_opened_prompt()                        │   │
+│  │  Response: {"dialog_opened": true/false}                             │   │
 │  │                                                                      │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                              │                                              │
 │                              ▼                                              │
-│  STEP 3: Find and Select User                                               │
+│  STEP 4: Find and Select User  (heavy model)                                │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                                                                      │   │
 │  │  [VISION FIND]                    [VISION-GUIDED CLICK]             │   │
@@ -297,19 +292,18 @@ The user removal process demonstrates the full find-click-verify pattern:
 │  │                                                                      │   │
 │  │                    │                                                 │   │
 │  │                    ▼                                                 │   │
-│  │           Click at calculated screen position                        │   │
+│  │   [PIPELINED] Click user checkbox → immediately click delete button │   │
+│  │   (no intermediate sleep; delete is at fixed scaffolding position)  │   │
 │  │                                                                      │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
 │                              │                                              │
 │                              ▼                                              │
-│  STEP 4: Confirm Removal                                                    │
+│  STEP 5: Confirm Removal  (fast verify_model)                               │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │                                                                      │   │
-│  │  [SCAFFOLDING CLICK]              [VISION VERIFY]                   │   │
+│  │  [VISION VERIFY — fast model]                                        │   │
 │  │                                                                      │   │
-│  │  Click delete button  ───────────▶ Verify user removed              │   │
-│  │  at fixed position                 using MEMBER_PANEL_REGION        │   │
-│  │  (1345, 920)                                                        │   │
+│  │  Crop MEMBER_PANEL_REGION ──▶ "Is user removed?"                    │   │
 │  │                                                                      │   │
 │  │  Prompt: verify_removal_prompt(user_name)                           │   │
 │  │  Response: {"user_removed": true/false}                             │   │
@@ -574,12 +568,21 @@ display: "1280x720"                 # Screen resolution
 timeout: 180                        # Connection timeout (seconds)
 telemetry_enabled: false            # Disable telemetry
 screenshot_delay: 0.5               # Delay before screenshots
+
+# WeChat UI fixed button positions (absolute screen pixels for 2560x1440)
+wechat_three_dots_x: 2525
+wechat_three_dots_y: 48
+wechat_delete_button_x: 1345
+wechat_delete_button_y: 920
 ```
 
 ### `config/model.yaml`
 
 ```yaml
-model: openrouter/anthropic/claude-sonnet-4  # LLM via OpenRouter
+model: openrouter/qwen/qwen3-vl-32b-instruct  # Primary model: coordinate prediction
+verify_model: openrouter/qwen/qwen2-vl-7b-instruct  # Fast model: yes/no checks
+                                              # Omit or leave empty to use model for all calls
+skills_dir: skills                            # Directory with skill .md files
 max_trajectory_budget: 5.0                    # Max cost in USD
 instructions: |                               # System prompt
   你是一个专门处理微信群违规信息的助手...
@@ -587,6 +590,137 @@ use_prompt_caching: false                     # Caching (Anthropic-only)
 screenshot_delay: 0.5                         # Delay before screenshots
 telemetry_enabled: false                      # Disable telemetry
 ```
+
+**Model routing logic:**
+
+| Call type | Model used | Why |
+|-----------|-----------|-----|
+| `verify_panel_and_find_minus_prompt` | `model` | Returns coordinates — needs the heavy model |
+| `select_user_for_removal_prompt` | `model` | Returns coordinates — needs the heavy model |
+| `verify_member_dialog_opened_prompt` | `verify_model` | Yes/no only — fast model sufficient |
+| `verify_removal_prompt` | `verify_model` | Yes/no only — fast model sufficient |
+| `classification_prompt` | `model` | Structured list extraction |
+| `message_reader_prompt` | `model` | Full message reading |
+
+---
+
+## Performance Architecture
+
+Per-suspect LLM call count before and after optimizations:
+
+```
+BEFORE (5-6 calls per suspect, all using heavy 32B model):
+  1. verify_panel_opened      → MEMBER_PANEL_REGION  (heavy model)
+  2. find_minus_button        → MEMBER_PANEL_REGION  (heavy model)
+  3. verify_dialog_opened     → MEMBER_SELECT_REGION (heavy model)
+  4. select_user_for_removal  → MEMBER_SELECT_REGION (heavy model)
+  5. verify_removal           → MEMBER_PANEL_REGION  (heavy model)
+  Total: ~15-30s per suspect
+
+AFTER (4 calls per suspect, mixed models):
+  1. verify_panel_and_find_minus → MEMBER_PANEL_REGION  (heavy model, was 2 calls)
+  2. verify_dialog_opened        → MEMBER_SELECT_REGION (fast model)
+  3. select_user_for_removal     → MEMBER_SELECT_REGION (heavy model)
+  4. verify_removal              → MEMBER_PANEL_REGION  (fast model)
+  Total: ~8-12s per suspect (estimated)
+```
+
+### Shared Retry Utility (`runtime/llm_utils.py`)
+
+All vision queries go through `llm_call_with_retry()`:
+
+```python
+async def llm_call_with_retry(
+    model: str,
+    messages: List[Dict[str, Any]],
+    timeout: float = 120.0,
+    max_retries: int = 3,
+) -> str:
+    ...
+```
+
+Retries automatically on transient API errors (502, 503, 504, Bad Gateway, Timeout) with 2s × attempt backoff. Non-transient errors propagate immediately. Any new action type should call this function rather than implement its own retry loop.
+
+### Pipelined Click Sequence
+
+After the user checkbox click is confirmed by `select_user_for_removal`, the delete button click is executed immediately with no intermediate sleep. The delete button is at a hardcoded position, so no vision query is needed between the two clicks — verification happens once after both clicks complete.
+
+---
+
+## Skills System
+
+Skills are markdown files in `skills/` that inject workflow rules into prompts at runtime. This separates UI knowledge (how WeChat behaves) from code logic (how to call the LLM).
+
+### File Format
+
+```markdown
+---
+name: wechat-removal
+description: Use when removing users from a WeChat group via the desktop client.
+---
+
+# WeChat Member Removal
+
+## UI Flow Overview
+1. Click the three-dots (...) button...
+...
+```
+
+### How Skills Are Loaded
+
+`removal_executor.load_skill(path)` reads the file, strips the YAML frontmatter, and returns the body text. If the file is missing, it returns an empty string (graceful degradation). Prompts that call `load_skill()` append the skill text as a reference section:
+
+```python
+skill = load_skill()
+skill_section = f"\n\n参考操作指南：\n{skill}" if skill else ""
+return "...core prompt..." + skill_section
+```
+
+### Currently Skill-Injected Prompts
+
+| Prompt function | Skill content injected? |
+|---|---|
+| `verify_panel_and_find_minus_prompt()` | Yes |
+| `select_user_for_removal_prompt()` | Yes |
+| `verify_member_dialog_opened_prompt()` | No (yes/no only) |
+| `verify_removal_prompt()` | No (yes/no only) |
+
+---
+
+## Adding New Actions
+
+To add a new action type to the workflow:
+
+1. **Add a prompt builder** in the relevant `modules/` file:
+   ```python
+   def my_action_prompt(param: str) -> str:
+       skill = load_skill()
+       skill_section = f"\n\n参考操作指南：\n{skill}" if skill else ""
+       return "...prompt text..." + skill_section
+   ```
+
+2. **Add a response parser** returning a typed dict:
+   ```python
+   def parse_my_action_response(text: str) -> Dict[str, Any]:
+       ...
+   ```
+
+3. **Call the query** from the workflow using the appropriate helper:
+   ```python
+   text_output, screenshots = await run_cropped_vision_query(
+       self.computer, self.model, my_action_prompt(param),
+       self.capture_dir, "my_action_label", MY_CROP_REGION,
+   )
+   ```
+   `run_cropped_vision_query` and `run_vision_query` both use `llm_call_with_retry` internally — no retry boilerplate needed.
+
+4. **Register the step** in `StepModeRunner.process_request()`:
+   ```python
+   elif step == "my_action":
+       await self.handle_my_action(params)
+   ```
+
+5. **Update the skill** in `skills/wechat_removal.md` if the new action interacts with the same UI, or create a new skill file.
 
 ---
 
@@ -944,6 +1078,9 @@ The following diagram shows the entire workflow from start to finish:
 │  │       │    ├── handle_classify()                                         │  │   │
 │  │       │    ├── handle_read_messages()                                    │  │   │
 │  │       │    └── handle_remove()                                           │  │   │
+│  │       │         └── _remove_suspect_in_session()                        │  │   │
+│  │       │              ├── run_cropped_vision_query(self.model, ...)       │  │   │
+│  │       │              └── run_cropped_vision_query(self.verify_model, ...)│  │   │
 │  │       │                                                                   │  │   │
 │  │       │ Step results (.step_result, .step_status)                        │  │   │
 │  │       └──────────────────────────────────────────────────────────────────┘  │   │
@@ -957,10 +1094,13 @@ The following diagram shows the entire workflow from start to finish:
 │  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────┐  │   │
 │  │  │ group_classifier │  │ message_reader   │  │ removal_executor         │  │   │
 │  │  │                  │  │                  │  │                          │  │   │
-│  │  │ • Prompt builder │  │ • Prompt builder │  │ • Prompt builders:       │  │   │
-│  │  │ • Response parser│  │ • Response parser│  │   - verify_panel_opened  │  │   │
+│  │  │ • Prompt builder │  │ • Prompt builder │  │ • load_skill()           │  │   │
+│  │  │ • Response parser│  │ • Response parser│  │ • Prompt builders:       │  │   │
+│  │  │                  │  │                  │  │   - verify_panel_and_    │  │   │
+│  │  │                  │  │                  │  │     find_minus (merged)  │  │   │
 │  │  │                  │  │                  │  │   - select_user_for_     │  │   │
 │  │  │                  │  │                  │  │     removal              │  │   │
+│  │  │                  │  │                  │  │   - verify_dialog_opened │  │   │
 │  │  │                  │  │                  │  │   - verify_removal       │  │   │
 │  │  │                  │  │                  │  │ • Response parsers       │  │   │
 │  │  └──────────────────┘  └──────────────────┘  └──────────────────────────┘  │   │
@@ -971,10 +1111,10 @@ The following diagram shows the entire workflow from start to finish:
 │  │  │ • CropRegion     │  │                  │  │ • GroupThread           │  │   │
 │  │  │ • CHAT_LIST_     │  │ • click_three_   │  │ • Suspect               │  │   │
 │  │  │   REGION         │  │   dots()         │  │ • RemovalPlan           │  │   │
-│  │  │ • MEMBER_PANEL_  │  │ • click_minus_   │  │ • RemovalResult         │  │   │
-│  │  │   REGION         │  │   button()       │  │                          │  │   │
-│  │  │ • MEMBER_SELECT_ │  │ • click_delete_  │  │                          │  │   │
+│  │  │ • MEMBER_PANEL_  │  │ • click_delete_  │  │ • RemovalResult         │  │   │
 │  │  │   REGION         │  │   confirm()      │  │                          │  │   │
+│  │  │ • MEMBER_SELECT_ │  │                  │  │                          │  │   │
+│  │  │   REGION         │  │                  │  │                          │  │   │
 │  │  │ • normalized_to_ │  │                  │  │                          │  │   │
 │  │  │   screen_coords()│  │                  │  │                          │  │   │
 │  │  └──────────────────┘  └──────────────────┘  └──────────────────────────┘  │   │
@@ -991,9 +1131,17 @@ The following diagram shows the entire workflow from start to finish:
 │  │  │ • load_computer_settings │    │ • load_model_settings               │  │   │
 │  │  │ • build_computer()       │    │ • build_agent()                     │  │   │
 │  │  │ • ComputerSettings       │    │ • ModelSettings                     │  │   │
-│  │  │   (button positions)     │    │   (LLM config)                      │  │   │
+│  │  │   (button positions)     │    │   (model, verify_model, skills_dir) │  │   │
 │  │  │                          │    │                                      │  │   │
 │  │  └──────────────────────────┘    └──────────────────────────────────────┘  │   │
+│  │                                                                              │   │
+│  │  ┌──────────────────────────────────────────────────────────────────────┐  │   │
+│  │  │ llm_utils.py                                                         │  │   │
+│  │  │                                                                      │  │   │
+│  │  │ • llm_call_with_retry(model, messages, timeout, max_retries)        │  │   │
+│  │  │   Used by run_vision_query and run_cropped_vision_query             │  │   │
+│  │  │   Extend by calling directly from any new action handler            │  │   │
+│  │  └──────────────────────────────────────────────────────────────────────┘  │   │
 │  │                                                                              │   │
 │  └─────────────────────────────────────────────────────────────────────────────┘   │
 │                                      │                                              │
@@ -1020,10 +1168,11 @@ The following diagram shows the entire workflow from start to finish:
 │  │  ┌────────────────────────────┐    ┌────────────────────────────────────┐  │   │
 │  │  │ LLM Provider (OpenRouter)  │    │ WeChat Desktop Application         │  │   │
 │  │  │                            │    │                                    │  │   │
-│  │  │ • Claude Sonnet 4          │    │ • Running on host machine          │  │   │
-│  │  │ • GPT-4o                   │    │ • Logged in with groups            │  │   │
-│  │  │ • Gemini                   │    │ • Visible on screen                │  │   │
-│  │  │                            │    │                                    │  │   │
+│  │  │ • qwen3-vl-32b (model)     │    │ • Running on host machine          │  │   │
+│  │  │ • qwen2-vl-7b (verify_     │    │ • Logged in with groups            │  │   │
+│  │  │   model)                   │    │ • Visible on screen                │  │   │
+│  │  │ • Or any litellm-          │    │                                    │  │   │
+│  │  │   compatible model         │    │                                    │  │   │
 │  │  └────────────────────────────┘    └────────────────────────────────────┘  │   │
 │  │                                                                              │   │
 │  └─────────────────────────────────────────────────────────────────────────────┘   │
@@ -1046,7 +1195,26 @@ Response format:
 {"threads": [{"name": "群名", "y": 73, "is_group": true, "unread": true}, ...]}
 ```
 
-### User Selection Prompt
+### Combined Panel Verify + Minus Button Find (merged, heavy model)
+
+```
+这是屏幕右侧群聊信息面板的裁剪截图（宽260像素，高1440像素）。
+刚才已点击了三个点按钮。
+
+请同时回答两个问题：
+1. 群聊信息面板是否已打开（能看到成员头像区域）？
+2. 如果已打开，找到灰色方形「-」减号按钮的位置。
+
+坐标说明：使用0-1000归一化坐标系
+
+Response format (panel open + button found):
+{"panel_opened": true, "button_found": true, "click_x": 800, "click_y": 150}
+
+Response format (panel not open):
+{"panel_opened": false, "button_found": false, "reason": "原因"}
+```
+
+### User Selection Prompt (heavy model)
 
 ```
 这是成员选择对话框的裁剪截图（宽705像素，高545像素）。
@@ -1061,7 +1229,7 @@ Response format:
 {"user_found": true, "user_name": "代写论文", "click_x": 100, "click_y": 300}
 ```
 
-### Removal Verification Prompt
+### Removal Verification Prompt (fast verify_model)
 
 ```
 这是屏幕右侧边缘的裁剪截图（宽260像素，高1440像素）。

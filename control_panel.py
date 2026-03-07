@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import sys
 import threading
@@ -410,6 +411,33 @@ class ControlPanel:
         )
         self.system_status_label.pack(fill=tk.X, pady=(0, 12))
 
+        # Running on Mac toggle
+        self.force_mac_var = tk.BooleanVar(value=self.state.force_mac_mode)
+
+        def _on_mac_toggle():
+            self.state.force_mac_mode = self.force_mac_var.get()
+            self._save_state()
+            self._log(
+                f"Mac mode: {'ON (full screen, AX tree)' if self.state.force_mac_mode else 'OFF (auto-detect)'}"
+            )
+
+        mac_frame = tk.Frame(card, bg=COLORS["card"])
+        mac_frame.pack(fill=tk.X, pady=(0, 12))
+
+        self.mac_toggle = tk.Checkbutton(
+            mac_frame,
+            text="Running on Mac",
+            variable=self.force_mac_var,
+            command=_on_mac_toggle,
+            font=("Segoe UI", 10),
+            bg=COLORS["card"],
+            fg=COLORS["text"],
+            activebackground=COLORS["card"],
+            activeforeground=COLORS["text"],
+            selectcolor=COLORS["primary_light"],
+        )
+        self.mac_toggle.pack(side=tk.LEFT)
+
         # Start/Stop button
         self.system_btn = ttk.Button(
             card,
@@ -553,8 +581,10 @@ class ControlPanel:
         self._kill_port_8000()
         # Final cleanup of any orphaned workflow processes
         self._kill_workflow_processes()
-        # Reset state on exit so next run starts fresh
+        # Reset workflow state on exit; preserve Mac mode preference
+        force_mac = self.state.force_mac_mode
         self.state = PanelState()
+        self.state.force_mac_mode = force_mac
         self._save_state()
         self.root.destroy()
 
@@ -728,55 +758,67 @@ class ControlPanel:
                     "8000",
                 ],
                 cwd=str(vendor_server),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 env=env,
                 creationflags=(
                     subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
                 ),
             )
 
-            # Start thread to monitor server and then start workflow
+            # Use a queue so the main thread drives UI updates. root.after(0, ...) from
+            # a daemon thread does not run on macOS tkinter.
+            server_startup_queue = queue.Queue()
+
             def monitor_and_start_workflow():
-                ready = False
                 start_time = time.time()
+                iteration = 0
 
                 while self.server_process and time.time() - start_time < 30:
-                    if self.server_process.poll() is not None:
-                        self.root.after(
-                            0,
-                            lambda: self._update_system_status(
-                                "error", "Server failed to start"
-                            ),
-                        )
-                        self.root.after(
-                            0, lambda: self._log("Server process exited unexpectedly")
-                        )
+                    iteration += 1
+                    elapsed = time.time() - start_time
+                    poll_result = self.server_process.poll()
+
+                    if poll_result is not None:
+                        server_startup_queue.put(("error", "Server failed to start"))
                         self.server_process = None
                         return
 
                     if self._check_server_ready():
-                        ready = True
-                        self.root.after(
-                            0, lambda: self._log("Computer-server is ready.")
-                        )
-                        break
+                        server_startup_queue.put(("ready",))
+                        return
 
+                    server_startup_queue.put(("progress", int(elapsed)))
                     time.sleep(0.5)
 
-                if not ready:
-                    self.root.after(
-                        0,
-                        lambda: self._update_system_status(
-                            "error", "Server startup timeout"
-                        ),
-                    )
-                    return
+                server_startup_queue.put(("timeout",))
 
-                # Server is ready, now start workflow
-                self.root.after(0, self._start_workflow_after_server)
+            def _poll_server_startup_queue():
+                try:
+                    while True:
+                        msg = server_startup_queue.get_nowait()
+                        if msg[0] == "ready":
+                            self._log("Computer-server is ready.")
+                            self._start_workflow_after_server()
+                            return
+                        if msg[0] == "error":
+                            self._update_system_status("error", msg[1])
+                            self._log("Server process exited unexpectedly")
+                            return
+                        if msg[0] == "timeout":
+                            self._update_system_status("error", "Server startup timeout")
+                            return
+                        if msg[0] == "progress":
+                            self._update_system_status(
+                                "starting_server",
+                                f"Starting computer server... ({msg[1]}s)",
+                            )
+                except queue.Empty:
+                    pass
+                self.root.after(200, _poll_server_startup_queue)
 
             threading.Thread(target=monitor_and_start_workflow, daemon=True).start()
+            self.root.after(200, _poll_server_startup_queue)
 
         except Exception as e:
             self._log(f"Failed to start server: {e}")
@@ -789,39 +831,42 @@ class ControlPanel:
         self._log("Starting workflow backend...")
 
         try:
+            cmd = [
+                sys.executable,
+                "-u",
+                "-m",
+                "workflow.run_wechat_removal",
+                "--step-mode",
+            ]
+            use_mac = self.state.force_mac_mode or sys.platform == "darwin"
+            if use_mac:
+                cmd.append("--mac")
+                self._log("Starting workflow with Mac mode (full screen, AX tree)")
+            else:
+                self._log("Starting workflow with Windows mode (cropped regions)")
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
             self.workflow_process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-u",
-                    "-m",
-                    "workflow.run_wechat_removal",
-                    "--step-mode",
-                ],
+                cmd,
                 cwd=str(self.root_dir),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                env=env,
                 creationflags=(
                     subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
                 ),
             )
+
+            # Use queue so main thread drives UI; root.after(0,...) from thread fails on macOS
+            workflow_queue = queue.Queue()
+            workflow_start_time = time.time()
 
             def monitor_workflow():
                 if self.workflow_process and self.workflow_process.stdout:
                     while self.workflow_process:
                         if self.workflow_process.poll() is not None:
                             exit_code = self.workflow_process.returncode
-                            self.root.after(
-                                0,
-                                lambda: self._log(
-                                    f"Workflow exited with code {exit_code}"
-                                ),
-                            )
-                            self.root.after(
-                                0,
-                                lambda: self._update_system_status(
-                                    "error", "Workflow stopped"
-                                ),
-                            )
+                            workflow_queue.put(("exited", exit_code))
                             self.workflow_process = None
                             return
 
@@ -832,27 +877,45 @@ class ControlPanel:
 
                         decoded = line.decode("utf-8", errors="replace").strip()
                         if decoded:
-                            self.root.after(
-                                0, lambda l=decoded: self._log(f"  [workflow] {l}")
-                            )
+                            workflow_queue.put(("log", decoded))
                             if (
                                 "STEP MODE ACTIVE" in decoded
                                 or "Waiting for step requests" in decoded
+                                or "DESKTOP MODE" in decoded
+                                or "Computer server connected" in decoded
                             ):
-                                self.root.after(
-                                    0,
-                                    lambda: self._update_system_status(
-                                        "running", "System running"
-                                    ),
-                                )
-                                self.root.after(
-                                    0,
-                                    lambda: self._log(
-                                        "System is ready for workflow steps."
-                                    ),
-                                )
+                                workflow_queue.put(("running",))
+
+            def _poll_workflow_queue():
+                try:
+                    while True:
+                        msg = workflow_queue.get_nowait()
+                        if msg[0] == "exited":
+                            self._log(f"Workflow exited with code {msg[1]}")
+                            self._update_system_status("error", "Workflow stopped")
+                            return
+                        if msg[0] == "log":
+                            self._log(f"  [workflow] {msg[1]}")
+                        if msg[0] == "running":
+                            self._update_system_status("running", "System running")
+                            self._log("System is ready for workflow steps.")
+                except queue.Empty:
+                    pass
+                elapsed = time.time() - workflow_start_time
+                if (
+                    elapsed > 10
+                    and self._system_status == "starting_workflow"
+                    and self.workflow_process
+                ):
+                    self._update_system_status(
+                        "starting_workflow",
+                        "Starting workflow backend... (loading, may take 1–2 min on first run)",
+                    )
+                if self.workflow_process:
+                    self.root.after(200, _poll_workflow_queue)
 
             threading.Thread(target=monitor_workflow, daemon=True).start()
+            self.root.after(200, _poll_workflow_queue)
 
         except Exception as e:
             self._log(f"Failed to start workflow: {e}")
@@ -1052,7 +1115,11 @@ class ControlPanel:
         text_output = result.get("text", "")
         self._log(f"Classification output: {text_output[:200]}...")
         try:
-            self.state.threads = parse_classification(text_output)
+            parse_height = result.get("parse_height")
+            assert parse_height is not None, (
+                "parse_height missing from classify result — re-run the Classify step."
+            )
+            self.state.threads = parse_classification(text_output, image_height=parse_height)
             self.state.step_logs["classify"] = text_output
             self._save_state()
             self._log(f"Parsed {len(self.state.threads)} threads.")
@@ -1255,9 +1322,7 @@ class ControlPanel:
         remaining = len(self.state.unread_groups) - self.state.current_thread_index
         if remaining > 0:
             next_group = self.state.unread_groups[self.state.current_thread_index]
-            self._log(
-                f"[Run All] Advanced to next group. {remaining} group(s) remaining."
-            )
+            self._log(f"[Run All] Advanced to next group. {remaining} group(s) remaining.")
             self._log(f"[Run All] Processing: {next_group.name}")
             self._run_all_read_messages()
         else:
@@ -1517,6 +1582,7 @@ class ControlPanel:
     def _poll_agent_result(self, callback: Callable[[dict], None]) -> None:
         result_file = self.artifacts_dir / ".step_result"
         status_file = self.artifacts_dir / ".step_status"
+        agent_result_queue = queue.Queue()
 
         def poll():
             poll_count = 0
@@ -1526,33 +1592,15 @@ class ControlPanel:
                 elapsed = time.time() - start_time
 
                 if poll_count % 20 == 0:
-                    self.root.after(
-                        0,
-                        lambda e=elapsed: self._log(
-                            f"  Waiting for response... ({e:.0f}s)"
-                        ),
-                    )
+                    agent_result_queue.put(("log", f"  Waiting for response... ({elapsed:.0f}s)"))
                     if self.workflow_process:
                         poll_result = self.workflow_process.poll()
                         if poll_result is not None:
-                            self.root.after(
-                                0,
-                                lambda: self._log("  ERROR: Workflow process exited!"),
-                            )
-                            self.root.after(
-                                0,
-                                lambda: self._on_agent_error("Workflow process exited"),
-                            )
+                            agent_result_queue.put(("exited",))
                             return
 
                 if elapsed > 300:
-                    self.root.after(
-                        0, lambda: self._log("  TIMEOUT: No response after 5 minutes")
-                    )
-                    self.root.after(
-                        0,
-                        lambda: self._on_agent_error("Timeout waiting for response"),
-                    )
+                    agent_result_queue.put(("timeout",))
                     return
 
                 if status_file.exists():
@@ -1566,7 +1614,7 @@ class ControlPanel:
                         result = json.loads(result_text)
                         result_file.unlink(missing_ok=True)
                         status_file.unlink(missing_ok=True)
-                        self.root.after(0, lambda: callback(result))
+                        agent_result_queue.put(("result", result))
                         return
                     elif status == "error":
                         error_msg = (
@@ -1576,12 +1624,37 @@ class ControlPanel:
                         )
                         result_file.unlink(missing_ok=True)
                         status_file.unlink(missing_ok=True)
-                        self.root.after(0, lambda e=error_msg: self._on_agent_error(e))
+                        agent_result_queue.put(("error", error_msg))
                         return
 
                 time.sleep(0.5)
 
+        def _poll_agent_result_queue():
+            try:
+                while True:
+                    msg = agent_result_queue.get_nowait()
+                    if msg[0] == "log":
+                        self._log(msg[1])
+                    elif msg[0] == "result":
+                        callback(msg[1])
+                        return
+                    elif msg[0] == "error":
+                        self._on_agent_error(msg[1])
+                        return
+                    elif msg[0] == "timeout":
+                        self._log("  TIMEOUT: No response after 5 minutes")
+                        self._on_agent_error("Timeout waiting for response")
+                        return
+                    elif msg[0] == "exited":
+                        self._log("  ERROR: Workflow process exited!")
+                        self._on_agent_error("Workflow process exited")
+                        return
+            except queue.Empty:
+                pass
+            self.root.after(200, _poll_agent_result_queue)
+
         threading.Thread(target=poll, daemon=True).start()
+        self.root.after(200, _poll_agent_result_queue)
 
     def _on_agent_error(self, error: str) -> None:
         self._set_status("Error")
@@ -1602,7 +1675,15 @@ class ControlPanel:
         text_output = result.get("text", "")
         self._log(f"Classification output: {text_output[:200]}...")
         try:
-            self.state.threads = parse_classification(text_output)
+            # parse_height is the pixel height of the image the AI saw.
+            # The workflow backend always sets this correctly (1964 for Mac, 1440 for Windows).
+            # There is intentionally no platform-specific fallback here — if it is absent
+            # the caller should re-run classify so the backend provides the right value.
+            parse_height = result.get("parse_height")
+            assert parse_height is not None, (
+                "parse_height missing from classify result — re-run the Classify step."
+            )
+            self.state.threads = parse_classification(text_output, image_height=parse_height)
             self.state.step_logs["classify"] = text_output
             self._save_state()
             self._log(f"Parsed {len(self.state.threads)} threads.")

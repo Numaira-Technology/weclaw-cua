@@ -48,18 +48,21 @@ cua/
 
 | File | Purpose |
 |------|---------|
-| `crop_utils.py` | Defines CHAT_LIST_REGION, MEMBER_PANEL_REGION, MEMBER_SELECT_REGION |
-| `scaffolding_clicks.py` | Fixed-position clicks for three dots, minus, delete buttons |
-| `removal_executor.py` | Vision prompts for finding users and verifying removal |
-| `run_wechat_removal.py` | Main workflow with `run_cropped_vision_query()` |
+| `crop_utils.py` | Defines `get_regions(os_type)`, Windows crop regions, macOS physical-pixel regions |
+| `scaffolding_clicks.py` | Fixed-position clicks (Windows) or AX-tree dispatch (macOS) |
+| `ax_clicks.py` | macOS Accessibility-tree click implementations (three dots, minus, confirm) |
+| `removal_executor.py` | Vision prompts for finding users and verifying removal (branched by os_type) |
+| `run_wechat_removal.py` | Main workflow with `_vision_query()` routing full vs cropped screenshot |
 
 ## Coordinate Quick Reference
 
+### Windows (2560×1440)
+
 | Region | Screen Coords | Size | Usage |
 |--------|---------------|------|-------|
-| CHAT_LIST_REGION | (58-276, 0-1440) | 218x1440 | Thread classification |
-| MEMBER_PANEL_REGION | (2300-2560, 0-1440) | 260x1440 | Panel/removal verification |
-| MEMBER_SELECT_REGION | (925-1630, 425-970) | 705x545 | User checkbox selection |
+| `chat_list` | (58–276, 0–1440) | 218×1440 | Thread classification, click to open |
+| `member_panel` | (2300–2560, 0–1440) | 260×1440 | Panel/removal verification |
+| `member_select` | (925–1630, 425–970) | 705×545 | Member-selection dialog |
 
 | Button | Screen Position | Function |
 |--------|-----------------|----------|
@@ -67,13 +70,19 @@ cua/
 | Minus button | (2525, 200) | Enter removal mode |
 | Delete button | (1345, 920) | Confirm removal |
 
+### macOS (3024×1964 — 16" MacBook Pro)
+
+AI always sees the **full 3024×1964 screenshot** (no cropping). Clicks use Quartz `CGEventPost` in physical pixels. Buttons are located via the Accessibility Tree — no hardcoded positions.
+
+See [PLATFORM_GUIDE.md](PLATFORM_GUIDE.md) for the complete platform comparison.
+
 ## Workflow Steps
 
-1. **Classify** → Crop chat list → LLM identifies threads
+1. **Classify** → (Win: crop chat list / Mac: full screen) → LLM identifies threads
 2. **Filter** → Keep unread groups only
-3. **Read** → Click chat → LLM reads messages → Find suspects
+3. **Read** → Click chat at y-pixel → LLM reads messages → find suspects
 4. **Extract** → Parse suspect info from response
 5. **Plan** → Build removal plan → Human confirmation
-6. **Remove** → For each suspect: Find checkbox → Click → Verify
+6. **Remove** → (Win: scaffolding clicks + vision / Mac: AX tree + vision) → verify
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed diagrams.
