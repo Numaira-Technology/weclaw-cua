@@ -15,6 +15,9 @@ Usage:
     # Convert 0-1000 normalized coords to screen coords (for AI responses)
     screen_x, screen_y = regions.member_select.normalized_to_screen_coords(500, 300)
 
+    # Get the chat content area for scroll-diff comparisons
+    content_bytes = regions.chat_content.crop_image(screenshot_bytes)
+
 Input:
     - img_bytes: PNG screenshot as bytes
     - crop_x, crop_y: Pixel coordinates within the cropped image
@@ -30,16 +33,18 @@ Output:
 Region reference:
 
   Windows — SCREEN coordinates, absolute pixels (2560×1440):
-    chat_list:      x=(58, 276),   y=(0, 1440)   → 218×1440px sidebar
-    member_panel:   x=(2300, 2560), y=(0, 1440)  → 260×1440px right panel
-    member_select:  x=(925, 1630),  y=(425, 970) → 705×545px  centre dialog
+    chat_list:      x=(58, 276),    y=(0, 1440)    → 218×1440px sidebar
+    member_panel:   x=(2300, 2560), y=(0, 1440)    → 260×1440px right panel
+    member_select:  x=(925, 1630),  y=(425, 970)   → 705×545px  centre dialog
+    chat_content:   x=(300, 1920),  y=(70, 880)    → 1620×810px  chat body (no title/input)
 
   macOS — PHYSICAL PIXEL coordinates (3024×1964 on a 16" MacBook Pro).
            Screenshots are captured at native Retina resolution (ImageGrab.grab())
            and clicks use Quartz CGEventPost — both in physical pixel space.
-    chat_list:      x=(70, 310),   y=(0, 1964)   → 240×1964px sidebar
-    member_panel:   x=(1980, 2560), y=(0, 1964)  → 580×1964px right panel
-    member_select:  x=(830, 1730),  y=(430, 1050) → 900×620px centre dialog
+    chat_list:      x=(70, 310),    y=(0, 1964)    → 240×1964px sidebar
+    member_panel:   x=(1980, 2560), y=(0, 1964)    → 580×1964px right panel
+    member_select:  x=(830, 1730),  y=(430, 1050)  → 900×620px  centre dialog
+    chat_content:   x=(340, 2700),  y=(80, 1760)   → 2360×1680px chat body (no title/input)
 """
 
 from __future__ import annotations
@@ -121,17 +126,21 @@ class CropRegion:
 
 @dataclass
 class ScreenRegions:
-    """Platform-specific crop regions for the three WeChat UI areas.
+    """Platform-specific crop regions for the WeChat UI areas.
 
     Fields:
-    - chat_list:     sidebar listing all chats (used for classification + click-to-open)
-    - member_panel:  group info / member panel on the right (used for minus button area)
-    - member_select: centre dialog for selecting members to remove
+    - chat_list:      sidebar listing all chats (classification + click-to-open)
+    - member_panel:   group info / member panel on the right (minus button area)
+    - member_select:  centre dialog for selecting members to remove
+    - chat_content:   body of the open chat window, excluding title bar and input
+                      box; used by the scroll reader to diff frames and detect
+                      when the bottom of the chat has been reached
     """
 
     chat_list: CropRegion
     member_panel: CropRegion
     member_select: CropRegion
+    chat_content: CropRegion
 
 
 # =============================================================================
@@ -141,6 +150,8 @@ _WINDOWS_REGIONS = ScreenRegions(
     chat_list=CropRegion(x_start=58, x_end=276, y_start=0, y_end=1440),
     member_panel=CropRegion(x_start=2300, x_end=2560, y_start=0, y_end=1440),
     member_select=CropRegion(x_start=925, x_end=1630, y_start=425, y_end=970),
+    # Excludes title bar (top) and input toolbar (bottom) to reduce diff false positives
+    chat_content=CropRegion(x_start=300, x_end=1920, y_start=70, y_end=880),
 )
 
 # =============================================================================
@@ -157,6 +168,8 @@ _MACOS_REGIONS = ScreenRegions(
     chat_list=CropRegion(x_start=70, x_end=310, y_start=0, y_end=1964),
     member_panel=CropRegion(x_start=1980, x_end=2560, y_start=0, y_end=1964),
     member_select=CropRegion(x_start=830, x_end=1730, y_start=430, y_end=1050),
+    # Excludes title bar (top ~80px) and input toolbar (bottom ~200px)
+    chat_content=CropRegion(x_start=340, x_end=2700, y_start=80, y_end=1760),
 )
 
 
@@ -188,3 +201,4 @@ WINDOWS_MEMBER_SELECT_REGION = _WINDOWS_REGIONS.member_select
 CHAT_LIST_REGION = WINDOWS_CHAT_LIST_REGION
 MEMBER_PANEL_REGION = WINDOWS_MEMBER_PANEL_REGION
 MEMBER_SELECT_REGION = WINDOWS_MEMBER_SELECT_REGION
+CHAT_CONTENT_REGION = _WINDOWS_REGIONS.chat_content

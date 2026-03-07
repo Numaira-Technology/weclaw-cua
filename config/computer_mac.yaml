@@ -13,3 +13,13 @@ screenshot_delay: 0.5
 # to confirm the actual capture size.
 screen_width: 3024
 screen_height: 1964
+
+# Chat window scroll settings (step 5: read messages)
+# scroll_chat_window_clicks_per_pass: wheel notches per scroll iteration
+# scroll_max_chat_window_passes: hard cap on iterations before giving up
+scroll_chat_window_clicks_per_pass: 20
+scroll_max_chat_window_passes: 8
+
+# Chat list panel scroll settings (left sidebar pagination)
+# scroll_chat_list_clicks_per_scroll: wheel notches to advance one full viewport
+scroll_chat_list_clicks_per_scroll: 15

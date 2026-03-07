@@ -66,6 +66,7 @@ from modules.scaffolding_clicks import (
     click_minus_button,
     click_three_dots,
 )
+from modules.scroll_actions import scroll_chat_list_down
 from modules.suspicious_detector import extract_suspects
 from modules.task_types import GroupThread, RemovalPlan, RemovalResult, Suspect
 from modules.unread_scanner import filter_unread_groups
@@ -572,13 +573,42 @@ class StepModeRunner:
 
             if result["success"]:
                 print(
-                    f"[StepModeRunner] Chat verified, found {len(result.get('suspects', []))} suspect(s)"
+                    f"[StepModeRunner] Chat verified — starting scroll read for '{thread_name}'"
+                )
+                from workflow.chat_scroll_reader import read_messages_with_scroll
+
+                scroll_suspects, scroll_screenshots = await read_messages_with_scroll(
+                    self.computer,
+                    self.model,
+                    thread_name,
+                    thread_id,
+                    self.capture_dir,
+                    self.computer_settings,
+                    max_passes=self.computer_settings.scroll_max_chat_window_passes,
+                    scroll_clicks=self.computer_settings.scroll_chat_window_clicks_per_pass,
+                )
+                all_screenshots.extend(scroll_screenshots)
+
+                initial_suspects = result.get("suspects", [])
+                merged: dict = {
+                    s["sender_id"]: s
+                    for s in initial_suspects
+                    if s.get("sender_id")
+                }
+                for s in scroll_suspects:
+                    sid = s.get("sender_id", "")
+                    if sid and sid not in merged:
+                        merged[sid] = s
+                final_suspects = list(merged.values())
+
+                print(
+                    f"[StepModeRunner] Total suspects after merge: {len(final_suspects)}"
                 )
                 self._write_result(
                     {
                         "text": text_output,
                         "screenshots": [str(p) for p in all_screenshots],
-                        "suspects": result.get("suspects", []),
+                        "suspects": final_suspects,
                     }
                 )
                 self._write_status("complete")
@@ -600,6 +630,17 @@ class StepModeRunner:
             }
         )
         self._write_status("error")
+
+    async def handle_scroll_chat_list(self, params: dict) -> None:
+        """Scroll the left chat list panel down by one viewport."""
+        clicks = params.get(
+            "clicks", self.computer_settings.scroll_chat_list_clicks_per_scroll
+        )
+        print(f"[StepModeRunner] Scrolling chat list down by {clicks} clicks")
+        sys.stdout.flush()
+        await scroll_chat_list_down(self.computer, self.computer_settings, clicks)
+        self._write_result({"text": f"Scrolled chat list down by {clicks} clicks"})
+        self._write_status("complete")
 
     async def handle_remove(self, params: dict) -> None:
         """Remove suspects using a single continuous agent session."""
@@ -949,6 +990,8 @@ class StepModeRunner:
                 await self.handle_classify(params)
             elif step == "read_messages":
                 await self.handle_read_messages(params)
+            elif step == "scroll_chat_list":
+                await self.handle_scroll_chat_list(params)
             elif step == "remove":
                 await self.handle_remove(params)
             else:

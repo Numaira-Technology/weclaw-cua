@@ -26,3 +26,13 @@ human_mouse:
   curve_variance: 0.3 # How much the path curves (0.1-0.5)
   zigzag_enabled: false # Enable subtle zigzag patterns
   base_delay_ms: 5.0 # Base delay between movement steps in milliseconds
+
+# Chat window scroll settings (step 5: read messages)
+# scroll_chat_window_clicks_per_pass: scroll notches per iteration (increase for faster scrolling)
+# scroll_max_chat_window_passes: hard cap on iterations before giving up
+scroll_chat_window_clicks_per_pass: 5
+scroll_max_chat_window_passes: 4
+
+# Chat list panel scroll settings (left sidebar pagination)
+# scroll_chat_list_clicks_per_scroll: wheel notches to advance one full viewport (~21 threads)
+scroll_chat_list_clicks_per_scroll: 15

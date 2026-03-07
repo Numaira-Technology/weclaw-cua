@@ -10,7 +10,7 @@ Usage:
 Input:
   - config_path: Path to YAML file with use_host_computer_server, os_type,
     api_port, display, timeout, telemetry_enabled, screenshot_delay, screen
-    dimensions, and (Windows only) wechat UI positions.
+    dimensions, (Windows only) wechat UI positions, and scroll tuning knobs.
 
 Output:
   - ComputerSettings dataclass populated from config.
@@ -43,6 +43,10 @@ class ComputerSettings:
     wechat_* position fields are in SCREEN COORDINATES (absolute pixels).
     They are only used on Windows; on macOS the AX accessibility tree is used
     instead and these fields default to (0, 0).
+
+    scroll_* fields tune the multi-pass scroll reader (step 5) and the chat
+    list pagination.  They have sensible defaults and are optional in both
+    platform configs.
     """
 
     use_host_computer_server: bool
@@ -54,9 +58,14 @@ class ComputerSettings:
     screenshot_delay: float
     screen_width: int   # SCREEN: display width in pixels (e.g., 2560)
     screen_height: int  # SCREEN: display height in pixels (e.g., 1440)
-    wechat_three_dots: Tuple[int, int] = field(default=(0, 0))   # Windows only
-    wechat_minus_button: Tuple[int, int] = field(default=(0, 0)) # Windows only
-    wechat_delete_button: Tuple[int, int] = field(default=(0, 0))# Windows only
+    # Windows-only click coords; ignored on macOS (AX tree used instead)
+    wechat_three_dots: Tuple[int, int] = field(default=(0, 0))
+    wechat_minus_button: Tuple[int, int] = field(default=(0, 0))
+    wechat_delete_button: Tuple[int, int] = field(default=(0, 0))
+    # Scroll tuning — shared across platforms
+    scroll_chat_window_clicks_per_pass: int = field(default=5)
+    scroll_max_chat_window_passes: int = field(default=4)
+    scroll_chat_list_clicks_per_scroll: int = field(default=15)
 
 
 def _parse_simple_yaml(path: Path) -> Dict[str, str]:
@@ -106,6 +115,15 @@ def load_computer_settings(path: Path) -> ComputerSettings:
         wechat_delete_button=(
             int(data.get("wechat_delete_button_x", 0)),
             int(data.get("wechat_delete_button_y", 0)),
+        ),
+        scroll_chat_window_clicks_per_pass=int(
+            data.get("scroll_chat_window_clicks_per_pass", 5)
+        ),
+        scroll_max_chat_window_passes=int(
+            data.get("scroll_max_chat_window_passes", 4)
+        ),
+        scroll_chat_list_clicks_per_scroll=int(
+            data.get("scroll_chat_list_clicks_per_scroll", 15)
         ),
     )
 
