@@ -6,18 +6,20 @@ timeout: 180
 telemetry_enabled: false
 screenshot_delay: 0.5
 
-# Screen and UI element positions for 2560x1440 display
-screen_width: 2560
-screen_height: 1440
+# Screen and UI element positions for 1920x1440 display
+screen_width: 1920
+screen_height: 1030
 
 # WeChat UI fixed button positions (SCREEN COORDINATES - absolute pixels)
 # These are used directly for clicking, no conversion needed
-wechat_three_dots_x: 2525
+wechat_three_dots_x: 1880
 wechat_three_dots_y: 48
-wechat_minus_button_x: 2525
+wechat_minus_button_x: 1880
 wechat_minus_button_y: 200
 wechat_delete_button_x: 1345
 wechat_delete_button_y: 920
+wechat_banner_x: 1840
+wechat_banner_y: 85
 
 # Human-like mouse movement settings
 human_mouse:
@@ -26,3 +28,13 @@ human_mouse:
   curve_variance: 0.3 # How much the path curves (0.1-0.5)
   zigzag_enabled: false # Enable subtle zigzag patterns
   base_delay_ms: 5.0 # Base delay between movement steps in milliseconds
+
+# Chat window scroll settings (step 5: read messages)
+# scroll_chat_window_clicks_per_pass: scroll notches per iteration (increase for faster scrolling)
+# scroll_max_chat_window_passes: hard cap on iterations before giving up
+scroll_chat_window_clicks_per_pass: 5
+scroll_max_chat_window_passes: 4
+
+# Chat list panel scroll settings (left sidebar pagination)
+# scroll_chat_list_clicks_per_scroll: wheel notches to advance one full viewport (~21 threads)
+scroll_chat_list_clicks_per_scroll: 15

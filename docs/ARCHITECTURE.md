@@ -20,6 +20,8 @@ The WeChat Removal Tool is an AI-powered agent that automates the detection and 
 10. [Adding New Actions](#adding-new-actions)
 11. [Troubleshooting](#troubleshooting)
 
+> **Platform differences (Windows vs macOS)** — screenshot strategy, coordinate spaces, click delivery, AX tree vs scaffolding, and per-platform prompt wording are documented separately in [PLATFORM_GUIDE.md](PLATFORM_GUIDE.md).
+
 ---
 
 ## Project Structure

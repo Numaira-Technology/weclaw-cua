@@ -966,6 +966,41 @@ class MacOSAccessibilityHandler(BaseAccessibilityHandler):
             return {"success": False, "error": str(e)}
 
 
+def _get_retina_scale() -> float:
+    """Return the pixel-to-point scale factor for the main display.
+
+    On a Retina (HiDPI) MacBook Pro, PIL ImageGrab.grab() captures at native
+    physical resolution (e.g. 3024×1964) while Quartz CGEventPost / CGDisplayBounds
+    / the AX API all operate in logical POINTS (e.g. 1512×982).
+
+    This function computes the ratio at runtime so the code works on any display
+    density without hard-coding a fixed factor.  The result is cached at module
+    level so we only pay the PIL cost once per server process.
+
+    Returns:
+        float — typically 2.0 on Retina, 1.0 on a standard display.
+    """
+    global _RETINA_SCALE_CACHE
+    if _RETINA_SCALE_CACHE is not None:
+        return _RETINA_SCALE_CACHE
+    try:
+        display_id = CGMainDisplayID()
+        logical_w = CGDisplayPixelsWide(display_id)   # logical points
+        from PIL import ImageGrab as _IG
+        phys_img = _IG.grab()
+        physical_w = phys_img.width                   # physical pixels
+        if logical_w > 0:
+            _RETINA_SCALE_CACHE = physical_w / logical_w
+            return _RETINA_SCALE_CACHE
+    except Exception:
+        pass
+    _RETINA_SCALE_CACHE = 1.0
+    return _RETINA_SCALE_CACHE
+
+
+_RETINA_SCALE_CACHE: Optional[float] = None
+
+
 class MacOSAutomationHandler(BaseAutomationHandler):
     """Handler for macOS automation including mouse, keyboard, and screen operations."""
 
@@ -1034,20 +1069,58 @@ class MacOSAutomationHandler(BaseAutomationHandler):
     async def left_click(self, x: Optional[int] = None, y: Optional[int] = None) -> Dict[str, Any]:
         """Perform a left mouse click at the specified coordinates.
 
+        Incoming x/y are in physical pixels (matching ImageGrab.grab() resolution).
+        Quartz CGEventPost operates in logical POINTS (half of physical on Retina).
+        _get_retina_scale() computes the ratio at runtime and converts before posting.
+
         Args:
-            x: X coordinate (optional, uses current position if None)
-            y: Y coordinate (optional, uses current position if None)
+            x: X coordinate in physical pixels (optional, uses current position if None)
+            y: Y coordinate in physical pixels (optional, uses current position if None)
 
         Returns:
             Dictionary containing success status and error message if failed
         """
         try:
             if x is not None and y is not None:
-                await move_mouse_human(
-                    self.mouse, x, y,
-                    config=self.human_mouse_config,
-                )
-            self.mouse.click(Button.left, 1)
+                scale = _get_retina_scale()
+                lx, ly = x / scale, y / scale
+                pos = (float(lx), float(ly))
+                move = CGEventCreateMouseEvent(None, kCGEventMouseMoved, pos, kCGMouseButtonLeft)
+                CGEventPost(kCGSessionEventTap, move)
+                await asyncio.sleep(0.03)
+                down = CGEventCreateMouseEvent(None, kCGEventLeftMouseDown, pos, kCGMouseButtonLeft)
+                CGEventPost(kCGHIDEventTap, down)
+                up = CGEventCreateMouseEvent(None, kCGEventLeftMouseUp, pos, kCGMouseButtonLeft)
+                CGEventPost(kCGHIDEventTap, up)
+            else:
+                self.mouse.click(Button.left, 1)
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def left_click_logical(self, x: int, y: int) -> Dict[str, Any]:
+        """Perform a left click at coordinates already in Quartz logical point space.
+
+        Use this when the caller has coordinates directly from the macOS AX tree
+        (kAXPositionAttribute), which already returns logical points.
+        Unlike left_click(), no Retina scale division is applied here.
+
+        Args:
+            x: X coordinate in logical points
+            y: Y coordinate in logical points
+
+        Returns:
+            Dictionary containing success status and error message if failed
+        """
+        try:
+            pos = (float(x), float(y))
+            move = CGEventCreateMouseEvent(None, kCGEventMouseMoved, pos, kCGMouseButtonLeft)
+            CGEventPost(kCGSessionEventTap, move)
+            await asyncio.sleep(0.03)
+            down = CGEventCreateMouseEvent(None, kCGEventLeftMouseDown, pos, kCGMouseButtonLeft)
+            CGEventPost(kCGHIDEventTap, down)
+            up = CGEventCreateMouseEvent(None, kCGEventLeftMouseUp, pos, kCGMouseButtonLeft)
+            CGEventPost(kCGHIDEventTap, up)
             return {"success": True}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -1055,20 +1128,29 @@ class MacOSAutomationHandler(BaseAutomationHandler):
     async def right_click(self, x: Optional[int] = None, y: Optional[int] = None) -> Dict[str, Any]:
         """Perform a right mouse click at the specified coordinates.
 
+        Uses Quartz CGEventPost (physical pixel space). See left_click docstring.
+
         Args:
-            x: X coordinate (optional, uses current position if None)
-            y: Y coordinate (optional, uses current position if None)
+            x: X coordinate in physical pixels (optional, uses current position if None)
+            y: Y coordinate in physical pixels (optional, uses current position if None)
 
         Returns:
             Dictionary containing success status and error message if failed
         """
         try:
             if x is not None and y is not None:
-                await move_mouse_human(
-                    self.mouse, x, y,
-                    config=self.human_mouse_config,
-                )
-            self.mouse.click(Button.right, 1)
+                scale = _get_retina_scale()
+                lx, ly = x / scale, y / scale
+                pos = (float(lx), float(ly))
+                move = CGEventCreateMouseEvent(None, kCGEventMouseMoved, pos, kCGMouseButtonRight)
+                CGEventPost(kCGSessionEventTap, move)
+                await asyncio.sleep(0.03)
+                down = CGEventCreateMouseEvent(None, kCGEventRightMouseDown, pos, kCGMouseButtonRight)
+                CGEventPost(kCGHIDEventTap, down)
+                up = CGEventCreateMouseEvent(None, kCGEventRightMouseUp, pos, kCGMouseButtonRight)
+                CGEventPost(kCGHIDEventTap, up)
+            else:
+                self.mouse.click(Button.right, 1)
             return {"success": True}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -1078,20 +1160,33 @@ class MacOSAutomationHandler(BaseAutomationHandler):
     ) -> Dict[str, Any]:
         """Perform a double left mouse click at the specified coordinates.
 
+        Applies _get_retina_scale() to convert physical pixels to logical points.
+        See left_click docstring.
+
         Args:
-            x: X coordinate (optional, uses current position if None)
-            y: Y coordinate (optional, uses current position if None)
+            x: X coordinate in physical pixels (optional, uses current position if None)
+            y: Y coordinate in physical pixels (optional, uses current position if None)
 
         Returns:
             Dictionary containing success status and error message if failed
         """
         try:
             if x is not None and y is not None:
-                await move_mouse_human(
-                    self.mouse, x, y,
-                    config=self.human_mouse_config,
-                )
-            self.mouse.click(Button.left, 2)
+                scale = _get_retina_scale()
+                lx, ly = x / scale, y / scale
+                pos = (float(lx), float(ly))
+                move = CGEventCreateMouseEvent(None, kCGEventMouseMoved, pos, kCGMouseButtonLeft)
+                CGEventPost(kCGSessionEventTap, move)
+                await asyncio.sleep(0.03)
+                for click_count in (1, 2):
+                    down = CGEventCreateMouseEvent(None, kCGEventLeftMouseDown, pos, kCGMouseButtonLeft)
+                    CGEventSetIntegerValueField(down, kCGMouseEventClickState, click_count)
+                    CGEventPost(kCGHIDEventTap, down)
+                    up = CGEventCreateMouseEvent(None, kCGEventLeftMouseUp, pos, kCGMouseButtonLeft)
+                    CGEventSetIntegerValueField(up, kCGMouseEventClickState, click_count)
+                    CGEventPost(kCGHIDEventTap, up)
+            else:
+                self.mouse.click(Button.left, 2)
             return {"success": True}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -1341,21 +1436,18 @@ class MacOSAutomationHandler(BaseAutomationHandler):
 
         Returns:
             Dictionary containing success status and base64-encoded image data or error message
+
+        Note: The screenshot is returned at native Retina resolution (e.g. 3024×1964 on a
+        16" MacBook Pro).  No downscaling is applied so that AI-returned normalised coords
+        (0–1000) can be converted back to physical pixels with a simple multiply and then
+        posted directly via CGEventPost, which also works in physical pixels.
         """
         try:
             screenshot = ImageGrab.grab()
             if not isinstance(screenshot, Image.Image):
                 return {"success": False, "error": "Failed to capture screenshot"}
 
-            # Resize image to reduce size (max width 1920, maintain aspect ratio)
-            max_width = 1920
-            if screenshot.width > max_width:
-                ratio = max_width / screenshot.width
-                new_height = int(screenshot.height * ratio)
-                screenshot = screenshot.resize((max_width, new_height), Image.Resampling.LANCZOS)
-
             buffered = BytesIO()
-            # Use PNG format with optimization to reduce file size
             screenshot.save(buffered, format="PNG", optimize=True)
             buffered.seek(0)
             image_data = base64.b64encode(buffered.getvalue()).decode()

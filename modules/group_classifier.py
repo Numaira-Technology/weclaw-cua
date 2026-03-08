@@ -2,11 +2,13 @@
 Classify WeChat threads as group or individual using icon cues.
 
 Usage:
-  prompt = classification_prompt()
-  threads = parse_classification(text_output)
+  prompt = classification_prompt(os_type)       # "windows" or "macos"
+  threads = parse_classification(text_output, image_height=screen_height)
 
 Input:
+  - os_type: "windows" or "macos" — controls prompt wording and coordinate hints.
   - text_output: JSON string returned by the agent with thread_id, name, is_group, unread.
+  - image_height: Height of the image the AI saw (pixels). Windows: 1440. Mac: 1964.
 
 Output:
   - classification_prompt: string sent to the agent to run the classification step.
@@ -21,18 +23,26 @@ from typing import List
 from modules.task_types import GroupThread
 
 
-def classification_prompt() -> str:
+def classification_prompt(os_type: str = "windows") -> str:
     """Build prompt for classifying WeChat threads.
 
-    Coordinate system: AI returns y in 0-1000 NORMALIZED space.
-    - 0 = top of cropped image
-    - 1000 = bottom of cropped image
-    - Cropped image is 218x1440 pixels (CHAT_LIST_REGION)
+    On Windows the AI sees a cropped 218x1440 sidebar image; it returns y in
+    0-1000 NORMALIZED space relative to that crop.
 
-    Reference (normalized coords):
-    - First chat center: y ≈ 73 (screen ~105px / 1440px * 1000)
-    - Chat spacing: ~49 (screen ~70px / 1440px * 1000)
+    On macOS the AI sees the full screenshot; it returns y in 0-1000 NORMALIZED
+    space relative to the full screen height.
     """
+    if os_type == "macos":
+        return (
+            "这是完整的桌面截图。请找到左侧的微信会话列表栏。"
+            "分析截图中可见的每个会话，从上到下依次列出。"
+            "使用头像图标区分群聊（多人头像/九宫格）与单聊（单人头像）。"
+            "记录每个会话的未读状态（是否有红色未读消息标记）。"
+            "对于每个会话，估算其头像中心点相对于整个截图高度的Y坐标（0-1000归一化值，0=顶部，1000=底部）。"
+            "直接输出JSON格式结果。"
+            '格式：{"threads": [{"name": "会话名称", "y": 50, "is_group": true/false, "unread": true/false}, ...]}'
+            "只输出JSON，不要输出其他文字。"
+        )
     return (
         "这是微信会话列表的裁剪截图（宽218像素，高1440像素，仅显示左侧聊天列表栏）。"
         "分析截图中可见的每个会话，从上到下依次列出。"
@@ -47,7 +57,7 @@ def classification_prompt() -> str:
 
 
 def parse_classification(
-    text_output: str, image_height: int = 1440
+    text_output: str, image_height: int
 ) -> List[GroupThread]:
     """Parse classification output and convert normalized y to pixel coords.
 
@@ -57,10 +67,12 @@ def parse_classification(
 
     Args:
         text_output: JSON string from AI with y in 0-1000 normalized space
-        image_height: Height of the cropped image in pixels (default 1440)
+        image_height: Height of the image the AI saw in pixels.
+                      Windows: 1440 (crop height).
+                      Mac: screen_height from config (physical pixels, e.g. 1964).
 
     Example:
-        AI returns y=73 (normalized) → pixel_y = 73/1000 * 1440 = 105 (screen)
+        AI returns y=73 (normalized) → pixel_y = 73/1000 * 1964 = 143 (Mac screen)
     """
     text = text_output.strip()
     if text.startswith("```"):
