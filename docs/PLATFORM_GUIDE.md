@@ -531,7 +531,7 @@ The following rules are enforced in code and must not be broken:
 
 2. **`parse_classification` and `parse_reader_response` have no default for `image_height` / `screen_height`.** Callers must always pass the correct value explicitly; the function will assert-fail rather than silently use the wrong platform's height.
 
-3. **`control_panel.py` does not default `parse_height` to 1440.** If `parse_height` is absent from the step result, an assertion fires so the user re-runs the classify step. Silent fallback to a Windows height while running on Mac is forbidden.
+3. **`control_panel_pro.py` does not default `parse_height` to 1440.** If `parse_height` is absent from the step result, an assertion fires so the user re-runs the classify step. Silent fallback to a Windows height while running on Mac is forbidden.
 
 4. **`_vision_query` always sends the full screenshot on Mac.** The `region` argument exists for API symmetry but is unused on Mac. Never add cropping logic inside the `if self.is_mac:` branch.
 

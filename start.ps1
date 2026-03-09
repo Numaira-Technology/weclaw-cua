@@ -83,7 +83,7 @@ Write-Host "  - Start/Stop the workflow backend" -ForegroundColor Gray
 Write-Host "  - Run individual workflow steps" -ForegroundColor Gray
 Write-Host ""
 
-python control_panel.py
+python control_panel_pro.py
 
 $exitCode = $LASTEXITCODE
 

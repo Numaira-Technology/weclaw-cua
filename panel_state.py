@@ -33,6 +33,7 @@ class PanelState:
     unread_groups: List[GroupThread] = field(default_factory=list)
     current_thread_index: int = 0
     force_mac_mode: bool = False
+    theme: str = "system"  # "light" | "dark" | "system"
     # Per-group state (reset when moving to next group)
     current_group_suspects: List[Suspect] = field(default_factory=list)
     current_group_plan: Optional[RemovalPlan] = None
@@ -66,6 +67,7 @@ def _serialize_plan(plan: RemovalPlan) -> dict:
 def _serialize_state(state: PanelState) -> dict:
     return {
         "force_mac_mode": state.force_mac_mode,
+        "theme": state.theme,
         "threads": [asdict(t) for t in state.threads],
         "unread_groups": [asdict(g) for g in state.unread_groups],
         "current_thread_index": state.current_thread_index,
@@ -131,6 +133,7 @@ def _deserialize_state(data: dict) -> PanelState:
     plan = _deserialize_plan(plan_data) if plan_data else None
     return PanelState(
         force_mac_mode=data.get("force_mac_mode", False),
+        theme=data.get("theme", "system"),
         threads=threads,
         unread_groups=unread_groups,
         current_thread_index=data.get("current_thread_index", 0),

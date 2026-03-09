@@ -184,6 +184,10 @@ pnpm-lock.yaml
 # IDEs and Editors
 # =============================================================================
 
+# Cursor rules (except coding-standards)
+.cursor/rules/*
+!.cursor/rules/coding-standards.mdc
+
 # VSCode
 .vscode/*
 !.vscode/settings.json

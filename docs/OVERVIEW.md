@@ -29,7 +29,7 @@ cua/
 ├── workflow/                        # Main orchestration
 │   └── run_wechat_removal.py        # Entry point (step-mode backend)
 │
-├── control_panel.py                 # Visual GUI
+├── control_panel_pro.py            # Control panel GUI
 ├── panel_state.py                   # State persistence
 │
 ├── artifacts/                       # Output

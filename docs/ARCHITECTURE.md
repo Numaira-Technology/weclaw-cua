@@ -53,7 +53,7 @@ The WeChat Removal Tool is an AI-powered agent that automates the detection and 
 ├── workflow/                        # Main orchestration
 │   └── run_wechat_removal.py        # Entry point (step-mode backend)
 │
-├── control_panel.py                 # Visual GUI for step-by-step control
+├── control_panel_pro.py            # Control panel GUI
 ├── panel_state.py                   # State persistence for control panel
 │
 ├── artifacts/                       # Output directory
@@ -89,12 +89,12 @@ The WeChat Removal Tool is an AI-powered agent that automates the detection and 
 │  ┌───────────────────────────────────────────────────────────────┐  │
 │  │  start.ps1 / start.bat                                         │  │
 │  │  1. Load .env for API key                                      │  │
-│  │  2. Launch control_panel.py                                    │  │
+│  │  2. Launch control_panel_pro.py                                │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 │                              │                                       │
 │                              ▼                                       │
 │  ┌───────────────────────────────────────────────────────────────┐  │
-│  │  control_panel.py (Visual GUI)                                 │  │
+│  │  control_panel_pro.py (GUI)                                    │  │
 │  │                                                                │  │
 │  │  Server Control:                                               │  │
 │  │  ├── [Start Server] → computer-server on port 8000            │  │
@@ -780,9 +780,7 @@ Via LiteLLM and OpenRouter, supports:
 The workflow is waiting for computer-server to start.
 
 **Fix:**
-1. Click "Start Server" in the Control Panel
-2. Wait for status to show "Running"
-3. Then click "Start Workflow"
+1. The Control Panel auto-starts the server and workflow. If it fails, check the terminal for errors.
 
 #### Server fails to start
 
@@ -796,7 +794,7 @@ If another process is using the port, either stop it or change `api_port` in con
 #### Agent not responding
 
 1. Make sure both Server and Workflow show "Running" status
-2. Check the log area in Control Panel for errors
+2. Check the terminal output for errors
 3. Verify WeChat is open and visible on screen
 
 ### Model Issues
@@ -865,37 +863,32 @@ To update vendored code, copy from the [upstream CUA repository](https://github.
 
 ## Control Panel Features
 
-The Control Panel (`control_panel.py`) provides:
+The Control Panel (`control_panel_pro.py`) provides:
 
-### Server Control
-- **Start/Stop Server**: Manages the computer-server process
-- **Start/Stop Workflow**: Manages the workflow backend process
+### Auto-Start
+- Launches and automatically starts the computer-server and workflow backend
+- Single "启动巡检" button runs the full workflow (all 6 steps) automatically
 
 ### Workflow Steps
-Steps 1-2 run once globally. Steps 3-6 run **per group** in a loop:
+When "启动巡检" is clicked, steps run in sequence. Steps 1-2 run once globally. Steps 3-6 run **per group** in a loop:
 
-| Step | Description | Scope | Manual Input |
-|------|-------------|-------|--------------|
-| 1. Classify Threads | Agent scans WeChat chat list | Global | N/A |
-| 2. Filter Unread | Filters to unread groups | Global | Load threads JSON |
-| 3. Read Messages | Reads messages in current group | Per Group | Load groups JSON |
-| 4. Extract Suspects | Parses suspect info from current group | Per Group | Load read results JSON |
-| 5. Build Plan | Creates removal plan for current group | Per Group | Load suspects JSON |
-| 6. Execute Removal | Removes suspects from current group | Per Group | Load plan JSON |
+| Step | Description | Scope |
+|------|-------------|-------|
+| 1. 扫描群组列表 | Agent scans WeChat chat list | Global |
+| 2. 筛选未读群组 | Filters to unread groups | Global |
+| 3. 读取群消息 | Reads messages in current group | Per Group |
+| 4. 识别可疑用户 | Parses suspect info from current group | Per Group |
+| 5. 生成处理方案 | Creates removal plan for current group | Per Group |
+| 6. 执行移除操作 | Removes suspects from current group | Per Group |
 
 After step 6 completes for a group, the workflow automatically advances to the next unread group and returns to step 3.
 
-### Manual Input (📂 buttons)
-Each step (except Classify) has a load button that allows:
-- Loading data from a JSON file
-- Pasting JSON directly
-
-This enables independent testing of each step without running previous steps.
+### Logging
+- Logs are printed to the terminal (stdout) with timestamps
+- Workflow backend output is streamed to the terminal
 
 ### State Management
 - State is persisted to `artifacts/panel_state.json`
-- "Reset State" clears all workflow state
-- "Export Report" saves results to `artifacts/logs/panel_report.json`
 
 ---
 
@@ -911,7 +904,7 @@ The following diagram shows the entire workflow from start to finish:
 │  ┌─────────────────────────────────────────────────────────────────────────────┐   │
 │  │                         INITIALIZATION                                       │   │
 │  │                                                                              │   │
-│  │   start.ps1 ──▶ Load .env ──▶ Launch control_panel.py                       │   │
+│  │   start.ps1 ──▶ Load .env ──▶ Launch control_panel_pro.py                   │   │
 │  │                                     │                                        │   │
 │  │                     ┌───────────────┴───────────────┐                       │   │
 │  │                     ▼                               ▼                        │   │
@@ -1068,7 +1061,7 @@ The following diagram shows the entire workflow from start to finish:
 │  ┌─────────────────────────────────────────────────────────────────────────────┐   │
 │  │                          CONTROL LAYER                                       │   │
 │  │                                                                              │   │
-│  │  control_panel.py ◄──────────────────────────────────────────────────────┐  │   │
+│  │  control_panel_pro.py ◄───────────────────────────────────────────────────┐  │   │
 │  │       │                                                                   │  │   │
 │  │       │ Step requests (.step_request)                                    │  │   │
 │  │       ▼                                                                   │  │   │
