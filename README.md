@@ -44,6 +44,17 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed workflow diagrams.
 
 ## Quick Start
 
+### Option A — Run the Installer (recommended for first-time setup)
+
+```powershell
+# Run once — installs dependencies, prompts for API key, creates desktop shortcut
+.\install.ps1
+```
+
+Then double-click **"WeChat Removal Tool"** on your desktop.
+
+### Option B — Manual Setup
+
 1. **Set your API key** in `.env` file:
    ```
    OPENROUTER_API_KEY=sk-or-v1-...
@@ -51,7 +62,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed workflow diagrams.
 
 2. **Install dependencies**:
    ```bash
-   pip install httpx aiohttp pydantic litellm pillow
+   pip install -r requirements.txt
    ```
 
 3. **Launch the Control Panel**:
@@ -65,6 +76,21 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed workflow diagrams.
    - Click "Start Workflow" to launch the workflow backend
    - Make sure WeChat is open and visible on screen
    - Click through workflow steps: Classify → Filter → Read → Extract → Plan → Remove
+
+### Option C — OpenClaw Skill
+
+If you use [OpenClaw](https://clawhub.ai) as your AI orchestrator, install the bundled
+skill so OpenClaw can invoke the tool on your behalf:
+
+```powershell
+$SkillsDir = "$env:USERPROFILE\clawd\skills\local"
+Copy-Item -Recurse OpenClaw_WeChatRemoval_skill "$SkillsDir\wechat-removal"
+```
+
+Then ask OpenClaw: *"remove spammers from my WeChat groups"*.
+
+See **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)** for a full explanation of both
+distribution channels and how to keep them in sync as the tool evolves.
 
 ## Project Structure
 
@@ -98,8 +124,18 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed workflow diagrams.
 │   ├── computer/                # cua-computer
 │   ├── computer-server/         # cua-computer-server
 │   └── core/                    # cua-core
+├── OpenClaw_WeChatRemoval_skill/   # OpenClaw skill package
+│   ├── SKILL.md                    # Skill descriptor (name, description, instructions)
+│   ├── README.md                   # Setup guide for OpenClaw users
+│   └── scripts/
+│       └── run_wechat_removal.ps1  # Launcher called by OpenClaw
+├── install.ps1              # One-shot installer (creates .env, desktop shortcut)
+├── start.ps1                # Day-to-day launcher
+├── start.bat                # Double-click launcher (calls start.ps1)
+├── requirements.txt         # Python dependencies
 └── docs/                    # Documentation
-    └── ARCHITECTURE.md          # Architecture details
+    ├── ARCHITECTURE.md          # Architecture details
+    └── DISTRIBUTION.md          # Distribution channels (standalone app + OpenClaw skill)
 ```
 
 ## Configuration
@@ -159,6 +195,13 @@ Results are saved to `artifacts/logs/report.json`:
   - Coordinate system conversions
   - Module interaction diagrams
   - Vision prompt examples
+
+- **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)** - Distribution channels documentation including:
+  - Standalone installer (`install.ps1`) walkthrough
+  - OpenClaw skill setup and usage
+  - How wrappers relate to the core tool
+  - Configuration reference and dependency list
+  - Guide for keeping wrappers up to date as the tool evolves
 
 ## Adding New Action Types
 

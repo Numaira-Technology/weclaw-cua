@@ -75,6 +75,15 @@ Write-Host ""
 Write-Host "------------------------------------------------------------" -ForegroundColor Gray
 Write-Host ""
 
+# Activate virtual environment if present
+$VenvActivate = Join-Path $ScriptDir ".venv\Scripts\Activate.ps1"
+if (Test-Path $VenvActivate) {
+    Write-Host "[OK] Activating virtual environment..." -ForegroundColor Green
+    & $VenvActivate
+} else {
+    Write-Host "[!] No .venv found — using system Python. Run install.ps1 for a clean setup." -ForegroundColor Yellow
+}
+
 # Launch Control Panel
 Write-Host "Launching Control Panel..." -ForegroundColor Cyan
 Write-Host "Use the Control Panel to:" -ForegroundColor Gray

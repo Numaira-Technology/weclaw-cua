@@ -1,0 +1,31 @@
+# WeChat Removal Tool — Python dependencies
+# Install with: pip install -r requirements.txt
+#
+# Minimum Python version: 3.11 (3.12 recommended)
+
+# Async HTTP
+httpx>=0.27
+aiohttp>=3.9
+anyio>=4.0
+
+# Data validation
+pydantic>=2.6
+
+# LLM abstraction layer (OpenAI / Anthropic / Google / Ollama / …)
+litellm>=1.35
+
+# Image processing (screenshots)
+pillow>=10.0
+
+# Computer-server HTTP layer
+uvicorn>=0.28
+fastapi>=0.110
+
+# Mouse / keyboard control (computer-server)
+pynput>=1.7
+
+# Python 3.11 typing back-port (vendored CUA patch)
+typing-extensions>=4.10
+
+# Config file parsing
+pyyaml>=6.0
