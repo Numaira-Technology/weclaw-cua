@@ -1,0 +1,25 @@
+GitHub Discussion: "What features do you want next?"
+---
+Post as a new Discussion. Category: Ideas / Q&A.
+
+--- TITLE ---
+What features do you want next?
+
+--- BODY ---
+WeClaw is community-driven. Your feedback shapes the roadmap.
+
+**Already planned:**
+- Reply generation / drafting
+- Friend request verification
+- More skill templates for different group types
+
+**What do you need?**
+
+Tell us:
+- Which WeChat tasks drain your time?
+- What would make WeClaw indispensable for your workflow?
+- Any integrations (OpenClaw, other tools) you'd like?
+
+No idea is too small. We'll triage and update the roadmap based on interest.
+
+Thanks for being part of this.

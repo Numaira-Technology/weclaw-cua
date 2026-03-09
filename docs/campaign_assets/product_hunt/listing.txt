@@ -1,0 +1,34 @@
+Product Hunt Listing
+---
+Fill in before submitting. Tagline max ~60 chars. Description ~260 chars for preview.
+
+--- TAGLINE (short) ---
+AI-powered WeChat group protection. Open source.
+
+--- TAGLINE (alternative) ---
+Scan WeChat groups for scams. You approve. Open source.
+
+--- DESCRIPTION (full — for PH listing page) ---
+WeClaw is an open-source AI agent that scans WeChat groups for scam and fraud. It runs on your desktop, uses vision-based automation (no APIs), and proposes removals—you confirm before anything happens.
+
+• Scam & fraud detection in group chats
+• Human-in-the-loop: you approve every removal
+• Vision-based: works with the WeChat UI you already use
+• Extensible via skills (markdown playbooks)
+• Runs standalone or with OpenClaw
+• 100% open source, MIT license
+• Roadmap: reply generation, friend request verification
+
+Built on CUA (Computer Use Agents). Your machine. Your data. Your control.
+
+--- MEDIA ---
+[Upload: logo, screenshot of control panel, 30s demo GIF/video]
+
+--- FIRST COMMENT (post after launch — maker's comment) ---
+Hey Product Hunt — I'm [Name], maker of WeClaw.
+
+We built this because manual WeChat group moderation was burning 1–2 hours a week. Scammers exploit trust; by the time you notice, it's late. WeClaw uses AI to flag threats early. You stay in control.
+
+Open source, runs locally, no vendor lock-in. Would love your feedback and stars on GitHub.
+
+Ask me anything! 🙌

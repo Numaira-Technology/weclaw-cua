@@ -1,0 +1,47 @@
+Twitter Thread: "How WeClaw detects scams in 5 steps"
+---
+Educational thread. Post as a thread. Add [GIF/IMAGE] placeholders for visuals.
+
+--- TWEET 1/6 (HOOK) ---
+How does WeClaw actually detect scams in WeChat groups?
+
+5 steps. Vision-based. Human in the loop.
+
+Thread 👇
+
+--- TWEET 2/6 ---
+1. CLASSIFY
+
+The agent scans your chat list and labels each thread: group vs. individual. Only groups matter for scam detection. Skips DMs.
+
+--- TWEET 3/6 ---
+2. FILTER UNREAD
+
+Focuses on unread group chats. No point re-scanning groups you already cleared. Saves time + API calls.
+
+--- TWEET 4/6 ---
+3. READ & EXTRACT
+
+Opens each unread group, takes a screenshot, sends to the LLM. Extracts suspects: spam links, phishing language, impersonation, fake giveaways.
+
+Pattern matching + context. Not keyword blacklists.
+
+--- TWEET 5/6 ---
+4. BUILD PLAN
+
+Creates a removal plan: who to remove, why. Presents it to *you*.
+
+You approve or cancel. No auto-removal. Ever.
+
+--- TWEET 6/6 ---
+5. EXECUTE (with verification)
+
+Agent clicks through the WeChat UI. After each action, a fast verification model confirms success. Find → Click → Verify. Loop until done.
+
+That's it. 5 steps. Your machine. Your data. Open source.
+
+Try it: [GitHub URL]
+
+#WeClaw #AIAutomation
+
+--- THREAD END ---

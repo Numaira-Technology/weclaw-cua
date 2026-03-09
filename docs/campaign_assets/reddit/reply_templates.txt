@@ -1,0 +1,19 @@
+Reddit Reply Templates: "We built something for this"
+---
+Use when someone asks about WeChat moderation, scam detection, or automation.
+Stay help-first. Don't spam. Only reply when genuinely relevant.
+
+--- TEMPLATE A (someone asks "how do I moderate WeChat groups?") ---
+We built WeClaw for this—AI scans groups for scam/spam patterns, you confirm removals. Runs locally, open source. Might be worth a look: [GitHub URL]
+
+--- TEMPLATE B (someone complains about WeChat spam) ---
+Dealing with the same thing. Built an open source tool (WeClaw) that uses AI to flag suspects—you approve before removal. Runs on your machine. [GitHub URL] if you want to try it.
+
+--- TEMPLATE C (someone asks about CUA / Computer Use Agents) ---
+WeClaw is a CUA-based agent for WeChat—scam detection, with more automation tasks planned. Good example of a real-world use case. [GitHub URL]
+
+--- TEMPLATE D (someone asks about local-first AI tools) ---
+WeClaw is in that space—vision-based WeChat automation, runs locally, you choose your LLM provider. No WeClaw cloud. [GitHub URL]
+
+--- TEMPLATE E (short, for tight context) ---
+WeClaw does this—open source, local. [GitHub URL]

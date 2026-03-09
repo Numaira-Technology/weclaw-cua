@@ -1,0 +1,28 @@
+Tweet: Demo GIF + "WeClaw in 30 seconds"
+---
+Attach: 30-second GIF or video showing scan → detect → remove workflow.
+Format: Short, punchy. Optimized for scroll-stopping.
+
+--- TWEET (with media) ---
+WeClaw in 30 seconds ⚡
+
+Scan → Detect → You confirm → Remove
+
+AI-powered scam detection for WeChat groups. Open source. Runs on your machine.
+
+[Attach: demo GIF/video]
+
+Try it: [GitHub URL]
+
+#WeClaw #OpenSource #AIAutomation #WeChat
+
+--- ALTERNATIVE (slightly longer) ---
+Your WeChat groups. Scams everywhere. Manual mod = burnout.
+
+WeClaw: AI scans, you approve, threats get removed. 30 seconds.
+
+[Attach: demo GIF/video]
+
+Open source. No vendor lock-in. [GitHub URL]
+
+#WeClaw #AIAutomation

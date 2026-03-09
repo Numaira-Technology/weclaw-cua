@@ -1,0 +1,48 @@
+Tweet Mix: Educational, Personal, Industry Commentary
+---
+Additional standalone tweets for varied feed. Use for ongoing cadence.
+
+--- EDUCATIONAL ---
+Scam detection 101 for WeChat groups:
+
+1. Phishing links (shortened URLs, urgency language)
+2. Impersonation (fake "support," fake brands)
+3. Fake accounts (new profiles, coordinated posting)
+
+WeClaw flags these. You confirm. Open source.
+
+--- EDUCATIONAL ---
+Why vision-based automation > API scraping for WeChat:
+
+• No reverse engineering
+• Works when UI changes
+• Same pattern for any desktop app
+• You control the agent
+
+Built on CUA. WeClaw is proof of concept.
+
+--- PERSONAL ---
+Shipped WeClaw this week. Open source AI for WeChat group protection.
+
+Nervous. Excited. Building in public.
+
+If you moderate groups, try it. Feedback = fuel.
+
+[GitHub URL]
+
+--- PERSONAL ---
+Months of "nobody will care" thoughts.
+
+Then: first star. First PR. First "this saved me 2 hours."
+
+Open source is a long game. Playing it.
+
+--- INDUSTRY ---
+Messaging fraud is a $X B problem. Most "solutions" = black box SaaS, your data in their cloud.
+
+WeClaw: open source, local, transparent. You own the pipeline.
+
+Different approach. Worth trying.
+
+--- INDUSTRY ---
+The future of desktop automation isn't brittle scripts. It's AI that sees and acts—vision + control. CUA, WeClaw, and the ecosystem building around it are just the start.

@@ -1,0 +1,38 @@
+Video Script: 30-Second Demo
+---
+For Loom, OBS, or screen recording. Pair with visuals.
+
+--- SCENE 1 (0–5 sec) ---
+[Visual: WeChat group with unread messages, obvious spam in chat]
+
+VO/NARRATION:
+"WeChat groups. Scams everywhere. Manual moderation? Exhausting."
+
+--- SCENE 2 (5–12 sec) ---
+[Visual: Control panel, click "Start Workflow," step through Classify → Filter → Read]
+
+VO/NARRATION:
+"WeClaw scans your groups. AI detects suspects—phishing, impersonation, spam. You see the plan."
+
+--- SCENE 3 (12–22 sec) ---
+[Visual: Removal confirmation dialog, user clicks Approve, agent executes removal, verification]
+
+VO/NARRATION:
+"You approve. It removes. Human in the loop. Always."
+
+--- SCENE 4 (22–30 sec) ---
+[Visual: GitHub repo, "open source" highlighted, logo]
+
+VO/NARRATION:
+"Open source. Runs on your machine. Try it. [GitHub URL]"
+
+--- ON-SCREEN TEXT OPTIONS ---
+• "WeClaw – Your WeChat shield"
+• "Open source • Your control"
+• [GitHub URL]
+
+--- ALTERNATIVE (NO VO — text-only) ---
+0–5s: "WeChat groups. Scams. Manual mod = burnout."
+5–12s: "WeClaw: AI scans. Detects. Proposes."
+12–22s: "You approve. It removes. Human in the loop."
+22–30s: "Open source. Your machine. [GitHub URL]"

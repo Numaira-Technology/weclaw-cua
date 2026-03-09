@@ -1,0 +1,21 @@
+Title: Contributor Spotlight — [Name]
+
+---
+
+Copy (paste and fill in bracketed placeholders):
+
+This month's WeClaw contributor spotlight: [Name].
+
+[Name] [brief description: e.g. "opened 3 PRs this quarter" / "wrote the friend request verification skill" / "maintains the macOS config docs"].
+
+What [he/she/they] built: [1–2 sentence description of contribution].
+
+Why it matters: [impact on users or the project].
+
+We're open source because of people like [Name]. Every contribution—code, docs, feedback—shapes what WeClaw becomes.
+
+Want to join? Check out our good-first-issue tags: [GitHub URL]
+
+Thanks, [Name]. 🙏
+
+#WeClaw #OpenSource #ContributorSpotlight #Community

@@ -1,0 +1,15 @@
+Tweet: Reply to scam/fraud news — WeClaw angle
+---
+Use when replying to news about WeChat scams, messaging fraud, or group moderation. Adapt the reply to the specific story.
+
+--- REPLY TEMPLATE A (general scam news) ---
+Tools like WeClaw help group admins scan for this before damage is done. AI flags suspects, you confirm, they're removed. Open source, runs locally. [GitHub URL]
+
+--- REPLY TEMPLATE B (when someone asks "how do I protect my group?") ---
+We built WeClaw for this—AI scans WeChat groups for scam/fraud patterns, you approve removals. No API hacks, vision-based. Open source. Worth a try: [GitHub URL]
+
+--- REPLY TEMPLATE C (quote tweet with added value) ---
+This is exactly why we built WeClaw. Group admins shouldn't have to manually scan hundreds of messages. AI can flag threats—you stay in control. Open source: [GitHub URL]
+
+--- REPLY TEMPLATE D (brief, for tight character limit) ---
+WeClaw: AI that scans WeChat groups for scams. You approve. Open source. [GitHub URL]

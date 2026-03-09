@@ -1,0 +1,29 @@
+Reddit Post: r/selfhosted
+---
+Title: AI agent that scans WeChat groups for scams—runs entirely on your machine
+
+---
+
+Title (copy-paste):
+AI agent that scans WeChat groups for scams—runs entirely on your machine
+
+---
+
+Body:
+
+If you use WeChat groups and want to cut down on scam/spam moderation without sending data to a SaaS product, this might help.
+
+**WeClaw** is an open-source AI agent that:
+- Runs on your desktop (Windows/macOS)
+- Scans WeChat groups for scam/fraud patterns
+- Proposes removals—you approve, it executes
+- Sends screenshots to *your* LLM provider (OpenRouter, etc.)—no WeClaw cloud, no data retention
+- All processing is local except LLM API calls (you control which provider)
+
+**Stack:** Built on CUA (Computer Use Agents). Vision-based; no reverse-engineered APIs. Config and skills are YAML/markdown.
+
+**Use case:** Group admins who want AI-assisted moderation without handing their data to a third party. Self-hosted-friendly in the sense that you own the pipeline—you just need an LLM API key.
+
+Repo: [GitHub URL]
+
+I'm the maintainer. Happy to answer questions about architecture, privacy, or setup.

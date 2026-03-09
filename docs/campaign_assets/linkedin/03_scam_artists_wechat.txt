@@ -1,0 +1,27 @@
+Title: 3 ways scam artists target WeChat groups (and how to spot them)
+
+---
+
+Copy (paste into LinkedIn post):
+
+Scam artists love WeChat groups. High trust. High volume. Hard to moderate.
+
+Here are 3 patterns we see again and again—and how to spot them before damage is done.
+
+1. THE "HELPFUL" STRANGER
+Joins as a new member, stays quiet for a few days, then offers "exclusive deals," "investment tips," or "customer service." Often impersonates brands or official support.
+→ Red flag: Unsolicited DMs, links to external sites, pressure to act fast.
+
+2. THE FAKE ACCOUNT FARM
+Multiple accounts join over time, upvote each other, and create fake social proof. Then one "breaks character" to pitch a scheme.
+→ Red flag: New accounts with minimal history, similar profile pics or bios, coordinated posting.
+
+3. THE PHISHING LINK
+Messages with "verify your account," "claim your prize," or "check this out" — leading to credential theft or malware.
+→ Red flag: Shortened URLs, mismatched domains, urgency language.
+
+Manual moderation doesn't scale. We built WeClaw to help: AI scans, you confirm, threats get removed before they spread.
+
+If you run WeChat groups, what patterns have you seen? Drop a comment—we're learning from the community.
+
+#WeChat #ScamPrevention #GroupModeration #WeClaw #MessagingSecurity
