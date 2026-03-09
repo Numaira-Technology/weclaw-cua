@@ -1,26 +1,66 @@
-# WeChat Removal Tool
+# WeChat Removal Tool · AI-Powered Group Cleanup
 
-An AI-powered agent that automates the detection and removal of spam/scam users from WeChat groups. Built on the [CUA (Computer Use Agents)](https://github.com/trycua/cua) platform and runs directly on the host desktop.
+**Clean your WeChat groups—let AI find the spammers, you confirm the removals.**
 
-## Features
+An AI-powered agent that automates the detection and removal of spam/scam users from WeChat groups. Built on the [CUA (Computer Use Agents)](https://github.com/trycua/cua) platform and runs directly on your desktop. No app-specific APIs—if a human can click it, this agent can too.
 
-- Automated spam/scam user detection in WeChat group chats
-- Human-in-the-loop confirmation before removal
-- Hybrid automation: fixed-position clicks + vision-guided detection
-- Dual-model LLM routing: heavy model for coordinate prediction, fast model for yes/no checks
-- Shared retry utility for all vision queries — extensible for future action types
-- Skills system: workflow rules live in `skills/` markdown files, not in code
-- Supports multiple LLM providers via OpenRouter (Claude, GPT-4o, Gemini, Qwen)
-- Visual control panel for step-by-step workflow management
+---
 
-## How It Works
+## Table of Contents
 
-The agent uses a **Find-Click-Verify** pattern combining:
+- [🖼️ Demos](#️-demos)
+- [✨ Key Features](#-key-features)
+- [🔄 How It Works](#-how-it-works)
+- [🚀 Quick Start](#-quick-start)
+- [📁 Project Structure](#-project-structure)
+- [⚙️ Configuration](#️-configuration)
+- [📖 Documentation](#-documentation)
+- [🔧 Extending](#-extending)
+- [📦 Upstream](#-upstream)
 
-1. **Scaffolding Clicks**: Fixed-position clicks for known UI elements (menu buttons)
-2. **Vision Queries**: Cropped screenshots sent to LLM for dynamic element detection
-3. **Merged Verify+Find**: Panel verification and button location resolved in a single LLM call
-4. **Verification**: Vision-based confirmation after each action, using a fast model
+---
+
+## 🖼️ Demos
+
+> *Add video or GIF demos here once the repo is public. Suggested placeholders:*
+
+### Windows Demo
+
+<!-- TODO: Add demo — Control panel + workflow in action -->
+![Control panel workflow](docs/demos/control-panel-workflow.gif)
+*Control panel: Start Server → Start Workflow → step through Classify → Filter → Read → Extract → Plan → Remove.*
+
+### OpenClaw Demo
+
+<!-- TODO: Add demo — "Remove spammers from my WeChat groups" via OpenClaw -->
+![OpenClaw skill invocation](docs/demos/openclaw-skill.gif)
+*Ask OpenClaw to remove spammers—the skill orchestrates the full workflow.*
+
+---
+
+## ✨ Key Features
+
+| Capability | What it means |
+|------------|---------------|
+| **Automated spam detection** | Vision-based identification of suspicious users in WeChat group chats |
+| **Human-in-the-loop** | You confirm before any removal—no surprises |
+| **Hybrid automation** | Fixed-position clicks for known UI + vision-guided detection for dynamic content |
+| **Dual-model LLM routing** | Heavy model for coordinates; fast model for yes/no checks—speed and accuracy |
+| **Skills (markdown playbooks)** | Workflow rules live in `skills/` markdown files, not in code |
+| **Multi-provider support** | OpenRouter (Claude, GPT-4o, Gemini, Qwen) or any compatible LLM |
+| **Visual control panel** | Step-by-step workflow management—run stages independently or in sequence |
+| **OpenClaw integration** | Invoke via [OpenClaw](https://clawhub.ai)—"remove spammers from my WeChat groups" |
+
+---
+
+## 🔄 How It Works
+
+The agent uses a **Find–Click–Verify** pattern:
+
+1. **Scaffolding Clicks** — Fixed-position clicks for known UI elements (menu buttons)
+2. **Vision Queries** — Cropped screenshots sent to an LLM for dynamic element detection
+3. **Merged Verify+Find** — Panel verification and button location in a single LLM call
+4. **Verification** — Vision-based confirmation after each action (fast model)
 
 ```
 ┌──────────────────┐    ┌─────────┐    ┌──────────────────────┐
@@ -36,15 +76,19 @@ The agent uses a **Find-Click-Verify** pattern combining:
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed workflow diagrams.
 
-## Prerequisites
+---
 
-- Windows 10/11 (macOS supported — requires a `config/computer_mac.yaml` with screen coordinates)
-- Python 3.11+ (3.12 recommended)
-- OpenRouter API key (or other supported LLM provider)
+## 🚀 Quick Start
 
-## Quick Start
+### Prerequisites
 
-### Option A — Run the Installer (recommended for first-time setup)
+- **Windows 10/11** (macOS supported with `config/computer_mac.yaml` and screen coordinates)
+- **Python 3.11+** (3.12 recommended)
+- **OpenRouter API key** (or other supported LLM provider)
+
+---
+
+### Option A — Run the Installer *(recommended for first-time setup)*
 
 ```powershell
 # Run once — installs dependencies, prompts for API key, creates desktop shortcut
@@ -53,92 +97,90 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed workflow diagrams.
 
 Then double-click **"WeChat Removal Tool"** on your desktop.
 
+---
+
 ### Option B — Manual Setup
 
-1. **Set your API key** in `.env` file:
+1. **Set your API key** in `.env`:
+
    ```
    OPENROUTER_API_KEY=sk-or-v1-...
    ```
 
 2. **Install dependencies**:
+
    ```bash
    pip install -r requirements.txt
    ```
 
 3. **Launch the Control Panel**:
+
    ```bash
-   # Double-click start.bat or run:
    .\start.ps1
+   # or double-click start.bat
    ```
 
 4. **Start the workflow**:
-   - Click "Start Server" to launch the computer-server
-   - Click "Start Workflow" to launch the workflow backend
-   - Make sure WeChat is open and visible on screen
-   - Click through workflow steps: Classify → Filter → Read → Extract → Plan → Remove
+   - Click **Start Server** to launch the computer-server
+   - Click **Start Workflow** to launch the workflow backend
+   - Ensure WeChat is open and visible on screen
+   - Step through: Classify → Filter → Read → Extract → Plan → Remove
+
+---
 
 ### Option C — OpenClaw Skill
 
-If you use [OpenClaw](https://clawhub.ai) as your AI orchestrator, install the bundled
-skill so OpenClaw can invoke the tool on your behalf:
+Use [OpenClaw](https://clawhub.ai) as your AI orchestrator? Install the bundled skill:
 
 ```powershell
 $SkillsDir = "$env:USERPROFILE\clawd\skills\local"
 Copy-Item -Recurse OpenClaw_WeChatRemoval_skill "$SkillsDir\wechat-removal"
 ```
 
-Then ask OpenClaw: *"remove spammers from my WeChat groups"*.
+Then ask OpenClaw: *"Remove spammers from my WeChat groups"*.
 
-See **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)** for a full explanation of both
-distribution channels and how to keep them in sync as the tool evolves.
+See [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) for distribution channels and keeping wrappers in sync.
 
-## Project Structure
+---
+
+## 📁 Project Structure
 
 ```
 .
-├── config/                  # Configuration files
-│   ├── computer_windows.yaml    # Desktop settings (screen coords, button positions)
-│   └── model.yaml               # AI model settings (model, verify_model, skills_dir)
-├── runtime/                 # Session lifecycle managers
-│   ├── computer_session.py      # Computer/sandbox setup
-│   ├── model_session.py         # Agent configuration (ModelSettings)
-│   └── llm_utils.py             # Shared LLM retry utility (llm_call_with_retry)
-├── modules/                 # Workflow components
-│   ├── task_types.py            # Data classes
-│   ├── group_classifier.py      # Chat classification
-│   ├── unread_scanner.py        # Unread filter
-│   ├── message_reader.py        # Message reading prompts
-│   ├── suspicious_detector.py   # Suspect extraction
-│   ├── removal_precheck.py      # Removal planning
-│   ├── human_confirmation.py    # User confirmation
-│   └── removal_executor.py      # Removal execution (load_skill, merged prompts)
-├── skills/                  # Skill markdown files
-│   └── wechat_removal.md        # WeChat removal workflow rules and UI reference
-├── workflow/                # Main orchestration
+├── config/                      # Configuration
+│   ├── computer_windows.yaml   # Desktop settings (screen coords, button positions)
+│   └── model.yaml              # AI model settings (model, verify_model, skills_dir)
+├── runtime/                     # Session lifecycle
+│   ├── computer_session.py
+│   ├── model_session.py
+│   └── llm_utils.py            # Shared LLM retry utility
+├── modules/                     # Workflow components
+│   ├── group_classifier.py
+│   ├── unread_scanner.py
+│   ├── message_reader.py
+│   ├── suspicious_detector.py
+│   ├── removal_precheck.py
+│   ├── human_confirmation.py
+│   └── removal_executor.py
+├── skills/                      # Markdown playbooks
+│   └── wechat_removal.md
+├── workflow/
 │   └── run_wechat_removal.py    # Entry point
-├── artifacts/               # Output directory
-│   ├── captures/                # Screenshots
-│   └── logs/                    # Reports
-├── vendor/                  # Vendored CUA packages
-│   ├── agent/                   # cua-agent
-│   ├── computer/                # cua-computer
-│   ├── computer-server/         # cua-computer-server
-│   └── core/                    # cua-core
-├── OpenClaw_WeChatRemoval_skill/   # OpenClaw skill package
-│   ├── SKILL.md                    # Skill descriptor (name, description, instructions)
-│   ├── README.md                   # Setup guide for OpenClaw users
-│   └── scripts/
-│       └── run_wechat_removal.ps1  # Launcher called by OpenClaw
-├── install.ps1              # One-shot installer (creates .env, desktop shortcut)
-├── start.ps1                # Day-to-day launcher
-├── start.bat                # Double-click launcher (calls start.ps1)
-├── requirements.txt         # Python dependencies
-└── docs/                    # Documentation
-    ├── ARCHITECTURE.md          # Architecture details
-    └── DISTRIBUTION.md          # Distribution channels (standalone app + OpenClaw skill)
+├── artifacts/
+│   ├── captures/
+│   └── logs/
+├── vendor/                      # Vendored CUA packages
+├── OpenClaw_WeChatRemoval_skill/
+├── install.ps1
+├── start.ps1
+└── docs/
+    ├── ARCHITECTURE.md
+    └── DISTRIBUTION.md
 ```
 
-## Configuration
+---
+
+## ⚙️ Configuration
 
 ### `config/computer_windows.yaml`
 
@@ -148,7 +190,6 @@ os_type: windows
 api_port: 8000
 screen_width: 2560
 screen_height: 1440
-# WeChat UI fixed button positions (absolute screen pixels)
 wechat_three_dots_x: 2525
 wechat_three_dots_y: 48
 wechat_delete_button_x: 1345
@@ -158,71 +199,51 @@ wechat_delete_button_y: 920
 ### `config/model.yaml`
 
 ```yaml
-model: openrouter/qwen/qwen3-vl-32b-instruct  # Heavy model: coordinate prediction
-verify_model: openrouter/qwen/qwen2-vl-7b-instruct  # Fast model: yes/no checks
-skills_dir: skills                             # Directory with skill .md files
+model: openrouter/qwen/qwen3-vl-32b-instruct      # Heavy: coordinate prediction
+verify_model: openrouter/qwen/qwen2-vl-7b-instruct # Fast: yes/no checks
+skills_dir: skills
 max_trajectory_budget: 5.0
-instructions: |
-  你是一个专门处理微信群违规信息的助手...
 ```
 
-`verify_model` is optional — if omitted or empty, falls back to `model` for all calls.
+`verify_model` is optional—omitted or empty falls back to `model` for all calls.
 
 ### `skills/wechat_removal.md`
 
-Markdown playbook injected into action prompts at runtime. Edit this file to tune the agent's understanding of the WeChat UI without touching Python code. The file uses YAML frontmatter (`name`, `description`) and plain markdown for the instructions body.
+Markdown playbook injected into action prompts. Tune the agent's understanding of the WeChat UI without touching Python. Uses YAML frontmatter (`name`, `description`) and plain markdown for instructions.
 
-## Output
+---
 
-Results are saved to `artifacts/logs/report.json`:
+## 📖 Documentation
 
-```json
-{
-  "timestamp": "2026-01-19T12:00:00.000000",
-  "threads": [...],
-  "suspects": [...],
-  "removal_confirmed": true,
-  "note": "Successfully removed 1 suspect"
-}
-```
+| Document | Description |
+|----------|-------------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Vision system, Find–Click–Verify diagrams, dual-model routing, coordinate conversions, module diagrams |
+| [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) | Standalone installer, OpenClaw skill setup, configuration reference, keeping wrappers in sync |
 
-## Documentation
+---
 
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Complete architecture documentation including:
-  - Agent vision system and crop regions
-  - Find-Click-Verify workflow diagrams
-  - Dual-model LLM routing
-  - Coordinate system conversions
-  - Module interaction diagrams
-  - Vision prompt examples
+## 🔧 Extending
 
-- **[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md)** - Distribution channels documentation including:
-  - Standalone installer (`install.ps1`) walkthrough
-  - OpenClaw skill setup and usage
-  - How wrappers relate to the core tool
-  - Configuration reference and dependency list
-  - Guide for keeping wrappers up to date as the tool evolves
+All vision queries use `runtime/llm_utils.llm_call_with_retry()`. To add a new action:
 
-## Adding New Action Types
-
-All vision queries go through `runtime/llm_utils.llm_call_with_retry()`. To add a new action:
-
-1. Add a prompt builder function in the relevant `modules/` file
+1. Add a prompt builder in the relevant `modules/` file
 2. Add a response parser returning a typed dict
-3. Call `run_cropped_vision_query()` (or `run_vision_query()`) from the workflow — both use `llm_call_with_retry` internally
-4. Add a new `elif step == "your_step"` branch in `StepModeRunner.process_request()`
-5. Optionally add rules to `skills/wechat_removal.md` or create a new skill file
+3. Call `run_cropped_vision_query()` or `run_vision_query()` from the workflow
+4. Add `elif step == "your_step"` in `StepModeRunner.process_request()`
+5. Optionally add rules to `skills/wechat_removal.md` or create a new skill
 
-## Upstream Reference
+---
 
-This project is built on the [CUA (Computer Use Agents)](https://github.com/trycua/cua) platform. The `vendor/` directory contains vendored copies of the following CUA packages:
+## 📦 Upstream
 
-- **cua-agent**: AI agent framework for computer-use tasks
-- **cua-computer**: SDK for controlling desktop environments
-- **cua-computer-server**: HTTP API for UI interactions inside sandboxes
-- **cua-core**: Shared utilities and telemetry
+Built on [CUA (Computer Use Agents)](https://github.com/trycua/cua). The `vendor/` directory contains:
 
-For the original source code and documentation, visit the [CUA repository](https://github.com/trycua/cua).
+- **cua-agent** — AI agent framework
+- **cua-computer** — Desktop control SDK
+- **cua-computer-server** — HTTP API for UI interactions
+- **cua-core** — Shared utilities and telemetry
+
+---
 
 ## License
 
