@@ -17,6 +17,7 @@ Output spec:
       `poll_forever` is `False`.
 """
 
+from pathlib import Path
 from time import sleep
 
 from algorithm_a.capture_scroll_screenshots import capture_scroll_screenshots
@@ -36,8 +37,13 @@ def run_group_collection(group_name: str) -> str | None:
 
     unread_position = locate_unread_position(group_name)
     screenshot_paths = capture_scroll_screenshots(group_name, unread_position)
-    long_image_paths = stitch_screenshots(screenshot_paths)
-    structured_messages = extract_structured_messages(long_image_paths) # LLM extraction
+    output_path = Path("output") / f"{group_name.replace('/', '_')}_stitched.png"
+    stitch_result = stitch_screenshots(
+        [Path(p) for p in screenshot_paths],
+        output_path=output_path,
+    )
+    long_image_path = stitch_result["output_path"]
+    structured_messages = extract_structured_messages(long_image_path)
     group_json_path = write_group_json(group_name, structured_messages)
     return group_json_path
 
