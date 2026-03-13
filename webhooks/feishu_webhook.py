@@ -10,6 +10,7 @@ Output spec:
     - Returns a configured Feishu webhook instance.
 """
 
+
 from webhooks.client_webhook import ClientWebhook
 
 

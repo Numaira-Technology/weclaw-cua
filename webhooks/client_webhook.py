@@ -1,25 +1,25 @@
 """Base webhook class for one client.
 
 Usage:
-    Inherit this class or use a channel-specific subclass.
+    Subclass this class for each concrete channel (for example, Telegram or Feishu)
+    and implement channel-specific message sending in `send_message`.
 
 Input spec:
-    - `client_name`: one client name.
-    - `client_json_path`: one client JSON path.
-    - `webhook_url`: public webhook URL.
-    - `webhook_secret`: shared webhook secret.
-    - `webhook_path`: local webhook path.
+    - `client_name`: logical name of the client.
+    - `client_json_path`: path to client-specific configuration JSON.
+    - `webhook_url`: public webhook URL visible to the external platform.
+    - `webhook_secret`: shared secret or token used for authentication.
+    - `webhook_path`: local webhook HTTP path.
     - `webhook_host`: local webhook host.
     - `webhook_port`: local webhook port.
 
 Output spec:
-    - `endpoint_config()` returns endpoint settings.
-    - `receive_message()` returns `(client_name, message)`.
-    - `send_message()` returns `(client_name, message)`.
+    - `endpoint_config()`: mapping of endpoint configuration fields.
+    - `receive_message()`: tuple `(client_name, client_id, question)`.
+    - `send_message()`: must be implemented by subclasses and return a
+      tuple `(client_name, status)`.
 """
-import sys
-import json
-import urllib.request
+
 
 class ClientWebhook:
     channel_name: str = ""
@@ -64,30 +64,13 @@ class ClientWebhook:
         }
 
     def receive_message(self, client_id: str, client_question: str) -> tuple[str, str, str]:
-        """
-        接收从外层入口脚本（经过 sys.argv 解析后）传入的纯净数据。
-        """
         assert client_id is not None
         assert client_question is not None
-        
         return self.client_name, client_id, client_question
 
     def send_message(self, receiver_name: str, answer: str) -> tuple[str, str]:
-        """
-        Directly call the Telegram official API to reply to the message
-        Here we assume that webhook_secret stores the Telegram Bot Token
-        """
-        url = f"https://api.telegram.org/bot{self.webhook_secret}/sendMessage"
-        payload = {"client_name": receiver_name, "text": answer}
-        
-        req = urllib.request.Request(
-            url, 
-            data=json.dumps(payload).encode('utf-8'), 
-            headers={'Content-Type': 'application/json'}
+        msg = (
+            f"{self.__class__.__name__}.send_message() is not implemented. "
+            "Use a concrete channel subclass instead."
         )
-        
-        try:
-            urllib.request.urlopen(req)
-            return self.client_name, "Success"
-        except Exception as e:
-            return self.client_name, f"Failed: {str(e)}"        
+        raise NotImplementedError(msg)

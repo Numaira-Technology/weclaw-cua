@@ -1,15 +1,14 @@
 """Telegram webhook for one client.
 
 Usage:
-    Use this class directly or inherit it for a client-specific Telegram hook.
+    Instantiate this class for a specific client or subclass it for further customization. It expects the ``webhook_secret`` to store the Telegram Bot Token.
 
 Input spec:
     - Same inputs as `ClientWebhook`.
 
 Output spec:
-    - Returns a configured Telegram webhook instance.
+    - A configured `TelegramWebhook` instance that can receive and send messages for one Telegram chat.
 """
-import sys
 import json
 import urllib.request
 
@@ -37,28 +36,21 @@ class TelegramWebhook(ClientWebhook):
             webhook_host=webhook_host,
             webhook_port=webhook_port,
         )
-        
+
     def send_message(self, client_id: str, answer: str) -> tuple[str, str]:
         """
-        Directly call the Telegram official API to send message.
-        Here we assume that webhook_secret stores the Telegram Bot Token.
+        Call the Telegram Bot API to send a text message.
         """
         url = f"https://api.telegram.org/bot{self.webhook_secret}/sendMessage"
-        payload = {
-            "chat_id": client_id,
-            "text": answer
-        }
-        
+        payload = {"chat_id": client_id, "text": answer}
+
         req = urllib.request.Request(
-            url, 
-            data=json.dumps(payload).encode('utf-8'), 
-            headers={'Content-Type': 'application/json'}
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
         )
-        
-        try:
-            with urllib.request.urlopen(req) as response:
-                if response.getcode() == 200:
-                    return self.client_name, "Message sent successfully"
-                return self.client_name, f"HTTP Error: {response.getcode()}"
-        except Exception as e:
-            return self.client_name, f"Failed to send message: {str(e)}"
+
+        with urllib.request.urlopen(req) as response:
+            status_code = response.getcode()
+            assert status_code == 200
+            return self.client_name, "Message sent successfully"
