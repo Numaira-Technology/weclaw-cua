@@ -17,7 +17,9 @@ Output spec:
     - `receive_message()` returns `(client_name, message)`.
     - `send_message()` returns `(client_name, message)`.
 """
-
+import sys
+import json
+import urllib.request
 
 class ClientWebhook:
     channel_name: str = ""
@@ -61,10 +63,31 @@ class ClientWebhook:
             "webhook_port": self.webhook_port,
         }
 
-    def receive_message(self, message: str) -> tuple[str, str]:
-        assert message
-        return self.client_name, message
+    def receive_message(self, client_id: str, client_question: str) -> tuple[str, str, str]:
+        """
+        接收从外层入口脚本（经过 sys.argv 解析后）传入的纯净数据。
+        """
+        assert client_id is not None
+        assert client_question is not None
+        
+        return self.client_name, client_id, client_question
 
-    def send_message(self, message: str) -> tuple[str, str]:
-        assert message
-        return self.client_name, message
+    def send_message(self, receiver_name: str, answer: str) -> tuple[str, str]:
+        """
+        Directly call the Telegram official API to reply to the message
+        Here we assume that webhook_secret stores the Telegram Bot Token
+        """
+        url = f"https://api.telegram.org/bot{self.webhook_secret}/sendMessage"
+        payload = {"client_name": receiver_name, "text": answer}
+        
+        req = urllib.request.Request(
+            url, 
+            data=json.dumps(payload).encode('utf-8'), 
+            headers={'Content-Type': 'application/json'}
+        )
+        
+        try:
+            urllib.request.urlopen(req)
+            return self.client_name, "Success"
+        except Exception as e:
+            return self.client_name, f"Failed: {str(e)}"        
