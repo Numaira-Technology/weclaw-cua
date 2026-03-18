@@ -1,186 +1,145 @@
-# WeChat Removal Tool
+# WeClaw
 
-An AI-powered agent that automates the detection and removal of spam/scam users from WeChat groups. Built on the [CUA (Computer Use Agents)](https://github.com/trycua/cua) platform and runs directly on the host desktop.
-
-## Features
-
-- Automated spam/scam user detection in WeChat group chats
-- Human-in-the-loop confirmation before removal
-- Hybrid automation: fixed-position clicks + vision-guided detection
-- Dual-model LLM routing: heavy model for coordinate prediction, fast model for yes/no checks
-- Shared retry utility for all vision queries — extensible for future action types
-- Skills system: workflow rules live in `skills/` markdown files, not in code
-- Supports multiple LLM providers via OpenRouter (Claude, GPT-4o, Gemini, Qwen)
-- Visual control panel for step-by-step workflow management
+OpenClaw skill for extracting unread WeChat messages and generating customized reports.
 
 ## How It Works
 
-The agent uses a **Find-Click-Verify** pattern combining:
+1. **algo_a** reads WeChat's UI tree (macOS Accessibility API) to find unread chats, scroll through messages, and extract structured message data into JSON files.
+2. **algo_b** loads those JSON files, combines them with a user-customized prompt, and calls an LLM to generate a report.
 
-1. **Scaffolding Clicks**: Fixed-position clicks for known UI elements (menu buttons)
-2. **Vision Queries**: Cropped screenshots sent to LLM for dynamic element detection
-3. **Merged Verify+Find**: Panel verification and button location resolved in a single LLM call
-4. **Verification**: Vision-based confirmation after each action, using a fast model
+Delivery channels (Telegram, Feishu, etc.) are handled by OpenClaw, not this repo.
 
-```
-┌──────────────────┐    ┌─────────┐    ┌──────────────────────┐
-│  VERIFY + FIND   │───▶│  CLICK  │───▶│       VERIFY         │
-│  (single call)   │    │         │    │   (fast model)       │
-└──────────────────┘    └─────────┘    └──────────────────────┘
-        │                    │                    │
-        ▼                    ▼                    ▼
-  Heavy VLM returns     Execute click        Fast VLM confirms
-  panel_opened +        at coordinates       success / failure
-  button coordinates
+## Setup
+
+```bash
+pip install -r requirements.txt
+cp config/config.json.example config/config.json   # edit with your settings
+cp .env.example .env                                # add your OPENROUTER_API_KEY
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed workflow diagrams.
+macOS Accessibility permission is required. On first run, the system will prompt you to grant access in System Preferences > Privacy & Security > Accessibility.
 
-## Prerequisites
+## Usage
 
-- Windows 10/11 (macOS supported — requires a `config/computer_mac.yaml` with screen coordinates)
-- Python 3.11+ (3.12 recommended)
-- OpenRouter API key (or other supported LLM provider)
-
-## Quick Start
-
-1. **Set your API key** in `.env` file:
-   ```
-   OPENROUTER_API_KEY=sk-or-v1-...
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   pip install httpx aiohttp pydantic litellm pillow
-   ```
-
-3. **Launch the Control Panel**:
-   ```bash
-   # Double-click start.bat or run:
-   .\start.ps1
-   ```
-
-4. **Start the workflow**:
-   - Click "Start Server" to launch the computer-server
-   - Click "Start Workflow" to launch the workflow backend
-   - Make sure WeChat is open and visible on screen
-   - Click through workflow steps: Classify → Filter → Read → Extract → Plan → Remove
-
-## Project Structure
-
-```
-.
-├── config/                  # Configuration files
-│   ├── computer_windows.yaml    # Desktop settings (screen coords, button positions)
-│   └── model.yaml               # AI model settings (model, verify_model, skills_dir)
-├── runtime/                 # Session lifecycle managers
-│   ├── computer_session.py      # Computer/sandbox setup
-│   ├── model_session.py         # Agent configuration (ModelSettings)
-│   └── llm_utils.py             # Shared LLM retry utility (llm_call_with_retry)
-├── modules/                 # Workflow components
-│   ├── task_types.py            # Data classes
-│   ├── group_classifier.py      # Chat classification
-│   ├── unread_scanner.py        # Unread filter
-│   ├── message_reader.py        # Message reading prompts
-│   ├── suspicious_detector.py   # Suspect extraction
-│   ├── removal_precheck.py      # Removal planning
-│   ├── human_confirmation.py    # User confirmation
-│   └── removal_executor.py      # Removal execution (load_skill, merged prompts)
-├── skills/                  # Skill markdown files
-│   └── wechat_removal.md        # WeChat removal workflow rules and UI reference
-├── workflow/                # Main orchestration
-│   └── run_wechat_removal.py    # Entry point
-├── artifacts/               # Output directory
-│   ├── captures/                # Screenshots
-│   └── logs/                    # Reports
-├── vendor/                  # Vendored CUA packages
-│   ├── agent/                   # cua-agent
-│   ├── computer/                # cua-computer
-│   ├── computer-server/         # cua-computer-server
-│   └── core/                    # cua-core
-└── docs/                    # Documentation
-    └── ARCHITECTURE.md          # Architecture details
+```bash
+./run.sh                        # uses config/config.json by default
+./run.sh path/to/config.json    # custom config path
 ```
 
-## Configuration
+## Directory Structure
 
-### `config/computer_windows.yaml`
-
-```yaml
-use_host_computer_server: true
-os_type: windows
-api_port: 8000
-screen_width: 2560
-screen_height: 1440
-# WeChat UI fixed button positions (absolute screen pixels)
-wechat_three_dots_x: 2525
-wechat_three_dots_y: 48
-wechat_delete_button_x: 1345
-wechat_delete_button_y: 920
+```
+weclaw/
+├── run.sh                              # one-command entry point
+├── requirements.txt
+├── .env.example
+│
+├── config/
+│   ├── __init__.py
+│   ├── weclaw_config.py                # WeclawConfig dataclass + load_config()
+│   └── config.json.example
+│
+├── platform_mac/
+│   ├── __init__.py
+│   ├── grant_permissions.py            # check/prompt macOS Accessibility permission
+│   ├── find_wechat_window.py           # locate WeChat window, return WechatWindow
+│   └── ui_tree_reader.py              # generic AXUIElement tree traversal helpers
+│
+├── algo_a/                             # message collection
+│   ├── __init__.py
+│   ├── pipeline_a.py                   # orchestrate full collection flow
+│   ├── list_unread_chats.py            # scan sidebar for unread badges
+│   ├── click_into_chat.py             # AXPress on a sidebar chat row
+│   ├── scroll_chat_to_bottom.py       # scroll message panel to bottom
+│   ├── read_messages_from_uitree.py   # extract messages from AX tree
+│   └── write_messages_json.py          # write messages to JSON file
+│
+├── algo_b/                             # report generation
+│   ├── __init__.py
+│   ├── pipeline_b.py                   # orchestrate full report flow
+│   ├── load_messages.py               # read JSON files from algo_a
+│   ├── build_report_prompt.py         # combine messages + custom prompt
+│   └── generate_report.py            # call LLM, return report
+│
+├── shared/
+│   ├── __init__.py
+│   ├── llm_client.py                  # thin OpenRouter API wrapper
+│   └── message_schema.py             # Message dataclass + serialization
+│
+└── test/
+    └── __init__.py
 ```
 
-### `config/model.yaml`
+## Data Flow
 
-```yaml
-model: openrouter/qwen/qwen3-vl-32b-instruct  # Heavy model: coordinate prediction
-verify_model: openrouter/qwen/qwen2-vl-7b-instruct  # Fast model: yes/no checks
-skills_dir: skills                             # Directory with skill .md files
-max_trajectory_budget: 5.0
-instructions: |
-  你是一个专门处理微信群违规信息的助手...
+```
+algo_a                                          algo_b
+┌─────────────────────────────────────┐        ┌──────────────────────────────┐
+│ list_unread_chats                   │        │ load_messages                │
+│         │                           │        │         │                    │
+│         v                           │        │         v                    │
+│ click_into_chat                     │        │ build_report_prompt          │
+│         │                           │        │         │                    │
+│         v                           │        │         v                    │
+│ scroll_chat_to_bottom               │        │ generate_report              │
+│         │                           │        │         │                    │
+│         v                           │        │         v                    │
+│ read_messages_from_uitree           │        │ report text (stdout/file)    │
+│         │                           │        └──────────────────────────────┘
+│         v                           │                  ^
+│ write_messages_json ── JSON files ──┼──────────────────┘
+│         │                           │
+│    (loop next chat)                 │
+└─────────────────────────────────────┘
 ```
 
-`verify_model` is optional — if omitted or empty, falls back to `model` for all calls.
+## Message JSON Schema
 
-### `skills/wechat_removal.md`
+Each chat produces a JSON file in `output/`:
 
-Markdown playbook injected into action prompts at runtime. Edit this file to tune the agent's understanding of the WeChat UI without touching Python code. The file uses YAML frontmatter (`name`, `description`) and plain markdown for the instructions body.
+```json
+[
+  {
+    "chat_name": "Group A",
+    "sender": "Alice",
+    "time": "14:32",
+    "content": "Hello!",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group A",
+    "sender": "SYSTEM",
+    "time": null,
+    "content": "Bob joined the group",
+    "type": "system"
+  }
+]
+```
 
-## Output
+`type` is one of: `text`, `system`, `link_card`, `image`, `unsupported`.
 
-Results are saved to `artifacts/logs/report.json`:
+## Config Schema
+
+`config/config.json`:
 
 ```json
 {
-  "timestamp": "2026-01-19T12:00:00.000000",
-  "threads": [...],
-  "suspects": [...],
-  "removal_confirmed": true,
-  "note": "Successfully removed 1 suspect"
+  "wechat_app_name": "WeChat",
+  "groups_to_monitor": ["Group A", "Group B"],
+  "report_custom_prompt": "Summarize key decisions and action items.",
+  "openrouter_api_key": "sk-or-...",
+  "llm_model": "google/gemini-3-flash-preview",
+  "output_dir": "output"
 }
 ```
 
-## Documentation
+## Parallel Work Boundaries (4 people)
 
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - Complete architecture documentation including:
-  - Agent vision system and crop regions
-  - Find-Click-Verify workflow diagrams
-  - Dual-model LLM routing
-  - Coordinate system conversions
-  - Module interaction diagrams
-  - Vision prompt examples
+| Person | Scope | Files |
+|--------|-------|-------|
+| A | macOS permissions + window | `platform_mac/grant_permissions.py`, `find_wechat_window.py`, `ui_tree_reader.py` |
+| B | Sidebar scan + chat clicking | `algo_a/list_unread_chats.py`, `click_into_chat.py` |
+| C | Message reading + writing | `algo_a/scroll_chat_to_bottom.py`, `read_messages_from_uitree.py`, `write_messages_json.py` |
+| D | Report + config + integration | `algo_b/*`, `config/*`, `shared/*`, `run.sh`, `pipeline_a.py` |
 
-## Adding New Action Types
-
-All vision queries go through `runtime/llm_utils.llm_call_with_retry()`. To add a new action:
-
-1. Add a prompt builder function in the relevant `modules/` file
-2. Add a response parser returning a typed dict
-3. Call `run_cropped_vision_query()` (or `run_vision_query()`) from the workflow — both use `llm_call_with_retry` internally
-4. Add a new `elif step == "your_step"` branch in `StepModeRunner.process_request()`
-5. Optionally add rules to `skills/wechat_removal.md` or create a new skill file
-
-## Upstream Reference
-
-This project is built on the [CUA (Computer Use Agents)](https://github.com/trycua/cua) platform. The `vendor/` directory contains vendored copies of the following CUA packages:
-
-- **cua-agent**: AI agent framework for computer-use tasks
-- **cua-computer**: SDK for controlling desktop environments
-- **cua-computer-server**: HTTP API for UI interactions inside sandboxes
-- **cua-core**: Shared utilities and telemetry
-
-For the original source code and documentation, visit the [CUA repository](https://github.com/trycua/cua).
-
-## License
-
-MIT License
+Interfaces between modules: `WechatWindow` dataclass, `ChatInfo` dataclass, `Message` dicts, and JSON files on disk.
