@@ -1,0 +1,2 @@
+from platform_win.grant_permissions import ensure_permissions
+from platform_win.find_wechat_window import WechatWindow, find_wechat_window
