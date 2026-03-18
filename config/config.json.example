@@ -1,0 +1,11 @@
+{
+  "wechat_app_name": "WeChat",
+  "groups_to_monitor": [
+    "Group A",
+    "Group B"
+  ],
+  "report_custom_prompt": "Summarize key decisions, action items, and important updates from these chat messages.",
+  "openrouter_api_key": "sk-or-YOUR-KEY-HERE",
+  "llm_model": "google/gemini-3-flash-preview",
+  "output_dir": "output"
+}

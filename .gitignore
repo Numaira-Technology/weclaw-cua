@@ -1,4 +1,8 @@
 __pycache__/
+*.pyc
 .env
-*.jpg
-*.png
+config/config.json
+output/
+.DS_Store
+.venv/
+*.egg-info/
