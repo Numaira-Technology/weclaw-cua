@@ -4,26 +4,33 @@ OpenClaw skill for extracting unread WeChat messages and generating customized r
 
 ## How It Works
 
-1. **algo_a** reads WeChat's UI tree (macOS Accessibility API) to find unread chats, scroll through messages, and extract structured message data into JSON files.
-2. **algo_b** loads those JSON files, combines them with a user-customized prompt, and calls an LLM to generate a report.
+1. A **platform layer** (`platform_mac/` or `platform_win/`) interfaces with the OS to locate the WeChat window and read its UI tree.
+2. **algo_a** uses the platform layer to find unread chats, scroll through messages, and extract structured message data into JSON files.
+3. **algo_b** loads those JSON files, combines them with a user-customized prompt, and calls an LLM to generate a report.
 
 Delivery channels (Telegram, Feishu, etc.) are handled by OpenClaw, not this repo.
+
+### Supported Platforms
+
+| Platform | Directory | UI Automation API |
+|----------|-----------|-------------------|
+| macOS | `platform_mac/` | Accessibility API (AXUIElement via pyobjc) |
+| Windows | `platform_win/` | UI Automation (IUIAutomation via comtypes) |
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
-cp config/config.json.example config/config.json   # edit with your settings
-cp .env.example .env                                # add your OPENROUTER_API_KEY
 ```
 
-macOS Accessibility permission is required. On first run, the system will prompt you to grant access in System Preferences > Privacy & Security > Accessibility.
+**macOS:** Accessibility permission is required. On first run, the system will prompt you to grant access in System Preferences > Privacy & Security > Accessibility.
+
+**Windows:** UI Automation generally works without extra permissions. If WeChat is running as admin, run the script elevated too (`Run as Administrator`).
 
 ## Usage
 
 ```bash
-./run.sh                        # uses config/config.json by default
-./run.sh path/to/config.json    # custom config path
+./run.sh                       
 ```
 
 ## Directory Structure
@@ -32,39 +39,49 @@ macOS Accessibility permission is required. On first run, the system will prompt
 weclaw/
 ├── run.sh                              # one-command entry point
 ├── requirements.txt
-├── .env.example
 │
 ├── config/
 │   ├── __init__.py
 │   ├── weclaw_config.py                # WeclawConfig dataclass + load_config()
 │   └── config.json.example
 │
-├── platform_mac/
+├── shared/                             # cross-cutting utilities
 │   ├── __init__.py
-│   ├── grant_permissions.py            # check/prompt macOS Accessibility permission
-│   ├── find_wechat_window.py           # locate WeChat window, return WechatWindow
-│   └── ui_tree_reader.py              # generic AXUIElement tree traversal helpers
+│   ├── platform_api.py               # PlatformDriver Protocol (interface contract)
+│   ├── llm_client.py                  # thin OpenRouter API wrapper
+│   └── message_schema.py             # Message dataclass + serialization
 │
-├── algo_a/                             # message collection
+├── platform_mac/                       # macOS platform layer (implements PlatformDriver)
+│   ├── __init__.py                    # exports create_driver()
+│   ├── driver.py                     # MacDriver class — all 14 methods to implement
+│   ├── grant_permissions.py           # check/prompt macOS Accessibility permission
+│   ├── find_wechat_window.py          # locate WeChat window, return WechatWindow
+│   └── ui_tree_reader.py             # generic AXUIElement tree traversal helpers
+│
+├── platform_win/                       # Windows platform layer (implements PlatformDriver)
+│   ├── __init__.py                    # exports create_driver()
+│   ├── driver.py                     # WinDriver class — all 14 methods to implement
+│   ├── grant_permissions.py           # check Windows prerequisites (admin, platform)
+│   ├── find_wechat_window.py          # locate WeChat window via UI Automation
+│   └── ui_tree_reader.py             # generic IUIAutomation tree traversal helpers
+│
+├── algo_a/                             # message collection (DONE)
 │   ├── __init__.py
-│   ├── pipeline_a.py                   # orchestrate full collection flow
-│   ├── list_unread_chats.py            # scan sidebar for unread badges
-│   ├── click_into_chat.py             # AXPress on a sidebar chat row
-│   ├── scroll_chat_to_bottom.py       # scroll message panel to bottom
-│   ├── read_messages_from_uitree.py   # extract messages from AX tree
-│   └── write_messages_json.py          # write messages to JSON file
+│   ├── pipeline_a.py                  # orchestrate: auto-detect platform, run collection
+│   ├── list_unread_chats.py           # scan sidebar for unread badges (scrolls if needed)
+│   ├── click_into_chat.py            # click sidebar row + wait for panel ready
+│   ├── scroll_chat_to_bottom.py      # scroll message panel to bottom
+│   ├── read_messages_from_uitree.py  # extract + classify messages from UI tree
+│   ├── write_messages_json.py         # write messages to JSON file
+│   ├── TESTING.md                    # test plan with edge cases
+│   └── DEVGUIDE.md                   # instructions for platform developers
 │
 ├── algo_b/                             # report generation
 │   ├── __init__.py
-│   ├── pipeline_b.py                   # orchestrate full report flow
-│   ├── load_messages.py               # read JSON files from algo_a
-│   ├── build_report_prompt.py         # combine messages + custom prompt
-│   └── generate_report.py            # call LLM, return report
-│
-├── shared/
-│   ├── __init__.py
-│   ├── llm_client.py                  # thin OpenRouter API wrapper
-│   └── message_schema.py             # Message dataclass + serialization
+│   ├── pipeline_b.py                  # orchestrate full report flow
+│   ├── load_messages.py              # read JSON files from algo_a
+│   ├── build_report_prompt.py        # combine messages + custom prompt
+│   └── generate_report.py           # call LLM, return report
 │
 └── test/
     └── __init__.py
@@ -92,54 +109,3 @@ algo_a                                          algo_b
 │    (loop next chat)                 │
 └─────────────────────────────────────┘
 ```
-
-## Message JSON Schema
-
-Each chat produces a JSON file in `output/`:
-
-```json
-[
-  {
-    "chat_name": "Group A",
-    "sender": "Alice",
-    "time": "14:32",
-    "content": "Hello!",
-    "type": "text"
-  },
-  {
-    "chat_name": "Group A",
-    "sender": "SYSTEM",
-    "time": null,
-    "content": "Bob joined the group",
-    "type": "system"
-  }
-]
-```
-
-`type` is one of: `text`, `system`, `link_card`, `image`, `unsupported`.
-
-## Config Schema
-
-`config/config.json`:
-
-```json
-{
-  "wechat_app_name": "WeChat",
-  "groups_to_monitor": ["Group A", "Group B"],
-  "report_custom_prompt": "Summarize key decisions and action items.",
-  "openrouter_api_key": "sk-or-...",
-  "llm_model": "google/gemini-3-flash-preview",
-  "output_dir": "output"
-}
-```
-
-## Parallel Work Boundaries (4 people)
-
-| Person | Scope | Files |
-|--------|-------|-------|
-| A | macOS permissions + window | `platform_mac/grant_permissions.py`, `find_wechat_window.py`, `ui_tree_reader.py` |
-| B | Sidebar scan + chat clicking | `algo_a/list_unread_chats.py`, `click_into_chat.py` |
-| C | Message reading + writing | `algo_a/scroll_chat_to_bottom.py`, `read_messages_from_uitree.py`, `write_messages_json.py` |
-| D | Report + config + integration | `algo_b/*`, `config/*`, `shared/*`, `run.sh`, `pipeline_a.py` |
-
-Interfaces between modules: `WechatWindow` dataclass, `ChatInfo` dataclass, `Message` dicts, and JSON files on disk.
