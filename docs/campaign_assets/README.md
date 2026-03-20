@@ -33,6 +33,12 @@ campaign_assets/
 | 9 | LinkedIn | `linkedin/04_first_100_users.txt` |
 | 10 | GitHub Discussions | `github/discussions_features_wanted.txt` |
 
+### Messaging variants
+
+| Locale / focus | File |
+|----------------|------|
+| 中文 · 未读总结优先（初版宣发） | `twitter/weclaw_announcement_draft_summary_first_zh.txt` |
+
 ## Before You Publish
 
 1. **Replace placeholders**: `[GitHub URL]`, `[URL]`, `[Name]`, version numbers
