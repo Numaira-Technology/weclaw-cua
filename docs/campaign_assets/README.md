@@ -38,7 +38,8 @@ campaign_assets/
 | Locale / focus | File |
 |----------------|------|
 | 中文 · 未读总结优先（初版宣发 · 结构化草稿） | `twitter/weclaw_announcement_draft_summary_first_zh.txt` |
-| 中文 · 正式发行长文（公众号 / 博客 / 官网） | `foundation/weclaw_launch_article_production_zh.md` |
+| 中文 · 正式发行长文（博客 / 官网） | `foundation/weclaw_launch_article_production_zh.md` |
+| 中文 · 微信公众号（分 Part + Demo/配图占位） | `foundation/weclaw_launch_article_wechat_gzh_zh.md` |
 
 ## Before You Publish
 

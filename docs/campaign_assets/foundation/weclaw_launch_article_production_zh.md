@@ -27,3 +27,5 @@
 ---
 
 *发布前请替换占位链接：下载页、GitHub 仓库、文档入口、官方账号。*
+
+*微信公众号排版（分 Part、预留 Demo 视频与配图位）：见同目录 `weclaw_launch_article_wechat_gzh_zh.md`。*
