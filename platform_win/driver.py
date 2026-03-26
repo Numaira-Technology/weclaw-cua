@@ -2,6 +2,7 @@
 Windows-specific implementation of the PlatformDriver protocol using AI Vision.
 """
 import json
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ from shared.platform_api import PlatformDriver
 from shared.datatypes import SidebarRow, ChatMessage
 from platform_win.find_wechat_window import find_wechat_window as find_window
 from platform_win.vision import capture_window, VisionAI, _force_foreground_window
-from utils.image_stitcher import stitch_screenshots, SCROLLABLE_REGION, CropRegion
+from utils.image_stitcher import stitch_screenshots, CropRegion
 from PIL import Image
 
 
@@ -81,30 +82,47 @@ Example:
 '''
 
 CHAT_PANEL_PROMPT = '''
-You are an expert chat transcript analyzer. Analyze the provided screenshot of a chat panel.
-Your task is to extract all messages in chronological order (from top to bottom).
+You are an expert UI automation assistant. Analyze the provided screenshot of a chat application's main chat panel.
+Your task is to identify every individual message visible and extract its details.
 
-For each message, identify the following:
-1. `sender`: The name of the person who sent the message. If the message is from the current user, the sender name might not be visible; in this case, use the sender name "me". If it's a system message like a timestamp or notification, the sender should be `null`.
-2. `content`: The full text content of the message bubble.
+For each message, you must extract the following information:
+1.  `sender`: The name of the person who sent the message. If it's a system message (like a timestamp or notification), the sender should be `null`.
+2.  `content`: The text content of the message. For non-text messages like images or files, provide a placeholder like `[Image]` or `[File]`.
+3.  `time`: The timestamp associated with the message. This is often displayed near the message bubble or as a separate centered item (e.g., "Yesterday 10:45 PM"). If a message doesn't have an explicit timestamp right next to it, you can associate it with the nearest preceding timestamp in the chat. If no timestamp is visible for a message, set this to `null`.
+4.  `type`: The type of message. This can be 'text', 'image', 'file', 'system' (for timestamps or notifications like "You recalled a message"), 'recalled', etc.
 
-Return your response as a single, valid JSON object, which is a list of the messages you found.
+- Messages from others are on the left, with the sender's name above the message bubble.
+- Messages from "You" (the user) are on the right, and do not have a visible sender name. You should explicitly set the sender to "You".
+- System messages (like timestamps, "You recalled a message", etc.) are centered and have no sender. The sender should be `null` and the type should be 'system'.
+
+Respond with a JSON object containing a single key "messages", which is a list of message objects.
+Each message object must have the keys "sender", "content", "time", and "type".
 
 Example:
-[
-  {
-    "sender": null,
-    "content": "10:45 AM"
-  },
-  {
-    "sender": "John Doe",
-    "content": "Hey, are we still on for lunch?"
-  },
-  {
-    "sender": "me",
-    "content": "Yes, absolutely! See you at 12:30."
-  }
-]
+```json
+{
+  "messages": [
+    {
+      "sender": "龚格非",
+      "content": "天呐",
+      "time": "2026年2月5日 0:53",
+      "type": "text"
+    },
+    {
+      "sender": "You",
+      "content": "好的",
+      "time": "2026年2月5日 0:54",
+      "type": "text"
+    },
+    {
+      "sender": null,
+      "content": "You recalled a message",
+      "time": "2026年2月5日 0:55",
+      "type": "recalled"
+    }
+  ]
+}
+```
 '''
 
 
@@ -302,51 +320,69 @@ class WinDriver(PlatformDriver):
 
         pyautogui.moveTo(scroll_x, scroll_y, duration=0.2)
 
-        # Scroll
-        scroll_amount = -500 if direction == "down" else 500
-        pyautogui.scroll(scroll_amount)
-        time.sleep(0.5) # Wait for scroll to complete
+        pyautogui.click() # Click to make sure the panel is focused
+
+        # Scroll using Page Up/Page Down keys for more reliable large scrolls
+        key_to_press = 'pagedown' if direction == "down" else 'pageup'
+        print(f"[*] Scrolling {direction} using '{key_to_press}' key.")
+        pyautogui.press(key_to_press)
+        time.sleep(1.0) # Wait for scroll to complete
 
     def get_chat_messages(self, chat_name: str) -> list[ChatMessage]:
         """
         Orchestrates the process of scrolling, capturing, stitching, and extracting
         chat messages from the current chat.
+        This version scrolls UP, captures, and then reverses the sequence for stitching.
         """
         print(f"[*] Starting message extraction for '{chat_name}'...")
 
-        # 1. Click the "new messages" button if it exists
+        # 1. Click the "new messages" button if it exists to jump to the latest unread.
         self.click_new_messages_button()
 
-        # 2. Scroll up to make sure we get the latest messages
-        self.scroll_chat_panel(direction="up")
-        self.scroll_chat_panel(direction="up")
-
-        # 3. Scroll down and capture screenshots
+        # 2. Scroll up and capture screenshots simultaneously.
         screenshot_paths = []
         temp_dir = Path(f"./temp_{chat_name.replace(':', '_')}")
         temp_dir.mkdir(exist_ok=True)
 
-        # Capture screenshots while scrolling down
-        for i in range(10): # Limit to 10 scrolls for now to avoid infinite loops
-            screenshot_path = temp_dir / f"ss_{i}.png"
+        # Create a directory to save pre-stitch files for debugging
+        output_dir = Path("./output")
+        sanitized_chat_name = "".join(c for c in chat_name if c.isalnum() or c in (' ', '_')).rstrip()
+        pre_stitch_dir = output_dir / f"pre-stitch_{sanitized_chat_name}"
+        pre_stitch_dir.mkdir(exist_ok=True)
+        print(f"[*] Saving individual pre-stitch screenshots to: {pre_stitch_dir}")
+
+        for i in range(10): # Scroll up 10 times
+            self.scroll_chat_panel(direction="up")
+            # Wait a moment for the scroll animation to complete before capturing
+            time.sleep(0.5)
+            
+            screenshot_path = temp_dir / f"ss_{i:02d}.png"
             capture_window(self.hwnd, save_path=str(screenshot_path))
             screenshot_paths.append(screenshot_path)
-            self.scroll_chat_panel(direction="down")
-            # TODO: Add a check to see if the screen has changed after scrolling to detect the end.
+
+            # Copy the pre-stitch screenshot to the output directory for inspection
+            pre_stitch_path = pre_stitch_dir / f"pre-stitch_{i:02d}.png"
+            shutil.copy(screenshot_path, pre_stitch_path)
 
         if not screenshot_paths:
             print("[WARN] No screenshots were captured.")
             return []
 
-        # 4. Stitch screenshots
-        safe_chat_name = "".join(c for c in chat_name if c.isalnum() or c in (' ', '_')).rstrip()
-        stitched_image_path = Path(f"output/stitched_{safe_chat_name}.png")
+        # 3. Reverse the list of screenshots to get chronological order (top-to-bottom)
+        print("[*] Reversing screenshot order for stitching...")
+        screenshot_paths.reverse()
 
+        # 4. Process screenshots in chunks
+        all_messages = []
+        chunk_size = 5
+        screenshot_chunks = [screenshot_paths[i:i + chunk_size] for i in range(0, len(screenshot_paths), chunk_size)]
+
+        print(f"[*] Processing {len(screenshot_paths)} screenshots in {len(screenshot_chunks)} chunks of size {chunk_size}.")
+
+        # Define the scrollable region for stitching once
         window_rect = win32gui.GetWindowRect(self.hwnd)
         window_width = window_rect[2] - window_rect[0]
         window_height = window_rect[3] - window_rect[1]
-        
-        # Define the scrollable region for stitching
         scroll_region = CropRegion(
             x=int(window_width * 0.31), 
             y=50, # Avoid header
@@ -354,39 +390,75 @@ class WinDriver(PlatformDriver):
             h=window_height - 100 # Avoid input box
         )
 
-        stitch_screenshots(
-            screenshot_paths=screenshot_paths, 
-            output_path=stitched_image_path,
-            scroll_region=scroll_region
-        )
+        for i, chunk_paths in enumerate(screenshot_chunks):
+            print(f"--- Processing chunk {i+1}/{len(screenshot_chunks)} ---")
+            if not chunk_paths:
+                continue
 
-        # 5. Send to AI for extraction
-        stitched_image = Image.open(stitched_image_path)
-        response_str = self.vision_ai.query(CHAT_PANEL_PROMPT, stitched_image)
+            # A. Stitch the current chunk of screenshots
+            stitched_chunk_path = temp_dir / f"stitched_chunk_{i}.png"
+            
+            stitch_screenshots(
+                screenshot_paths=chunk_paths,
+                output_path=stitched_chunk_path,
+                scroll_region=scroll_region
+            )
 
-        # 6. Clean up temp files
-        for path in screenshot_paths:
-            path.unlink()
-        temp_dir.rmdir()
+            # Also save this stitched chunk to the output folder for debugging
+            output_stitched_chunk_path = pre_stitch_dir.parent / f"stitched_{sanitized_chat_name}_chunk_{i}.png"
+            shutil.copy(stitched_chunk_path, output_stitched_chunk_path)
+            print(f"[*] Saved stitched chunk for inspection: {output_stitched_chunk_path}")
 
-        print(f"[+] Stitched screenshot saved to: {stitched_image_path}")
+            # B. Send stitched image to AI
+            try:
+                stitched_image = Image.open(stitched_chunk_path)
+                response_str = self.vision_ai.query(CHAT_PANEL_PROMPT, stitched_image)
+            except Exception as e:
+                print(f"[ERROR] Vision AI query for chunk {i+1} failed: {e}")
+                continue # Skip to the next chunk
 
-        if not response_str:
-            print("[ERROR] No response from AI for message extraction.")
-            return []
+            if not response_str:
+                print(f"[ERROR] No response from AI for message extraction on chunk {i+1}.")
+                continue
 
-        try:
-            if "```json" in response_str:
-                json_str = response_str.split("```json\n")[1].split("\n```")[0]
-            else:
-                json_str = response_str
+            # C. Parse AI response for the chunk
+            try:
+                if "```json" in response_str:
+                    json_str = response_str.split("```json\n")[1].split("\n```")[0]
+                else:
+                    json_str = response_str
 
-            messages_data = json.loads(json_str)
-            return [ChatMessage(**msg) for msg in messages_data]
-        except Exception as e:
-            print(f"[ERROR] Failed to parse messages from AI response: {e}")
-            print(f"Raw response was: {response_str}")
-            return []
+                data = json.loads(json_str)
+                messages_data = data.get("messages", [])
+                chunk_messages = []
+                
+                for j, msg_data in enumerate(messages_data):
+                    if "content" not in msg_data:
+                        print(f"[WARN] Chunk {i+1}, Msg {j+1}: Skipping message due to missing 'content': {msg_data}")
+                        continue
+                    
+                    try:
+                        chunk_messages.append(ChatMessage(**msg_data))
+                    except TypeError as e:
+                        print(f"[WARN] Chunk {i+1}, Msg {j+1}: Skipping message during creation: {msg_data}. Error: {e}")
+                
+                if chunk_messages:
+                    print(f"[+] Extracted {len(chunk_messages)} messages from chunk {i+1}.")
+                    all_messages.extend(chunk_messages)
+                else:
+                    print(f"[WARN] No valid messages extracted from chunk {i+1}.")
+
+            except Exception as e:
+                print(f"[ERROR] Failed to parse messages from AI response for chunk {i+1}: {e}")
+                print(f"Raw response was: {response_str}")
+                continue
+        
+        # 5. Clean up temp files
+        print("[*] Cleaning up temporary files...")
+        shutil.rmtree(temp_dir)
+
+        print(f"[*] Finished processing all chunks. Total messages extracted: {len(all_messages)}")
+        return all_messages
 
     def get_current_chat_name(self) -> str | None:
         """Captures the header of the chat panel and uses AI to get the current chat name."""
@@ -512,13 +584,14 @@ class WinDriver(PlatformDriver):
             print(f"Raw response was: {response_str}")
             return False
 
-    def click_row(self, row: Any) -> None:
-        """Clicks on the center of a given SidebarRow."""
+    def click_row(self, row: SidebarRow, attempt: int = 0) -> None:
+        """
+        Clicks on a given SidebarRow element.
+        On subsequent attempts, it can apply a vertical offset.
+        """
         if not isinstance(row, SidebarRow):
-            print(f"[ERROR] Cannot click on type {type(row)}, expected SidebarRow.")
+            print(f"[WARN] click_row called with invalid type: {type(row)}")
             return
-
-        _force_foreground_window(self.hwnd)
 
         # Get precise coordinates just before clicking to ensure accuracy.
         coords = self._get_precise_row_coords(row)
@@ -528,11 +601,18 @@ class WinDriver(PlatformDriver):
 
         center_x, center_y = coords
 
-        print(f"[*] Preparing to click on row '{row.name}' at screen coordinates: ({center_x}, {center_y})")
-        
+        # On retries (attempt > 0), apply a progressively larger upward offset.
+        y_offset = 0
+        if attempt > 0:
+            y_offset = -10 * attempt  # attempt 1 -> -10px, attempt 2 -> -20px
+
+        adjusted_y = center_y + y_offset
+
+        print(f"[*] Preparing to click on row '{row.name}'. Attempt: {attempt + 1}, Coords: ({center_x}, {adjusted_y})")
+
         # Move the mouse to the target over a short duration to make it visible
-        pyautogui.moveTo(center_x, center_y, duration=0.5)
-        
+        pyautogui.moveTo(center_x, adjusted_y, duration=0.5)
+
         # Perform the click at the current mouse location
         pyautogui.click()
         print("[+] Click action sent.")

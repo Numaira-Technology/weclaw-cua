@@ -15,6 +15,8 @@ class ChatMessage:
     """Represents a single message in the chat panel."""
     sender: str | None  # None for system messages (e.g., timestamps)
     content: str
+    time: str | None
+    type: str  # e.g., 'text', 'image', 'file', 'system'
 
 
 @dataclass

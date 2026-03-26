@@ -53,37 +53,41 @@ def list_target_chats(driver: PlatformDriver, window: Any, targets: list[str]) -
     found_chats: dict[str, ChatInfo] = {}
     # To detect when we're stuck, we track all unique chat names seen across scrolls.
     all_seen_chat_names = set()
+    # To stop when all targets are seen, regardless of read status.
+    seen_target_names = set()
 
     print(f"[*] Starting sidebar scan for unread target chats. Targets: {list(target_set)}")
 
     for i in range(MAX_SCROLL_ITERATIONS):
         visible_chats = _collect_visible_chats(driver, window)
-        
+
         if not visible_chats:
             print("[WARN] Got no visible chats from driver. Stopping scan.")
             break
 
         new_chats_found_this_scroll = False
-        
+
         print(f"--- Iteration {i+1}: Processing {len(visible_chats)} visible chats ---")
         for chat in visible_chats:
             is_target = chat.name in target_set
             print(f"  - Seen: '{chat.name}' (Is Target: {is_target}, Is Unread: {chat.is_unread})")
 
-            # Check if this chat is a target and is unread
-            if is_target and chat.is_unread:
-                # Add it to our list if we haven't already found it
-                if chat.name not in found_chats:
-                    print(f"    [+] Found unread target chat to process: {chat.name}")
-                    found_chats[chat.name] = chat
-            
+            if is_target:
+                seen_target_names.add(chat.name)
+                # Check if this chat is unread
+                if chat.is_unread:
+                    # Add it to our list if we haven't already found it
+                    if chat.name not in found_chats:
+                        print(f"    [+] Found unread target chat to process: {chat.name}")
+                        found_chats[chat.name] = chat
+
             if chat.name not in all_seen_chat_names:
                 new_chats_found_this_scroll = True
                 all_seen_chat_names.add(chat.name)
 
-        # Early exit condition: if we have found all unread chats we are looking for.
-        if target_set.issubset(found_chats.keys()):
-            print("[*] All unread target chats have been found. Stopping scan.")
+        # Early exit condition: if we have found all target chats we are looking for.
+        if target_set.issubset(seen_target_names):
+            print("[*] All target chats have been found. Stopping scan.")
             break
 
         # If this scroll didn't reveal any new chats we haven't seen before, we're at the end.

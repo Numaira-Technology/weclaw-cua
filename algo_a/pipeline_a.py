@@ -59,7 +59,7 @@ def run_pipeline_a(config: WeclawConfig) -> None:
         click_successful = False
         for i in range(3): # Max 3 attempts
             print(f"[*] Attempting to click '{chat.name}' (Attempt {i + 1}/3)")
-            driver.click_row(chat.ui_element)
+            driver.click_row(chat.ui_element, attempt=i)
             time.sleep(2) # Wait for UI to potentially update
 
             current_chat_name = driver.get_current_chat_name()
