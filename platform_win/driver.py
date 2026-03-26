@@ -173,7 +173,6 @@ class WinDriver(PlatformDriver):
                 json_str = response_str
 
             data = json.loads(json_str)
-            # The bbox from the AI is relative to the window screenshot
             win_rel_bbox = data.get("bbox")
 
             if not win_rel_bbox or len(win_rel_bbox) != 4:
@@ -181,7 +180,6 @@ class WinDriver(PlatformDriver):
                 print(f"[DEBUG] Raw AI response for invalid bbox: {response_str}")
                 return None
 
-            # Convert window-relative coordinates to absolute screen coordinates.
             abs_x1 = window_left + win_rel_bbox[0]
             abs_y1 = window_top + win_rel_bbox[1]
             abs_x2 = window_left + win_rel_bbox[2]
@@ -210,10 +208,8 @@ class WinDriver(PlatformDriver):
             print("[WARN] Failed to capture window for sidebar row detection.")
             return []
 
-        # Get window position to calculate crop and absolute coordinates
         window_left, window_top, _, _ = win32gui.GetWindowRect(hwnd)
 
-        # Crop to the sidebar (e.g., the left 30% of the window)
         sidebar_width = int(full_screenshot.width * 0.3)
         sidebar_crop_box = (0, 0, sidebar_width, full_screenshot.height)
         sidebar_image = full_screenshot.crop(sidebar_crop_box)
@@ -226,8 +222,6 @@ class WinDriver(PlatformDriver):
             return []
 
         try:
-            # The AI might return a string containing a JSON code block.
-            # We need to extract the raw JSON.
             if "```json" in response_str:
                 json_str = response_str.split("```json\n")[1].split("\n```")[0]
             else:
@@ -239,11 +233,8 @@ class WinDriver(PlatformDriver):
             print(f"Raw response was: {response_str}")
             return []
 
-        # Convert the parsed data into SidebarRow objects with absolute screen coordinates
         sidebar_rows = []
         for item in sidebar_data:
-            # Bbox from AI is relative to the cropped sidebar image.
-            # Convert it to absolute screen coordinates.
             relative_bbox = item.get("bbox")
             if not relative_bbox or len(relative_bbox) != 4:
                 print(f"[WARN] Skipping item with invalid bbox: {item}")
@@ -314,19 +305,17 @@ class WinDriver(PlatformDriver):
 
         chat_panel_region = self._get_chat_panel_region()
         
-        # Move mouse to the middle of the chat panel to ensure it has focus
         scroll_x = window_left + (chat_panel_region[0] + chat_panel_region[2]) // 2
         scroll_y = window_top + (chat_panel_region[1] + chat_panel_region[3]) // 2
 
         pyautogui.moveTo(scroll_x, scroll_y, duration=0.2)
 
-        pyautogui.click() # Click to make sure the panel is focused
+        pyautogui.click()
 
-        # Scroll using Page Up/Page Down keys for more reliable large scrolls
         key_to_press = 'pagedown' if direction == "down" else 'pageup'
         print(f"[*] Scrolling {direction} using '{key_to_press}' key.")
         pyautogui.press(key_to_press)
-        time.sleep(1.0) # Wait for scroll to complete
+        time.sleep(1.0)
 
     def get_chat_messages(self, chat_name: str) -> list[ChatMessage]:
         """
@@ -336,92 +325,63 @@ class WinDriver(PlatformDriver):
         """
         print(f"[*] Starting message extraction for '{chat_name}'...")
 
-        # 1. Click the "new messages" button if it exists to jump to the latest unread.
         self.click_new_messages_button()
 
-        # 2. Scroll up and capture screenshots simultaneously.
-        screenshot_paths = []
-        temp_dir = Path(f"./temp_{chat_name.replace(':', '_')}")
-        temp_dir.mkdir(exist_ok=True)
-
-        # Create a directory to save pre-stitch files for debugging
-        output_dir = Path("./output")
-        sanitized_chat_name = "".join(c for c in chat_name if c.isalnum() or c in (' ', '_')).rstrip()
-        pre_stitch_dir = output_dir / f"pre-stitch_{sanitized_chat_name}"
-        pre_stitch_dir.mkdir(exist_ok=True)
-        print(f"[*] Saving individual pre-stitch screenshots to: {pre_stitch_dir}")
-
-        for i in range(10): # Scroll up 10 times
+        screenshots = []
+        for i in range(10):
             self.scroll_chat_panel(direction="up")
-            # Wait a moment for the scroll animation to complete before capturing
             time.sleep(0.5)
-            
-            screenshot_path = temp_dir / f"ss_{i:02d}.png"
-            capture_window(self.hwnd, save_path=str(screenshot_path))
-            screenshot_paths.append(screenshot_path)
+            screenshot = capture_window(self.hwnd)
+            if screenshot:
+                screenshots.append(screenshot)
 
-            # Copy the pre-stitch screenshot to the output directory for inspection
-            pre_stitch_path = pre_stitch_dir / f"pre-stitch_{i:02d}.png"
-            shutil.copy(screenshot_path, pre_stitch_path)
-
-        if not screenshot_paths:
+        if not screenshots:
             print("[WARN] No screenshots were captured.")
             return []
 
-        # 3. Reverse the list of screenshots to get chronological order (top-to-bottom)
-        print("[*] Reversing screenshot order for stitching...")
-        screenshot_paths.reverse()
+        print("[*] Reversing screenshot order for processing...")
+        screenshots.reverse()
 
-        # 4. Process screenshots in chunks
         all_messages = []
         chunk_size = 5
-        screenshot_chunks = [screenshot_paths[i:i + chunk_size] for i in range(0, len(screenshot_paths), chunk_size)]
+        screenshot_chunks = [screenshots[i:i + chunk_size] for i in range(0, len(screenshots), chunk_size)]
 
-        print(f"[*] Processing {len(screenshot_paths)} screenshots in {len(screenshot_chunks)} chunks of size {chunk_size}.")
+        print(f"[*] Processing {len(screenshots)} screenshots in {len(screenshot_chunks)} chunks of size {chunk_size}.")
 
-        # Define the scrollable region for stitching once
         window_rect = win32gui.GetWindowRect(self.hwnd)
         window_width = window_rect[2] - window_rect[0]
         window_height = window_rect[3] - window_rect[1]
         scroll_region = CropRegion(
-            x=int(window_width * 0.31), 
-            y=50, # Avoid header
-            w=int(window_width * 0.64), # Avoid scrollbar
-            h=window_height - 100 # Avoid input box
+            x=int(window_width * 0.31),
+            y=50,
+            w=int(window_width * 0.64),
+            h=window_height - 100
         )
 
-        for i, chunk_paths in enumerate(screenshot_chunks):
+        for i, chunk in enumerate(screenshot_chunks):
             print(f"--- Processing chunk {i+1}/{len(screenshot_chunks)} ---")
-            if not chunk_paths:
+            if not chunk:
                 continue
 
-            # A. Stitch the current chunk of screenshots
-            stitched_chunk_path = temp_dir / f"stitched_chunk_{i}.png"
-            
-            stitch_screenshots(
-                screenshot_paths=chunk_paths,
-                output_path=stitched_chunk_path,
+            stitched_image = stitch_screenshots(
+                images=chunk,
                 scroll_region=scroll_region
             )
 
-            # Also save this stitched chunk to the output folder for debugging
-            output_stitched_chunk_path = pre_stitch_dir.parent / f"stitched_{sanitized_chat_name}_chunk_{i}.png"
-            shutil.copy(stitched_chunk_path, output_stitched_chunk_path)
-            print(f"[*] Saved stitched chunk for inspection: {output_stitched_chunk_path}")
+            if not stitched_image:
+                print(f"[ERROR] Failed to stitch chunk {i+1}.")
+                continue
 
-            # B. Send stitched image to AI
             try:
-                stitched_image = Image.open(stitched_chunk_path)
                 response_str = self.vision_ai.query(CHAT_PANEL_PROMPT, stitched_image)
             except Exception as e:
                 print(f"[ERROR] Vision AI query for chunk {i+1} failed: {e}")
-                continue # Skip to the next chunk
+                continue
 
             if not response_str:
                 print(f"[ERROR] No response from AI for message extraction on chunk {i+1}.")
                 continue
 
-            # C. Parse AI response for the chunk
             try:
                 if "```json" in response_str:
                     json_str = response_str.split("```json\n")[1].split("\n```")[0]
@@ -431,17 +391,17 @@ class WinDriver(PlatformDriver):
                 data = json.loads(json_str)
                 messages_data = data.get("messages", [])
                 chunk_messages = []
-                
+
                 for j, msg_data in enumerate(messages_data):
                     if "content" not in msg_data:
                         print(f"[WARN] Chunk {i+1}, Msg {j+1}: Skipping message due to missing 'content': {msg_data}")
                         continue
-                    
+
                     try:
                         chunk_messages.append(ChatMessage(**msg_data))
                     except TypeError as e:
                         print(f"[WARN] Chunk {i+1}, Msg {j+1}: Skipping message during creation: {msg_data}. Error: {e}")
-                
+
                 if chunk_messages:
                     print(f"[+] Extracted {len(chunk_messages)} messages from chunk {i+1}.")
                     all_messages.extend(chunk_messages)
@@ -452,10 +412,6 @@ class WinDriver(PlatformDriver):
                 print(f"[ERROR] Failed to parse messages from AI response for chunk {i+1}: {e}")
                 print(f"Raw response was: {response_str}")
                 continue
-        
-        # 5. Clean up temp files
-        print("[*] Cleaning up temporary files...")
-        shutil.rmtree(temp_dir)
 
         print(f"[*] Finished processing all chunks. Total messages extracted: {len(all_messages)}")
         return all_messages
@@ -468,8 +424,6 @@ class WinDriver(PlatformDriver):
             print("[WARN] Failed to capture window for chat name verification.")
             return None
 
-        # The header is at the top of the window, to the right of the sidebar.
-        # Let's crop to a region: 31% to 90% of width, and top 10% of height.
         header_crop_box = (
             int(full_screenshot.width * 0.31),
             0,
@@ -511,13 +465,10 @@ class WinDriver(PlatformDriver):
         if not full_screenshot:
             return (0, 0, 0, 0)
 
-        # The chat panel is assumed to be the area to the right of the sidebar.
-        # Sidebar is ~30% of the width. Chat panel starts after that.
-        # We add a small margin (31%) and don't go all the way to the edge (95%).
         chat_panel_x1 = int(full_screenshot.width * 0.31)
-        chat_panel_y1 = 0  # Start from the top
+        chat_panel_y1 = 0 
         chat_panel_x2 = int(full_screenshot.width * 0.95)
-        chat_panel_y2 = full_screenshot.height # Go to the bottom
+        chat_panel_y2 = full_screenshot.height
 
         return (chat_panel_x1, chat_panel_y1, chat_panel_x2, chat_panel_y2)
 
@@ -535,8 +486,6 @@ class WinDriver(PlatformDriver):
         window_rect = win32gui.GetWindowRect(self.hwnd)
         window_left, window_top, _, _ = window_rect
 
-        # The button is expected at the top-right of the chat panel.
-        # We crop a region to reduce the search area for the AI.
         chat_panel_region = (
             int(full_screenshot.width * 0.31),
             0,
@@ -564,7 +513,6 @@ class WinDriver(PlatformDriver):
                 print("[DEBUG] No 'new messages' button found by AI.")
                 return False
 
-            # Bbox is relative to the chat_panel_screenshot. Convert to absolute.
             abs_x1 = window_left + chat_panel_region[0] + bbox[0]
             abs_y1 = window_top + chat_panel_region[1] + bbox[1]
             abs_x2 = window_left + chat_panel_region[0] + bbox[2]
@@ -576,7 +524,7 @@ class WinDriver(PlatformDriver):
             print(f"[+] 'New messages' button found. Clicking at ({center_x}, {center_y}).")
             pyautogui.moveTo(center_x, center_y, duration=0.2)
             pyautogui.click()
-            time.sleep(1)  # Wait for UI to update after click.
+            time.sleep(1) 
             return True
 
         except Exception as e:
@@ -593,7 +541,6 @@ class WinDriver(PlatformDriver):
             print(f"[WARN] click_row called with invalid type: {type(row)}")
             return
 
-        # Get precise coordinates just before clicking to ensure accuracy.
         coords = self._get_precise_row_coords(row)
         if not coords:
             print(f"[ERROR] Could not get precise coordinates for '{row.name}'. Aborting click.")
@@ -601,19 +548,16 @@ class WinDriver(PlatformDriver):
 
         center_x, center_y = coords
 
-        # On retries (attempt > 0), apply a progressively larger upward offset.
         y_offset = 0
         if attempt > 0:
-            y_offset = -10 * attempt  # attempt 1 -> -10px, attempt 2 -> -20px
+            y_offset = -10 * attempt 
 
         adjusted_y = center_y + y_offset
 
         print(f"[*] Preparing to click on row '{row.name}'. Attempt: {attempt + 1}, Coords: ({center_x}, {adjusted_y})")
 
-        # Move the mouse to the target over a short duration to make it visible
         pyautogui.moveTo(center_x, adjusted_y, duration=0.5)
 
-        # Perform the click at the current mouse location
         pyautogui.click()
         print("[+] Click action sent.")
 
