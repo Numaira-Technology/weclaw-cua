@@ -78,7 +78,7 @@ def run_pipeline_a(config: WeclawConfig) -> None:
 
         # 5. Scrape messages
         # TODO: Implement scrolling within the chat panel to get more history.
-        messages = driver.get_chat_messages()
+        messages = driver.get_chat_messages(chat.name)
         if not messages:
             print(f"[WARN] No messages were extracted from '{chat.name}'. Skipping save.")
             continue

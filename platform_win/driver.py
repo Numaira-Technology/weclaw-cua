@@ -2,6 +2,8 @@
 Windows-specific implementation of the PlatformDriver protocol using AI Vision.
 """
 import json
+import time
+from pathlib import Path
 from typing import Any
 
 import pyautogui
@@ -11,6 +13,8 @@ from shared.platform_api import PlatformDriver
 from shared.datatypes import SidebarRow, ChatMessage
 from platform_win.find_wechat_window import find_wechat_window as find_window
 from platform_win.vision import capture_window, VisionAI, _force_foreground_window
+from utils.image_stitcher import stitch_screenshots, SCROLLABLE_REGION, CropRegion
+from PIL import Image
 
 
 SIDEBAR_PROMPT = '''
@@ -57,6 +61,12 @@ Example for a chat named "Family Group":
 {{
   "bbox": [5, 50, 250, 100]
 }}
+'''
+
+NEW_MESSAGES_BUTTON_PROMPT = '''
+Analyze the screenshot of the chat panel. If you see a button indicating "xx new messages" or similar, return its bounding box.
+Respond in JSON format with a single key "bbox" which is a list of four numbers [x1, y1, x2, y2] representing the bounding box of the button.
+If no such button is visible, return {"bbox": null}.
 '''
 
 CHAT_HEADER_PROMPT = '''
@@ -150,6 +160,7 @@ class WinDriver(PlatformDriver):
 
             if not win_rel_bbox or len(win_rel_bbox) != 4:
                 print(f"[WARN] AI returned invalid bbox for '{chat_name}': {win_rel_bbox}")
+                print(f"[DEBUG] Raw AI response for invalid bbox: {response_str}")
                 return None
 
             # Convert window-relative coordinates to absolute screen coordinates.
@@ -277,28 +288,88 @@ class WinDriver(PlatformDriver):
             return None
         return row.badge_text
 
-    def get_chat_messages(self) -> list[ChatMessage]:
-        """Captures the chat panel and uses AI to extract messages."""
-        print("[*] Extracting chat messages from panel...")
-        full_screenshot = capture_window(self.hwnd)
-        if not full_screenshot:
-            print("[WARN] Failed to capture window for message extraction.")
+    def scroll_chat_panel(self, direction: str = "down") -> None:
+        """Scrolls the chat panel area up or down."""
+        print(f"[*] Scrolling chat panel {direction}...")
+        window_rect = win32gui.GetWindowRect(self.hwnd)
+        window_left, window_top, _, _ = window_rect
+
+        chat_panel_region = self._get_chat_panel_region()
+        
+        # Move mouse to the middle of the chat panel to ensure it has focus
+        scroll_x = window_left + (chat_panel_region[0] + chat_panel_region[2]) // 2
+        scroll_y = window_top + (chat_panel_region[1] + chat_panel_region[3]) // 2
+
+        pyautogui.moveTo(scroll_x, scroll_y, duration=0.2)
+
+        # Scroll
+        scroll_amount = -500 if direction == "down" else 500
+        pyautogui.scroll(scroll_amount)
+        time.sleep(0.5) # Wait for scroll to complete
+
+    def get_chat_messages(self, chat_name: str) -> list[ChatMessage]:
+        """
+        Orchestrates the process of scrolling, capturing, stitching, and extracting
+        chat messages from the current chat.
+        """
+        print(f"[*] Starting message extraction for '{chat_name}'...")
+
+        # 1. Click the "new messages" button if it exists
+        self.click_new_messages_button()
+
+        # 2. Scroll up to make sure we get the latest messages
+        self.scroll_chat_panel(direction="up")
+        self.scroll_chat_panel(direction="up")
+
+        # 3. Scroll down and capture screenshots
+        screenshot_paths = []
+        temp_dir = Path(f"./temp_{chat_name.replace(':', '_')}")
+        temp_dir.mkdir(exist_ok=True)
+
+        # Capture screenshots while scrolling down
+        for i in range(10): # Limit to 10 scrolls for now to avoid infinite loops
+            screenshot_path = temp_dir / f"ss_{i}.png"
+            capture_window(self.hwnd, save_path=str(screenshot_path))
+            screenshot_paths.append(screenshot_path)
+            self.scroll_chat_panel(direction="down")
+            # TODO: Add a check to see if the screen has changed after scrolling to detect the end.
+
+        if not screenshot_paths:
+            print("[WARN] No screenshots were captured.")
             return []
 
-        # The chat panel is to the right of the sidebar.
-        # Let's crop to a region: 31% to 95% of width.
-        panel_crop_box = (
-            int(full_screenshot.width * 0.31),
-            0,
-            int(full_screenshot.width * 0.95),
-            full_screenshot.height
+        # 4. Stitch screenshots
+        stitched_image_path = temp_dir / "stitched.png"
+        window_rect = win32gui.GetWindowRect(self.hwnd)
+        window_width = window_rect[2] - window_rect[0]
+        window_height = window_rect[3] - window_rect[1]
+        
+        # Define the scrollable region for stitching
+        scroll_region = CropRegion(
+            x=int(window_width * 0.31), 
+            y=50, # Avoid header
+            w=int(window_width * 0.64), # Avoid scrollbar
+            h=window_height - 100 # Avoid input box
         )
-        panel_image = full_screenshot.crop(panel_crop_box)
 
-        response_str = self.vision_ai.query(CHAT_PANEL_PROMPT, panel_image)
+        stitch_screenshots(
+            screenshot_paths=screenshot_paths, 
+            output_path=stitched_image_path,
+            scroll_region=scroll_region
+        )
+
+        # 5. Send to AI for extraction
+        stitched_image = Image.open(stitched_image_path)
+        response_str = self.vision_ai.query(CHAT_PANEL_PROMPT, stitched_image)
+
+        # 6. Clean up temp files
+        for path in screenshot_paths:
+            path.unlink()
+        stitched_image_path.unlink()
+        temp_dir.rmdir()
 
         if not response_str:
-            print(f"[ERROR] Received no response from Vision AI for message extraction.")
+            print("[ERROR] No response from AI for message extraction.")
             return []
 
         try:
@@ -306,14 +377,11 @@ class WinDriver(PlatformDriver):
                 json_str = response_str.split("```json\n")[1].split("\n```")[0]
             else:
                 json_str = response_str
-            
-            messages_data = json.loads(json_str)
-            messages = [ChatMessage(**msg) for msg in messages_data]
-            print(f"[+] Extracted {len(messages)} messages.")
-            return messages
 
-        except (json.JSONDecodeError, TypeError, KeyError) as e:
-            print(f"[ERROR] Failed to parse message response. Exception: {e}")
+            messages_data = json.loads(json_str)
+            return [ChatMessage(**msg) for msg in messages_data]
+        except Exception as e:
+            print(f"[ERROR] Failed to parse messages from AI response: {e}")
             print(f"Raw response was: {response_str}")
             return []
 
@@ -361,6 +429,85 @@ class WinDriver(PlatformDriver):
             print(f"[ERROR] Failed to parse chat name response. Exception: {e}")
             print(f"Raw response was: {response_str}")
             return None
+
+    def _get_chat_panel_region(self) -> tuple[int, int, int, int]:
+        """Calculates the bounding box of the chat panel region."""
+        full_screenshot = capture_window(self.hwnd)
+        if not full_screenshot:
+            return (0, 0, 0, 0)
+
+        # The chat panel is assumed to be the area to the right of the sidebar.
+        # Sidebar is ~30% of the width. Chat panel starts after that.
+        # We add a small margin (31%) and don't go all the way to the edge (95%).
+        chat_panel_x1 = int(full_screenshot.width * 0.31)
+        chat_panel_y1 = 0  # Start from the top
+        chat_panel_x2 = int(full_screenshot.width * 0.95)
+        chat_panel_y2 = full_screenshot.height # Go to the bottom
+
+        return (chat_panel_x1, chat_panel_y1, chat_panel_x2, chat_panel_y2)
+
+    def click_new_messages_button(self) -> bool:
+        """
+        Checks for a "new messages" button and clicks it if found.
+        Returns True if a button was clicked, False otherwise.
+        """
+        print("[*] Checking for 'new messages' button...")
+        full_screenshot = capture_window(self.hwnd)
+        if not full_screenshot:
+            print("[WARN] Failed to capture window for new messages button check.")
+            return False
+
+        window_rect = win32gui.GetWindowRect(self.hwnd)
+        window_left, window_top, _, _ = window_rect
+
+        # The button is expected at the top-right of the chat panel.
+        # We crop a region to reduce the search area for the AI.
+        chat_panel_region = (
+            int(full_screenshot.width * 0.31),
+            0,
+            int(full_screenshot.width * 0.95),
+            full_screenshot.height
+        )
+        chat_panel_screenshot = full_screenshot.crop(chat_panel_region)
+
+        response_str = self.vision_ai.query(NEW_MESSAGES_BUTTON_PROMPT, chat_panel_screenshot)
+
+        if not response_str:
+            print("[DEBUG] No response from AI for new messages button check.")
+            return False
+
+        try:
+            if "```json" in response_str:
+                json_str = response_str.split("```json\n")[1].split("\n```")[0]
+            else:
+                json_str = response_str
+
+            data = json.loads(json_str)
+            bbox = data.get("bbox")
+
+            if not bbox:
+                print("[DEBUG] No 'new messages' button found by AI.")
+                return False
+
+            # Bbox is relative to the chat_panel_screenshot. Convert to absolute.
+            abs_x1 = window_left + chat_panel_region[0] + bbox[0]
+            abs_y1 = window_top + chat_panel_region[1] + bbox[1]
+            abs_x2 = window_left + chat_panel_region[0] + bbox[2]
+            abs_y2 = window_top + chat_panel_region[1] + bbox[3]
+
+            center_x = (abs_x1 + abs_x2) // 2
+            center_y = (abs_y1 + abs_y2) // 2
+
+            print(f"[+] 'New messages' button found. Clicking at ({center_x}, {center_y}).")
+            pyautogui.moveTo(center_x, center_y, duration=0.2)
+            pyautogui.click()
+            time.sleep(1)  # Wait for UI to update after click.
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to process AI response for new messages button: {e}")
+            print(f"Raw response was: {response_str}")
+            return False
 
     def click_row(self, row: Any) -> None:
         """Clicks on the center of a given SidebarRow."""

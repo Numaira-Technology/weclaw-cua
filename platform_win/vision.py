@@ -228,7 +228,7 @@ def _force_foreground_window(hwnd: int):
         print(f"[WARN] AttachThreadInput activation failed: {e}")
 
 
-def capture_window(hwnd: int) -> Image.Image | None:
+def capture_window(hwnd: int, save_path: str = None) -> Image.Image | None:
     """Captures a screenshot of the specified window handle (HWND)."""
     if not hwnd or not user32.IsWindow(hwnd):
         print(f"[ERROR] HWND {hwnd} is not a valid window.")
@@ -270,6 +270,8 @@ def capture_window(hwnd: int) -> Image.Image | None:
     try:
         screenshot = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
         print(f"[DEBUG] Captured bbox: ({left}, {top}, {right}, {bottom})")
+        if save_path:
+            screenshot.save(save_path)
         return screenshot
     except Exception as e:
         print(f"[FATAL_CAPTURE] Exception during ImageGrab.grab: {type(e).__name__}: {e}")
