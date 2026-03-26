@@ -1,69 +1,65 @@
-"""Orchestrate the full algo_a pipeline: find unread chats, read messages, write JSON.
+"""Orchestrate the full algo_a pipeline: find target chats, click, and scroll.
 
-Usage:
-    from algo_a.pipeline_a import run_pipeline_a
-    json_paths = run_pipeline_a(config)
-
-Input spec:
-    - config: WeclawConfig with wechat_app_name, groups_to_monitor, output_dir.
-
-Output spec:
-    - Returns list of JSON file paths written (one per chat with unread messages).
-
-Pipeline steps:
-    1. Auto-detect platform, create PlatformDriver
-    2. driver.ensure_permissions()
-    3. driver.find_wechat_window(config.wechat_app_name)
-    4. list_unread_chats(driver, window) -> filter by groups_to_monitor
-    5. For each unread chat:
-       a. click_into_chat(driver, window, chat)
-       b. scroll_chat_to_bottom(driver, window)
-       c. read_messages_from_uitree(driver, window, chat.name)
-       d. write_messages_json(chat.name, messages, config.output_dir)
+This new version uses an OCR-based driver.
 """
 
 import sys
+import time
 
 from config.weclaw_config import WeclawConfig
 
 
 def _create_driver():
     """Auto-detect the platform and return the appropriate PlatformDriver."""
-    if sys.platform == "darwin":
-        from platform_mac import create_driver
-        return create_driver()
-    elif sys.platform == "win32":
-        from platform_win import create_driver
-        return create_driver()
+    if sys.platform == "win32":
+        from platform_win.driver import WinDriver
+        return WinDriver()
     else:
-        assert False, f"unsupported platform: {sys.platform}"
+        # Placeholder for other platforms like macOS
+        raise NotImplementedError(f"Platform {sys.platform} is not supported yet.")
 
 
-def run_pipeline_a(config: WeclawConfig) -> list[str]:
-    """Run the full message collection pipeline and return written JSON paths."""
+def run_pipeline_a(config: WeclawConfig) -> None:
+    """Run the full message collection pipeline."""
     assert config is not None
 
-    from algo_a.list_unread_chats import list_unread_chats
-    from algo_a.click_into_chat import click_into_chat
-    from algo_a.scroll_chat_to_bottom import scroll_chat_to_bottom
-    from algo_a.read_messages_from_uitree import read_messages_from_uitree
-    from algo_a.write_messages_json import write_messages_json
+    from algo_a.list_target_chats import list_target_chats
 
+    # 1. Initialize driver and find the WeChat window
     driver = _create_driver()
-    driver.ensure_permissions()
-    window = driver.find_wechat_window(config.wechat_app_name)
-    unread_chats = list_unread_chats(driver, window)
+    window = driver.find_wechat_window()
+    if not window:
+        print("[ERROR] Pipeline failed: Could not find WeChat window.")
+        return
 
-    monitor_set = set(config.groups_to_monitor)
-    target_chats = [c for c in unread_chats if c.name in monitor_set]
+    # 2. Scroll the sidebar to the top to ensure a consistent starting point.
+    print("[*] Scrolling sidebar to the top...")
+    for _ in range(10):  # Scroll up a few times to be sure
+        driver.scroll_sidebar(window, "up")
+        time.sleep(0.1)
 
-    written_paths: list[str] = []
-    for chat in target_chats:
-        click_into_chat(driver, window, chat)
-        scroll_chat_to_bottom(driver, window)
-        messages = read_messages_from_uitree(driver, window, chat.name)
-        if messages:
-            path = write_messages_json(chat.name, messages, config.output_dir)
-            written_paths.append(path)
+    # 3. Scan the sidebar to find all unread chats from our target list.
+    print(f"[*] Searching for unread target chats: {config.groups_to_monitor}")
+    unread_target_chats = list_target_chats(driver, window, config.groups_to_monitor)
 
-    return written_paths
+    if not unread_target_chats:
+        print("[+] No unread target chats found. Pipeline finished.")
+        return
+
+    print(f"[+] Located {len(unread_target_chats)} unread target chats. Proceeding to click them.")
+
+    # 4. For each found chat, click into it.
+    # The message scraping logic will be added in a future step.
+    for i, chat in enumerate(unread_target_chats):
+        print(f"\n--- Processing chat {i + 1}/{len(unread_target_chats)}: {chat.name} ---")
+
+        # Click into the chat
+        # The ui_element from ChatInfo is a SidebarRow object for the new driver
+        driver.click_row(chat.ui_element)
+        print(f"[+] Clicked on '{chat.name}'. Pausing for UI to update...")
+        time.sleep(3)  # Wait for the message panel to load
+
+        # TODO: In the next step, we will implement message scraping here.
+        print(f"[*] Skipping message scraping for '{chat.name}' for now.")
+
+    print("\n[SUCCESS] Pipeline finished processing all unread target chats.")

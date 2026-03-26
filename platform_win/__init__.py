@@ -1,7 +1,4 @@
-from platform_win.grant_permissions import ensure_permissions
-from platform_win.find_wechat_window import WechatWindow, find_wechat_window
-from platform_win.driver import WinDriver
+from .find_wechat_window import find_wechat_window
+from .vision import capture_window
 
-
-def create_driver() -> WinDriver:
-    return WinDriver()
+__all__ = ["find_wechat_window", "capture_window"]

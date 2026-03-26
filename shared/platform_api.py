@@ -72,22 +72,4 @@ class PlatformDriver(Protocol):
         """Scroll the message panel. direction is 'up' or 'down'."""
         ...
 
-    def get_message_scroll_position(self, window: Any) -> float:
-        """Return the vertical scroll position of the message panel (0.0 = top, 1.0 = bottom)."""
-        ...
 
-    def get_element_role(self, element: Any) -> str:
-        """Return the UI role/control type of an element (e.g. 'AXStaticText', 'AXImage')."""
-        ...
-
-    def get_element_text(self, element: Any) -> str | None:
-        """Return the text value of an element, or None."""
-        ...
-
-    def get_element_children(self, element: Any) -> list[Any]:
-        """Return direct children of a UI element."""
-        ...
-
-    def wait_for_message_panel_ready(self, window: Any) -> None:
-        """Block until the message panel finishes loading after a chat switch."""
-        ...
