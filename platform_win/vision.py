@@ -267,5 +267,10 @@ def capture_window(hwnd: int) -> Image.Image | None:
 
     # Capture the screen area defined by the rectangle
     print(f"[DEBUG] Capturing bbox: ({left}, {top}, {right}, {bottom})")
-    screenshot = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
-    return screenshot
+    try:
+        screenshot = ImageGrab.grab(bbox=(left, top, right, bottom), all_screens=True)
+        print(f"[DEBUG] Captured bbox: ({left}, {top}, {right}, {bottom})")
+        return screenshot
+    except Exception as e:
+        print(f"[FATAL_CAPTURE] Exception during ImageGrab.grab: {type(e).__name__}: {e}")
+        return None

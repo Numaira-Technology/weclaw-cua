@@ -49,14 +49,14 @@ Your task is to find the exact bounding box (`bbox`) for the chat item with the 
 The chat sidebar is on the left side of the window.
 
 You MUST return your response as a single, valid JSON object containing only the `bbox`.
-If the specified chat item cannot be found in the image, you MUST return a JSON object with a null `bbox`, like this: `{"bbox": null}`.
+If the specified chat item cannot be found in the image, you MUST return a JSON object with a null `bbox`, like this: `{{ "bbox": null }}`.
 The coordinates must be relative to the top-left corner of the provided image.
 The `bbox` should be a list of four integers: [x_min, y_min, x_max, y_max].
 
 Example for a chat named "Family Group":
-{
+{{
   "bbox": [5, 50, 250, 100]
-}
+}}
 '''
 
 
@@ -85,9 +85,15 @@ class WinDriver(PlatformDriver):
         if not full_screenshot:
             print(f"[WARN] Failed to capture window for precise coordinate detection.")
             return None
+        else:
+            print("success capture")
 
+
+        print(f"[DEBUG] Precise coord prompt chat_name: '{chat_name}'")
         prompt = COORDS_PROMPT_TEMPLATE.format(chat_name=chat_name)
+        print(f"[DEBUG] Precise coord prompt being sent:\n---\n{prompt}\n---")
         response_str = self.vision_ai.query(prompt, full_screenshot)
+        print("response",response_str)
 
         if not response_str:
             print(f"[ERROR] Received no response from Vision AI for precise coordinates.")
