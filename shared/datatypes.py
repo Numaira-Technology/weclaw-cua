@@ -7,7 +7,14 @@ class SidebarRow:
     name: str
     last_message: str | None
     badge_text: str | None
-    bbox: tuple[int, int, int, int]  # Absolute screen coordinates
+    bbox: tuple[int, int, int, int]  # Bounding box relative to the sidebar image crop
+
+
+@dataclass
+class ChatMessage:
+    """Represents a single message in the chat panel."""
+    sender: str | None  # None for system messages (e.g., timestamps)
+    content: str
 
 
 @dataclass

@@ -8,7 +8,7 @@ import pyautogui
 import win32gui
 
 from shared.platform_api import PlatformDriver
-from shared.datatypes import SidebarRow
+from shared.datatypes import SidebarRow, ChatMessage
 from platform_win.find_wechat_window import find_wechat_window as find_window
 from platform_win.vision import capture_window, VisionAI, _force_foreground_window
 
@@ -45,8 +45,8 @@ Example response format:
 
 COORDS_PROMPT_TEMPLATE = '''
 You are a precision UI automation assistant. You will be given a screenshot of an entire chat application window.
-Your task is to find the exact bounding box (`bbox`) for the chat item with the name "{chat_name}".
-The chat sidebar is on the left side of the window.
+Your task is to find the exact bounding box (`bbox`) for the chat item with the name "{chat_name}", which is located in the sidebar on the left.
+Pay close attention to the exact name provided. You must find the item that precisely matches this name, not one with a similar name.
 
 You MUST return your response as a single, valid JSON object containing only the `bbox`.
 If the specified chat item cannot be found in the image, you MUST return a JSON object with a null `bbox`, like this: `{{ "bbox": null }}`.
@@ -57,6 +57,44 @@ Example for a chat named "Family Group":
 {{
   "bbox": [5, 50, 250, 100]
 }}
+'''
+
+CHAT_HEADER_PROMPT = '''
+You are a UI analysis assistant. Analyze the provided screenshot of a chat application's header.
+Your task is to identify the name of the currently open chat or group.
+Return a single JSON object with one key, "chat_name".
+
+Example:
+{
+  "chat_name": "Family Group"
+}
+'''
+
+CHAT_PANEL_PROMPT = '''
+You are an expert chat transcript analyzer. Analyze the provided screenshot of a chat panel.
+Your task is to extract all messages in chronological order (from top to bottom).
+
+For each message, identify the following:
+1. `sender`: The name of the person who sent the message. If the message is from the current user, the sender name might not be visible; in this case, use the sender name "me". If it's a system message like a timestamp or notification, the sender should be `null`.
+2. `content`: The full text content of the message bubble.
+
+Return your response as a single, valid JSON object, which is a list of the messages you found.
+
+Example:
+[
+  {
+    "sender": null,
+    "content": "10:45 AM"
+  },
+  {
+    "sender": "John Doe",
+    "content": "Hey, are we still on for lunch?"
+  },
+  {
+    "sender": "me",
+    "content": "Yes, absolutely! See you at 12:30."
+  }
+]
 '''
 
 
@@ -75,54 +113,54 @@ class WinDriver(PlatformDriver):
         print(f"[+] WeChat window '{app_name}' found with HWND: {self.hwnd}")
         return self.hwnd
 
-    def _get_precise_row_coords(self, chat_name: str) -> tuple[int, int] | None:
+    def _get_precise_row_coords(self, row: SidebarRow) -> tuple[int, int] | None:
         """
         Captures the full window and uses the AI to find the precise coordinates
         for a specific chat name. This is used for accurate clicking.
         """
-        print(f"[*] Getting precise coordinates for '{chat_name}'...")
+        chat_name = row.name
+        print(f"[*] Getting precise coordinates for '{chat_name}' using full screenshot...")
         full_screenshot = capture_window(self.hwnd)
         if not full_screenshot:
             print(f"[WARN] Failed to capture window for precise coordinate detection.")
             return None
-        else:
-            print("success capture")
 
+        window_rect = win32gui.GetWindowRect(self.hwnd)
+        window_left, window_top, _, _ = window_rect
 
         print(f"[DEBUG] Precise coord prompt chat_name: '{chat_name}'")
         prompt = COORDS_PROMPT_TEMPLATE.format(chat_name=chat_name)
-        print(f"[DEBUG] Precise coord prompt being sent:\n---\n{prompt}\n---")
         response_str = self.vision_ai.query(prompt, full_screenshot)
-        print("response",response_str)
 
         if not response_str:
             print(f"[ERROR] Received no response from Vision AI for precise coordinates.")
             return None
+
+        print(f"[DEBUG] Raw AI response for precise coords:\n{response_str}")
 
         try:
             if "```json" in response_str:
                 json_str = response_str.split("```json\n")[1].split("\n```")[0]
             else:
                 json_str = response_str
-            
-            data = json.loads(json_str)
-            relative_bbox = data.get("bbox")
 
-            if not relative_bbox or len(relative_bbox) != 4:
-                print(f"[WARN] AI returned invalid bbox for '{chat_name}': {relative_bbox}")
+            data = json.loads(json_str)
+            # The bbox from the AI is relative to the window screenshot
+            win_rel_bbox = data.get("bbox")
+
+            if not win_rel_bbox or len(win_rel_bbox) != 4:
+                print(f"[WARN] AI returned invalid bbox for '{chat_name}': {win_rel_bbox}")
                 return None
 
-            # Bbox from AI is relative to the full screenshot.
-            # Convert it to absolute screen coordinates.
-            window_left, window_top, _, _ = win32gui.GetWindowRect(self.hwnd)
-            abs_x1 = window_left + relative_bbox[0]
-            abs_y1 = window_top + relative_bbox[1]
-            abs_x2 = window_left + relative_bbox[2]
-            abs_y2 = window_top + relative_bbox[3]
+            # Convert window-relative coordinates to absolute screen coordinates.
+            abs_x1 = window_left + win_rel_bbox[0]
+            abs_y1 = window_top + win_rel_bbox[1]
+            abs_x2 = window_left + win_rel_bbox[2]
+            abs_y2 = window_top + win_rel_bbox[3]
 
             center_x = (abs_x1 + abs_x2) // 2
             center_y = (abs_y1 + abs_y2) // 2
-            
+
             print(f"[+] Precise coordinates for '{chat_name}' found: ({center_x}, {center_y})")
             return (center_x, center_y)
 
@@ -239,6 +277,91 @@ class WinDriver(PlatformDriver):
             return None
         return row.badge_text
 
+    def get_chat_messages(self) -> list[ChatMessage]:
+        """Captures the chat panel and uses AI to extract messages."""
+        print("[*] Extracting chat messages from panel...")
+        full_screenshot = capture_window(self.hwnd)
+        if not full_screenshot:
+            print("[WARN] Failed to capture window for message extraction.")
+            return []
+
+        # The chat panel is to the right of the sidebar.
+        # Let's crop to a region: 31% to 95% of width.
+        panel_crop_box = (
+            int(full_screenshot.width * 0.31),
+            0,
+            int(full_screenshot.width * 0.95),
+            full_screenshot.height
+        )
+        panel_image = full_screenshot.crop(panel_crop_box)
+
+        response_str = self.vision_ai.query(CHAT_PANEL_PROMPT, panel_image)
+
+        if not response_str:
+            print(f"[ERROR] Received no response from Vision AI for message extraction.")
+            return []
+
+        try:
+            if "```json" in response_str:
+                json_str = response_str.split("```json\n")[1].split("\n```")[0]
+            else:
+                json_str = response_str
+            
+            messages_data = json.loads(json_str)
+            messages = [ChatMessage(**msg) for msg in messages_data]
+            print(f"[+] Extracted {len(messages)} messages.")
+            return messages
+
+        except (json.JSONDecodeError, TypeError, KeyError) as e:
+            print(f"[ERROR] Failed to parse message response. Exception: {e}")
+            print(f"Raw response was: {response_str}")
+            return []
+
+    def get_current_chat_name(self) -> str | None:
+        """Captures the header of the chat panel and uses AI to get the current chat name."""
+        print("[*] Identifying current chat name...")
+        full_screenshot = capture_window(self.hwnd)
+        if not full_screenshot:
+            print("[WARN] Failed to capture window for chat name verification.")
+            return None
+
+        # The header is at the top of the window, to the right of the sidebar.
+        # Let's crop to a region: 31% to 90% of width, and top 10% of height.
+        header_crop_box = (
+            int(full_screenshot.width * 0.31),
+            0,
+            int(full_screenshot.width * 0.9),
+            int(full_screenshot.height * 0.1)
+        )
+        header_image = full_screenshot.crop(header_crop_box)
+
+        response_str = self.vision_ai.query(CHAT_HEADER_PROMPT, header_image)
+
+        if not response_str:
+            print(f"[ERROR] Received no response from Vision AI for chat name.")
+            return None
+
+        try:
+            if "```json" in response_str:
+                json_str = response_str.split("```json\n")[1].split("\n```")[0]
+            else:
+                json_str = response_str
+            
+            data = json.loads(json_str)
+            chat_name = data.get("chat_name")
+
+            if chat_name:
+                print(f"[+] Current chat identified as: '{chat_name}'")
+                return chat_name
+            else:
+                print(f"[WARN] AI did not return a chat_name.")
+                return None
+
+        except (json.JSONDecodeError, KeyError) as e:
+            print(f"[ERROR] Failed to parse chat name response. Exception: {e}")
+            print(f"Raw response was: {response_str}")
+            return None
+
     def click_row(self, row: Any) -> None:
         """Clicks on the center of a given SidebarRow."""
         if not isinstance(row, SidebarRow):
@@ -248,7 +371,7 @@ class WinDriver(PlatformDriver):
         _force_foreground_window(self.hwnd)
 
         # Get precise coordinates just before clicking to ensure accuracy.
-        coords = self._get_precise_row_coords(row.name)
+        coords = self._get_precise_row_coords(row)
         if not coords:
             print(f"[ERROR] Could not get precise coordinates for '{row.name}'. Aborting click.")
             return

@@ -2,6 +2,10 @@ import os
 from config.weclaw_config import load_config
 from algo_a.pipeline_a import run_pipeline_a
 
+# Ensure the output directory exists
+if not os.path.exists('output'):
+    os.makedirs('output')
+
 CONFIG_PATH = "config/config.json"
 
 def main():

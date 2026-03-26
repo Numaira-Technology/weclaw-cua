@@ -4,7 +4,9 @@ This new version uses an OCR-based driver.
 """
 
 import sys
+import json
 import time
+from dataclasses import asdict
 
 from config.weclaw_config import WeclawConfig
 
@@ -53,13 +55,47 @@ def run_pipeline_a(config: WeclawConfig) -> None:
     for i, chat in enumerate(unread_target_chats):
         print(f"\n--- Processing chat {i + 1}/{len(unread_target_chats)}: {chat.name} ---")
 
-        # Click into the chat
-        # The ui_element from ChatInfo is a SidebarRow object for the new driver
-        driver.click_row(chat.ui_element)
-        print(f"[+] Clicked on '{chat.name}'. Pausing for UI to update...")
-        time.sleep(3)  # Wait for the message panel to load
+        # Click into the chat with verification and retries
+        click_successful = False
+        for i in range(3): # Max 3 attempts
+            print(f"[*] Attempting to click '{chat.name}' (Attempt {i + 1}/3)")
+            driver.click_row(chat.ui_element)
+            time.sleep(2) # Wait for UI to potentially update
 
-        # TODO: In the next step, we will implement message scraping here.
-        print(f"[*] Skipping message scraping for '{chat.name}' for now.")
+            current_chat_name = driver.get_current_chat_name()
+            # Simple comparison, might need to be more robust (e.g., handle truncated names)
+            if current_chat_name and chat.name in current_chat_name:
+                print(f"[+] Successfully clicked and verified chat: '{chat.name}'")
+                click_successful = True
+                break
+            else:
+                print(f"[WARN] Click verification failed. Expected '{chat.name}', but current chat is '{current_chat_name}'. Retrying...")
+        
+        # If all attempts failed, skip to the next chat
+        if not click_successful:
+            print(f"[ERROR] Failed to click on chat '{chat.name}' after 3 attempts. Skipping.")
+            continue
+
+        # 5. Scrape messages
+        # TODO: Implement scrolling within the chat panel to get more history.
+        messages = driver.get_chat_messages()
+        if not messages:
+            print(f"[WARN] No messages were extracted from '{chat.name}'. Skipping save.")
+            continue
+
+        # 6. Save messages to a file
+        # Sanitize chat name for filename
+        safe_filename = "".join(c for c in chat.name if c.isalnum() or c in (' ', '_')).rstrip()
+        output_path = f"output/{safe_filename}.json"
+
+        try:
+            with open(output_path, 'w', encoding='utf-8') as f:
+                # Convert list of dataclass objects to list of dicts
+                messages_as_dict = [asdict(msg) for msg in messages]
+                json.dump(messages_as_dict, f, ensure_ascii=False, indent=2)
+            print(f"[SUCCESS] Successfully saved {len(messages)} messages to {output_path}")
+        except Exception as e:
+            print(f"[ERROR] Failed to save messages for '{chat.name}' to {output_path}. Exception: {e}")
+
 
     print("\n[SUCCESS] Pipeline finished processing all unread target chats.")
