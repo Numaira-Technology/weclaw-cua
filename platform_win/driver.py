@@ -339,7 +339,9 @@ class WinDriver(PlatformDriver):
             return []
 
         # 4. Stitch screenshots
-        stitched_image_path = temp_dir / "stitched.png"
+        safe_chat_name = "".join(c for c in chat_name if c.isalnum() or c in (' ', '_')).rstrip()
+        stitched_image_path = Path(f"output/stitched_{safe_chat_name}.png")
+
         window_rect = win32gui.GetWindowRect(self.hwnd)
         window_width = window_rect[2] - window_rect[0]
         window_height = window_rect[3] - window_rect[1]
@@ -365,8 +367,9 @@ class WinDriver(PlatformDriver):
         # 6. Clean up temp files
         for path in screenshot_paths:
             path.unlink()
-        stitched_image_path.unlink()
         temp_dir.rmdir()
+
+        print(f"[+] Stitched screenshot saved to: {stitched_image_path}")
 
         if not response_str:
             print("[ERROR] No response from AI for message extraction.")
