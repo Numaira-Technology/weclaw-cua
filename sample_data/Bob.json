@@ -1,0 +1,51 @@
+[
+  {
+    "chat_name": "Bob",
+    "sender": "Bob",
+    "time": "21:18",
+    "content": "财务刚给我打电话了，你上周那笔报销单还差签字，她说明天 11 点前补掉最好，不然这批真过不了。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Bob",
+    "sender": "Bob",
+    "time": "21:24",
+    "content": "发票我这边都帮你夹好了，放你桌上。就差你签最后那页。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Bob",
+    "sender": "Bob",
+    "time": "21:55",
+    "content": "还有个事，行政催我问你周五到底出不出差，他们明早要订车和酒店。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Bob",
+    "sender": "Me",
+    "time": "22:02",
+    "content": "我刚到家，明早先处理签字。出差那个你先把链接甩我。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Bob",
+    "sender": "Bob",
+    "time": "22:04",
+    "content": "ok，我发你邮箱了，微信里也扔一个。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Bob",
+    "sender": "Bob",
+    "time": null,
+    "content": "出差申请入口",
+    "type": "link_card"
+  },
+  {
+    "chat_name": "Bob",
+    "sender": "Bob",
+    "time": "22:37",
+    "content": "哦还有，老板明早大概会先问报销那张，不一定，但你最好先去财务那边转一圈。",
+    "type": "text"
+  }
+]
