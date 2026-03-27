@@ -8,6 +8,8 @@ algo_a 负责从微信 macOS 客户端中提取未读消息。整个流程依赖
 测试分为三层：Basic（基本流程）、Edge Cases（边界场景）、Precision（精度与速度）。
 
 ---
+scripts/debug_mac_wechat_tree.py
+
 
 ## 1. Basic：微信未开启 / 冷启动状态下的完整读取
 

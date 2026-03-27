@@ -2,3 +2,8 @@ pyobjc-core
 pyobjc-framework-Cocoa
 pyobjc-framework-Quartz
 pyobjc-framework-ApplicationServices
+pyobjc-framework-Vision
+Pillow
+numpy
+opencv-python
+litellm
