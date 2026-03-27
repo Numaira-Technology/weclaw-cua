@@ -3,7 +3,7 @@
 - 单帧：截图 → 裁切 viewport → 提取（见 extract_viewport_messages / read_visible_messages）。
 - 长图：用 read_long_image_messages 模块从 Step 3 拼接长图提取。
 
-支持的消息类型：text, system, link_card, image
+支持的消息类型：text, system, link_card, image, video, voice, call, unsupported, other（与 TESTING.md §3.3 一致）
 """
 
 from __future__ import annotations
@@ -16,8 +16,9 @@ from typing import Any, Dict, List, Optional
 
 from PIL import Image
 
+from algo_a.extract_messages import DEFAULT_EXTRACT_MODEL
 from algo_a.llm_image_prep import DEFAULT_MAX_SIDE_PIXELS, downscale_max_side
-from algo_a.llm_openrouter_headers import headers_for_model
+from algo_a.llm_openrouter_headers import ensure_openrouter_ascii_env, headers_for_model
 from platform_mac.chat_panel_detector import crop_chat_viewport
 
 
@@ -28,7 +29,7 @@ class Message:
     sender: str
     time: Optional[str]
     content: str
-    type: str  # text | system | link_card | image
+    type: str  # text | system | link_card | image | video | voice | call | unsupported | other
 
 
 def _build_prompt(chat_name: str) -> str:
@@ -42,14 +43,26 @@ def _build_prompt(chat_name: str) -> str:
         "3. For each message, extract: sender, time, content, type.\n"
         '4. If time is not explicitly shown above or near a message, use null.\n'
         '5. If sender is unclear, use "UNKNOWN".\n'
-        '6. For system notices (date separators, join/leave, recalls), '
-        'use sender="SYSTEM", type="system".\n'
+        '6. Do NOT output standalone date/time separator rows (gray bar showing only '
+        'a date or "HH:MM") as messages—omit them. For real system notices '
+        '(join/leave/recall), use sender="SYSTEM", type="system".\n'
         '7. For link/share/mini-program cards, extract visible title into content, '
         'type="link_card".\n'
-        '8. For image messages where no text content is visible, '
-        'set content="[图片]", type="image".\n'
+        '8. For image messages where no text is visible, set content="[图片]", type="image". '
+        'For video bubbles use type="video" and content="[视频]" (add visible caption after a space if any). '
+        'For voice bubbles use type="voice" and one content line: "[语音]" plus visible duration '
+        '(seconds or mm:ss); never add a separate message that is only the duration. '
+        'For file bubbles use type="unsupported" and content like "[文件] name". '
+        'For voice/video call status rows (Canceled, Missed, 未接听, 通话时长), '
+        'use type="call" and put the visible status in content.\n'
+        "8r. For reply/quote bubbles (引用 + reply), use one message: type=\"text\", "
+        "content with the quoted part and the reply separated clearly (e.g. two paragraphs).\n"
         "9. Do NOT invent content that is not visible.\n"
-        "10. Do NOT include the chat title bar or input box text as messages.\n\n"
+        "10. Do NOT include the chat title bar or input box text as messages.\n"
+        "11. Time-only lines are not messages; never emit an entry whose content is "
+        "only a timestamp or date string.\n"
+        "12. If the same sender posts nearly identical duplicate text (e.g. repeated "
+        "ads), output a single message.\n\n"
         "JSON schema:\n"
         "{\n"
         '  "messages": [\n'
@@ -57,7 +70,7 @@ def _build_prompt(chat_name: str) -> str:
         '      "sender": "string",\n'
         '      "time": "string|null",\n'
         '      "content": "string",\n'
-        '      "type": "text|system|link_card|image"\n'
+        '      "type": "text|system|link_card|image|video|voice|call|unsupported|other"\n'
         "    }\n"
         "  ],\n"
         '  "extraction_confidence": "high|medium|low"\n'
@@ -86,7 +99,11 @@ def _parse_response(raw: str, chat_name: str) -> List[Message]:
         if not isinstance(entry, dict):
             continue
         msg_type = str(entry.get("type", "text"))
-        if msg_type not in {"text", "system", "link_card", "image"}:
+        _ok = {
+            "text", "system", "link_card", "image", "video", "voice", "call",
+            "unsupported", "other",
+        }
+        if msg_type not in _ok:
             msg_type = "text"
         messages.append(Message(
             chat_name=chat_name,
@@ -116,6 +133,7 @@ def _extract_once(
     import litellm
     import sys
 
+    ensure_openrouter_ascii_env()
     rgb = viewport_img.convert("RGB")
     scaled, orig_sz, final_sz = downscale_max_side(rgb, max_side_pixels)
     if orig_sz != final_sz:
@@ -168,7 +186,7 @@ def _extract_once(
 def extract_viewport_messages(
     viewport_img: Image.Image,
     chat_name: str,
-    model: str = "openrouter/google/gemini-2.5-flash",
+    model: str = DEFAULT_EXTRACT_MODEL,
     max_retries: int = 3,
 ) -> tuple[List[Message], Dict[str, Any]]:
     """从 viewport 截图中提取消息。
@@ -194,7 +212,7 @@ def extract_viewport_messages(
 def read_visible_messages(
     driver,
     chat_name: str,
-    model: str = "openrouter/google/gemini-2.5-flash",
+    model: str = DEFAULT_EXTRACT_MODEL,
 ) -> tuple[List[Message], Image.Image, Dict[str, Any]]:
     """完整流程：截图 → 裁切 viewport → LLM 提取消息。
 

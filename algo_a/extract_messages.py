@@ -14,7 +14,7 @@ from algo_a.llm_image_prep import (
     pil_rgb_open,
     pil_to_b64_png,
 )
-from algo_a.llm_openrouter_headers import headers_for_model
+from algo_a.llm_openrouter_headers import ensure_openrouter_ascii_env, headers_for_model
 
 
 EXTRACT_PROMPT = (
@@ -25,9 +25,19 @@ EXTRACT_PROMPT = (
     "3. For each message, extract: sender, time, content, type.\n"
     '4. If time is not explicitly visible, use null.\n'
     '5. If sender is unclear, use "UNKNOWN".\n'
-    '6. For system notices or date separators, use sender="SYSTEM", type="system".\n'
-    '7. For link/job/share/mini-program cards, extract visible title/summary into content, type="link_card".\n'
-    "8. Do not invent hidden or cut-off content; only extract what is visible.\n\n"
+    '6. Do NOT output standalone date/time separator rows as messages. For real '
+    'system notices (join/leave/recall), use sender="SYSTEM", type="system".\n'
+    '7. For link/share/mini-program cards, type="link_card" with visible title/summary in content. '
+    'For image-only bubbles without caption, type="image", content="[图片]". '
+    'For video bubbles, type="video", content="[视频]" (optional caption after a space). '
+    'For voice bubbles, type="voice", one line "[语音]" plus duration; do not emit a second line '
+    'that is only duration. '
+    'For file bubbles not fully readable, type="unsupported", content "[文件] name". '
+    'For call status rows (Canceled, Missed, 未接听, 通话时长), type="call".\n'
+    '7r. Reply/quote bubbles: one message, type="text", merge quoted block and reply in content.\n'
+    "8. Do not invent hidden or cut-off content; only extract what is visible.\n"
+    "9. Never emit a message whose content is only a timestamp or date line.\n"
+    "10. If the same sender posts nearly identical duplicate text, output one message.\n\n"
     "JSON schema:\n"
     "{\n"
     '  "messages": [\n'
@@ -35,7 +45,7 @@ EXTRACT_PROMPT = (
     '      "sender": "string",\n'
     '      "time": "string|null",\n'
     '      "content": "string",\n'
-    '      "type": "text|system|link_card|other"\n'
+    '      "type": "text|system|link_card|image|video|voice|call|unsupported|other"\n'
     "    }\n"
     "  ],\n"
     '  "extraction_confidence": "high|medium|low",\n'
@@ -96,6 +106,7 @@ def _extract_once(
     import sys
     import litellm
 
+    ensure_openrouter_ascii_env()
     pil = pil_rgb_open(image)
     scaled, orig_sz, final_sz = downscale_max_side(pil, max_side_pixels)
     if orig_sz != final_sz:

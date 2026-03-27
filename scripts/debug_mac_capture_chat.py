@@ -40,6 +40,7 @@ from algo_a.capture_chat import (
     capture_scroll_screenshots,
     capture_and_stitch,
 )
+from algo_a.extract_messages import DEFAULT_EXTRACT_MODEL
 from algo_a.llm_image_prep import DEFAULT_MAX_SIDE_PIXELS
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "debug_outputs", "capture")
@@ -96,7 +97,7 @@ def main():
     parser = argparse.ArgumentParser(description="聊天截图 → 长图 → JSON 调试")
     parser.add_argument("--chat", type=str, default=None, help="指定会话名称")
     parser.add_argument("--extract", action="store_true", help="启用 LLM 消息提取")
-    parser.add_argument("--model", type=str, default="openrouter/google/gemini-2.5-flash",
+    parser.add_argument("--model", type=str, default=DEFAULT_EXTRACT_MODEL,
                         help="LLM 模型")
     parser.add_argument("--direction", type=str, default="up",
                         choices=["up", "down"], help="滚动方向")

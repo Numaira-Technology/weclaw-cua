@@ -34,6 +34,7 @@ from platform_mac.sidebar_detector import ChatInfo, Rect, scan_sidebar_once
 from platform_mac.chat_panel_detector import titles_match
 from algo_a.click_into_chat import click_chat_row, wait_chat_panel_ready
 from algo_a.read_visible_messages import messages_to_dicts
+from algo_a.extract_messages import DEFAULT_EXTRACT_MODEL
 from algo_a.llm_image_prep import DEFAULT_MAX_SIDE_PIXELS
 from algo_a.read_long_image_messages import read_messages_from_long_image_file
 
@@ -79,7 +80,7 @@ def main() -> None:
         help="Step 3 输出的长图路径",
     )
     parser.add_argument("--chat", type=str, default=None, help="会话名（注入 LLM）")
-    parser.add_argument("--model", type=str, default="openrouter/google/gemini-2.5-flash")
+    parser.add_argument("--model", type=str, default=DEFAULT_EXTRACT_MODEL)
     parser.add_argument(
         "--max-side",
         type=int,
@@ -90,14 +91,25 @@ def main() -> None:
         "--chunks",
         type=int,
         default=2,
-        choices=[1, 2, 3],
-        help="长图竖向条数：2 或 3 分段并行送模型以提速；1=整图一次",
+        help="chunk-max-height=0 时固定竖切条数（1～10）；否则由高度自动算条数",
     )
     parser.add_argument(
         "--chunk-overlap",
         type=float,
         default=0.08,
-        help="分段相邻重叠比例（仅 chunks>1），减轻截断气泡",
+        help="分段相邻重叠比例（仅多段），减轻截断气泡",
+    )
+    parser.add_argument(
+        "--chunk-max-height",
+        type=int,
+        default=2400,
+        help="单条最大高度(px)自动算条数，上限 --chunk-max-count；0=用 --chunks 固定",
+    )
+    parser.add_argument(
+        "--chunk-max-count",
+        type=int,
+        default=10,
+        help="自动分段最多条数",
     )
     parser.add_argument(
         "--with-wechat",
@@ -110,6 +122,9 @@ def main() -> None:
         help="与 --with-wechat 合用：不点 sidebar，需 --chat",
     )
     args = parser.parse_args()
+    if not (1 <= args.chunks <= 10):
+        print("[!] --chunks 须在 1～10")
+        sys.exit(1)
 
     long_path = os.path.abspath(args.long_image)
     if not os.path.isfile(long_path):
@@ -160,17 +175,23 @@ def main() -> None:
 
     print(f"\n[读取] 长图: {long_path}")
     print(
-        f"[LLM]  model={args.model}  max_side={args.max_side}px  chunks={args.chunks}",
+        f"[LLM]  model={args.model}  max_side={args.max_side}px  "
+        f"chunk_max_height={args.chunk_max_height}  chunks_fixed={args.chunks}",
     )
-    if args.chunks == 1:
+    if args.chunk_max_height <= 0 and args.chunks == 1:
         print(
             "    （接下来会先编码整图，再请求云端；长图可能要 1～5 分钟才有结果，"
             "终端会出现 [read_visible] 进度行）",
             flush=True,
         )
+    elif args.chunk_max_height <= 0:
+        print(
+            f"    （固定拆成 {args.chunks} 段；每段会打印 [read_visible] 进度）",
+            flush=True,
+        )
     else:
         print(
-            f"    （将长图竖向拆成 {args.chunks} 段分别请求，每段会打印 [read_visible] 进度）",
+            "    （按高度自动分段，每段会打印 [read_visible] 进度）",
             flush=True,
         )
 
@@ -182,6 +203,8 @@ def main() -> None:
             max_side_pixels=args.max_side,
             chunk_count=args.chunks,
             chunk_overlap_ratio=args.chunk_overlap,
+            chunk_max_strip_height_px=args.chunk_max_height,
+            chunk_max_count=args.chunk_max_count,
         )
     except Exception as e:
         print(f"    提取失败: {e}")
@@ -191,6 +214,9 @@ def main() -> None:
     shutil.copy2(long_path, out_long)
 
     print(f"    提取到 {len(messages)} 条消息")
+    ec = meta.get("effective_chunk_count", meta.get("chunk_count"))
+    if ec is not None:
+        print(f"    分段数 effective_chunk_count={ec}", flush=True)
 
     print(f"\n{'─' * 60}")
     print(f"  消息列表 — {chat_name}")
@@ -210,6 +236,10 @@ def main() -> None:
         "long_image_size": list(meta.get("long_image_size", ())),
         "chunked": meta.get("chunked"),
         "chunk_count": meta.get("chunk_count"),
+        "effective_chunk_count": meta.get("effective_chunk_count"),
+        "chunk_max_strip_height_px": meta.get("chunk_max_strip_height_px"),
+        "chunk_max_count": meta.get("chunk_max_count"),
+        "long_image_height_px": meta.get("long_image_height_px"),
         "chunk_overlap_ratio": meta.get("chunk_overlap_ratio"),
         "chunks": meta.get("chunks"),
         "source_image_size": meta.get("source_image_size"),

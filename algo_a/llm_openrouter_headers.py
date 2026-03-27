@@ -7,13 +7,22 @@ OpenRouter 使用 X-Title / HTTP-Referer；若环境变量 OR_APP_NAME、OR_SITE
 
 from __future__ import annotations
 
+import os
+
 OPENROUTER_LITELLM_HEADERS: dict[str, str] = {
     "HTTP-Referer": "https://github.com/weclaw-main",
     "X-Title": "weclaw",
 }
 
 
+def ensure_openrouter_ascii_env() -> None:
+    """在 litellm.completion 之前调用，避免 get_secret(OR_APP_NAME) 含中文。"""
+    os.environ.setdefault("OR_APP_NAME", "weclaw")
+    os.environ.setdefault("OR_SITE_URL", "https://github.com/weclaw-main")
+
+
 def headers_for_model(model: str) -> dict[str, str] | None:
     if model.startswith("openrouter/"):
+        ensure_openrouter_ascii_env()
         return dict(OPENROUTER_LITELLM_HEADERS)
     return None

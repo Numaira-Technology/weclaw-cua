@@ -1,17 +1,31 @@
-"""对 LLM 提取的消息列表做后处理：规范化、去重、排序。
+"""对 LLM 提取的消息列表做后处理：normalize → refine_call → 去时间伪消息 → 去重 → 相似合并。
 
-流程：
-  1. normalize — 统一字段、过滤空消息、修正 type
-  2. deduplicate — 去掉接缝附近的重复消息（相邻 content+sender 完全一致）
-  3. merge_adjacent — 合并连续重复内容
-  4. 保证消息顺序从上到下（输入已是视觉顺序，不做重排）
+VALID_TYPES 与 algo_a/TESTING.md §3.3 对齐：含 video、voice、call、unsupported 等。
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List
 
-VALID_TYPES = {"text", "system", "link_card", "image", "other"}
+from algo_a.merge_similar_messages import merge_similar_content
+from algo_a.refine_call_messages import refine_call_message_types
+from algo_a.refine_voice_video_messages import (
+    drop_redundant_voice_duration_lines,
+    infer_video_voice_types,
+)
+
+VALID_TYPES = {
+    "text",
+    "system",
+    "link_card",
+    "image",
+    "other",
+    "unsupported",
+    "call",
+    "video",
+    "voice",
+}
 
 
 def _normalize_type(raw: str) -> str:
@@ -24,6 +38,18 @@ def _normalize_type(raw: str) -> str:
         return "image"
     if t in {"notice", "recall", "join", "leave", "date"}:
         return "system"
+    if t in {"voip", "phone_call", "voice_call", "video_call", "call_record", "audio_call"}:
+        return "call"
+    if t in {"movie", "short_video", "clip"}:
+        return "video"
+    if t in {"voice_message", "audio_message"}:
+        return "voice"
+    if t == "video":
+        return "video"
+    if t in {"voice", "audio"}:
+        return "voice"
+    if t in {"file", "document", "unknown"}:
+        return "unsupported"
     return "other"
 
 
@@ -77,7 +103,34 @@ def deduplicate(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return result
 
 
-def merge_adjacent(messages: List[Dict[str, Any]], max_window: int = 3) -> List[Dict[str, Any]]:
+def _is_time_only_content(content: str) -> bool:
+    """判断是否为纯时间/日期条（微信灰条上的日期或时钟，非气泡消息）。"""
+    c = content.strip()
+    if not c:
+        return True
+    if len(c) > 48:
+        return False
+    if re.match(r"^\d{1,2}:\d{2}(:\d{2})?$", c):
+        return True
+    if re.match(r"^\d{1,2}月\d{1,2}日(\s+\d{1,2}:\d{2})?$", c):
+        return True
+    if re.match(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}(\s+\d{1,2}:\d{2})?$", c):
+        return True
+    return False
+
+
+def drop_time_only_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """去掉内容仅为时间或日期的伪消息（LLM 误把分隔条当 system）。"""
+    out: List[Dict[str, Any]] = []
+    for m in messages:
+        c = str(m.get("content", "")).strip()
+        if _is_time_only_content(c):
+            continue
+        out.append(m)
+    return out
+
+
+def merge_adjacent(messages: List[Dict[str, Any]], max_window: int = 5) -> List[Dict[str, Any]]:
     """合并小窗口内（默认 3 条以内）的连续重复。
 
     当同一 sender 连续发了相同 content，只保留一条。
@@ -104,8 +157,13 @@ def postprocess(
     messages: List[Dict[str, Any]],
     chat_name: str,
 ) -> List[Dict[str, Any]]:
-    """完整后处理管线：normalize → deduplicate → merge_adjacent。"""
+    """完整后处理管线：normalize → refine_call → voice/video → drop_time_only → dedupe → merge。"""
     msgs = normalize(messages, chat_name)
+    msgs = refine_call_message_types(msgs)
+    msgs = infer_video_voice_types(msgs)
+    msgs = drop_redundant_voice_duration_lines(msgs)
+    msgs = drop_time_only_messages(msgs)
     msgs = deduplicate(msgs)
     msgs = merge_adjacent(msgs)
+    msgs = merge_similar_content(msgs)
     return msgs

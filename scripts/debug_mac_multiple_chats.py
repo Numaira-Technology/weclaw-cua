@@ -10,6 +10,8 @@
   python3 scripts/debug_mac_multiple_chats.py
   python3 scripts/debug_mac_multiple_chats.py --max-chats 2
   python3 scripts/debug_mac_multiple_chats.py --passes 8 --max-side 768
+  # 与 debug_mac_read_visible_messages 同一路径解析长图：
+  python3 scripts/debug_mac_multiple_chats.py --read-visible --chunks 2
 """
 
 from __future__ import annotations
@@ -81,7 +83,45 @@ def main() -> None:
         default=3,
         help="整轮（点击+截图+LLM）失败后的最大重试轮数",
     )
+    parser.add_argument(
+        "--read-visible",
+        action="store_true",
+        help="长图解析走 read_long_image_messages（与 debug_mac_read_visible_messages 一致）；默认 extract_messages",
+    )
+    parser.add_argument(
+        "--llm-timeout",
+        type=float,
+        default=300.0,
+        help="仅 --read-visible：vision 请求超时（秒）",
+    )
+    parser.add_argument(
+        "--chunks",
+        type=int,
+        default=2,
+        help="仅 --read-visible 且 --chunk-max-height=0：固定竖切条数（1～10）",
+    )
+    parser.add_argument(
+        "--chunk-overlap",
+        type=float,
+        default=0.08,
+        help="仅 --read-visible：分段重叠比例",
+    )
+    parser.add_argument(
+        "--chunk-max-height",
+        type=int,
+        default=2400,
+        help="仅 --read-visible：单条最大高度(px)自动算条数；0=用 --chunks 固定",
+    )
+    parser.add_argument(
+        "--chunk-max-count",
+        type=int,
+        default=10,
+        help="仅 --read-visible：自动分段最多条数",
+    )
     args = parser.parse_args()
+    if not (1 <= args.chunks <= 10):
+        print("[!] --chunks 须在 1～10", flush=True)
+        sys.exit(1)
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -120,6 +160,7 @@ def main() -> None:
         )
         sys.exit(1)
 
+    eb = "read_long_image" if args.read_visible else "extract_messages"
     cfg = UnreadBatchConfig(
         click_timeout=args.click_timeout,
         click_max_retries=args.click_retries,
@@ -131,6 +172,12 @@ def main() -> None:
         model=args.model,
         save_frames=args.save_frames,
         vision_max_side_pixels=args.max_side,
+        extract_backend=eb,
+        extract_llm_timeout=args.llm_timeout,
+        read_long_chunk_count=args.chunks,
+        read_long_chunk_overlap=args.chunk_overlap,
+        read_long_chunk_max_strip_height_px=args.chunk_max_height,
+        read_long_chunk_max_count=args.chunk_max_count,
     )
 
     print(f"\n[debug] 输出目录: {os.path.abspath(output_dir)}\n", flush=True)

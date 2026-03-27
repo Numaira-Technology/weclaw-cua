@@ -31,4 +31,4 @@
 
 ## 可选增强
 
-- 若 `gemini-3-flash-preview` 在 OpenRouter 不可用，运行时传 `--model openrouter/google/gemini-2.5-flash`。
+- 默认模型为 `openrouter/google/gemini-3-flash-preview`（`DEFAULT_EXTRACT_MODEL`）；若不可用，运行时传 `--model openrouter/google/gemini-2.5-flash`。

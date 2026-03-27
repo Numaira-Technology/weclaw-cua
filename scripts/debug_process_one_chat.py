@@ -155,7 +155,45 @@ def main() -> None:
         default=DEFAULT_MAX_SIDE_PIXELS,
         help="送 LLM 前长图长边像素上限（0=不缩小）",
     )
+    parser.add_argument(
+        "--read-visible",
+        action="store_true",
+        help="长图解析走 read_long_image_messages（与 debug_mac_read_visible_messages 一致）；默认 whole_pic extract_messages",
+    )
+    parser.add_argument(
+        "--llm-timeout",
+        type=float,
+        default=300.0,
+        help="仅 --read-visible：单次 vision 请求超时（秒）",
+    )
+    parser.add_argument(
+        "--chunks",
+        type=int,
+        default=2,
+        help="仅 --read-visible 且 --chunk-max-height=0：固定竖切条数（1～10）",
+    )
+    parser.add_argument(
+        "--chunk-overlap",
+        type=float,
+        default=0.08,
+        help="仅 --read-visible：分段重叠比例",
+    )
+    parser.add_argument(
+        "--chunk-max-height",
+        type=int,
+        default=2400,
+        help="仅 --read-visible：单条最大高度(px)自动算条数，上限见 --chunk-max-count；0=用 --chunks 固定",
+    )
+    parser.add_argument(
+        "--chunk-max-count",
+        type=int,
+        default=10,
+        help="仅 --read-visible：自动分段最多条数",
+    )
     args = parser.parse_args()
+    if not (1 <= args.chunks <= 10):
+        print("[!] --chunks 须在 1～10", flush=True)
+        sys.exit(1)
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -197,6 +235,7 @@ def main() -> None:
         scroll_direction=args.direction,
     )
 
+    eb = "read_long_image" if args.read_visible else "extract_messages"
     try:
         result = process_one_chat(
             driver=driver,
@@ -207,6 +246,12 @@ def main() -> None:
             skip_click=args.skip_click,
             save_frames=args.save_frames,
             vision_max_side_pixels=args.max_side,
+            extract_backend=eb,
+            extract_llm_timeout=args.llm_timeout,
+            read_long_chunk_count=args.chunks,
+            read_long_chunk_overlap=args.chunk_overlap,
+            read_long_chunk_max_strip_height_px=args.chunk_max_height,
+            read_long_chunk_max_count=args.chunk_max_count,
         )
     except RuntimeError as e:
         print(f"\n[致命] {e}", flush=True)

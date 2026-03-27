@@ -19,7 +19,7 @@ from platform_mac.sidebar_detector import ChatInfo
 from algo_a.capture_chat import CaptureSettings
 from algo_a.extract_messages import DEFAULT_EXTRACT_MODEL
 from algo_a.llm_image_prep import DEFAULT_MAX_SIDE_PIXELS
-from algo_a.process_one_chat import ProcessResult, process_one_chat
+from algo_a.process_one_chat import ExtractBackend, ProcessResult, process_one_chat
 from algo_a.sidebar_find_chat import find_unread_chat_by_name
 
 
@@ -34,6 +34,12 @@ class UnreadBatchConfig:
     save_frames: bool = False
     vision_max_side_pixels: int = DEFAULT_MAX_SIDE_PIXELS
     pause_between_chats_sec: float = 0.5
+    extract_backend: ExtractBackend = "extract_messages"
+    extract_llm_timeout: float = 300.0
+    read_long_chunk_count: int = 2
+    read_long_chunk_overlap: float = 0.08
+    read_long_chunk_max_strip_height_px: int = 2400
+    read_long_chunk_max_count: int = 10
 
 
 def process_unread_chats_batch(
@@ -85,6 +91,12 @@ def process_unread_chats_batch(
                 vision_max_side_pixels=cfg.vision_max_side_pixels,
                 click_timeout=cfg.click_timeout,
                 click_max_retries=cfg.click_max_retries,
+                extract_backend=cfg.extract_backend,
+                extract_llm_timeout=cfg.extract_llm_timeout,
+                read_long_chunk_count=cfg.read_long_chunk_count,
+                read_long_chunk_overlap=cfg.read_long_chunk_overlap,
+                read_long_chunk_max_strip_height_px=cfg.read_long_chunk_max_strip_height_px,
+                read_long_chunk_max_count=cfg.read_long_chunk_max_count,
             )
             if last.success:
                 break

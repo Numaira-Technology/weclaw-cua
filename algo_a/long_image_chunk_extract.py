@@ -9,6 +9,22 @@ from PIL import Image
 from algo_a.read_visible_messages import Message
 
 
+def vertical_chunk_count_for_height(
+    height_px: int,
+    max_strip_height_px: int,
+    max_chunks: int,
+) -> int:
+    """按单条最大高度估算竖向条数，不超过 max_chunks。"""
+    assert height_px > 0
+    assert max_chunks >= 1
+    if max_strip_height_px <= 0:
+        return 1
+    if height_px <= max_strip_height_px:
+        return 1
+    n = (height_px + max_strip_height_px - 1) // max_strip_height_px
+    return min(max(n, 1), max_chunks)
+
+
 def split_vertical_strips(
     img: Image.Image,
     n: int,
@@ -20,14 +36,6 @@ def split_vertical_strips(
     if n == 1:
         return [img]
     overlap = max(30, int(h * overlap_ratio))
-    if n == 2:
-        mid = h // 2
-        y1_end = min(h, mid + overlap // 2)
-        y2_start = max(0, mid - overlap // 2)
-        return [
-            img.crop((0, 0, w, y1_end)),
-            img.crop((0, y2_start, w, h)),
-        ]
     boundaries = [int(i * h / n) for i in range(n + 1)]
     out: List[Image.Image] = []
     for i in range(n):
@@ -40,18 +48,20 @@ def split_vertical_strips(
     return out
 
 
-def merge_chunk_messages(parts: List[List[Message]]) -> List[Message]:
-    """按条带顺序拼接，相邻重复（重叠区）去重；仅比较 sender、content、type。"""
+def merge_chunk_messages(parts: List[List[Message]], lookback: int = 5) -> List[Message]:
+    """按条带顺序拼接；在滑动窗口内按 sender+content+type 去重（接缝与重叠区）。"""
     merged: List[Message] = []
     for part in parts:
         for m in part:
-            if merged:
-                p = merged[-1]
+            dup = False
+            for prev in merged[-lookback:]:
                 if (
-                    p.sender == m.sender
-                    and p.content == m.content
-                    and p.type == m.type
+                    prev.sender == m.sender
+                    and prev.content == m.content
+                    and prev.type == m.type
                 ):
-                    continue
-            merged.append(m)
+                    dup = True
+                    break
+            if not dup:
+                merged.append(m)
     return merged

@@ -118,8 +118,8 @@ scripts/debug_mac_wechat_tree.py
 | 3.3.1 | **纯文本消息** | AXGroup 内含 AXStaticText | 直接读 `AXValue` | `"text"` |
 | 3.3.2 | **表情包 / Sticker** | AXImage 元素，无文本 | 记录为 "[表情]" 或提取 AXDescription | `"image"` |
 | 3.3.3 | **图片消息** | AXImage 元素，较大尺寸 | 记录为 "[图片]"；可选保存到本地 | `"image"` |
-| 3.3.4 | **视频消息** | AXGroup 内含播放按钮图标 | 记录为 "[视频]" | `"unsupported"` |
-| 3.3.5 | **语音消息** | AXGroup 内含特定语音条 UI 元素 | 记录为 "[语音]"，提取时长信息（如果有） | `"unsupported"` |
+| 3.3.4 | **视频消息** | AXGroup 内含播放按钮图标 | 记录为 "[视频]"（可有标题后缀） | `"video"` |
+| 3.3.5 | **语音消息** | AXGroup 内含特定语音条 UI 元素 | 一条记录："[语音]" + 时长，勿拆成单独时长行 | `"voice"` |
 | 3.3.6 | **链接卡片（公众号文章等）** | AXGroup 内含 AXLink 或嵌套 AXStaticText（标题 + 来源） | 提取标题 + 描述 + 来源名称 | `"link_card"` |
 | 3.3.7 | **公众号推送消息** | 类似链接卡片，可能有缩略图 AXImage | 提取标题 + 公众号名称 | `"link_card"` |
 | 3.3.8 | **视频号分享** | AXGroup 内含视频封面 AXImage + 标题 AXStaticText | 提取标题 + 视频号名称 | `"link_card"` |
@@ -134,7 +134,9 @@ scripts/debug_mac_wechat_tree.py
 | 3.3.17 | **撤回消息提示** | 系统消息样式，"xxx 撤回了一条消息" | 同系统消息处理 | `"system"` |
 | 3.3.18 | **引用/回复消息** | AXGroup 内含引用块（嵌套 AXGroup）+ 回复文本 | 提取引用内容 + 回复内容 | `"text"` |
 | 3.3.19 | **拍一拍** | 系统消息样式 | 提取文本 | `"system"` |
-| 3.3.20 | **音视频通话记录** | AXGroup 内含通话 icon + 时长/状态 | 记录为 "[通话] {时长/状态}" | `"unsupported"` |
+| 3.3.20 | **音视频通话记录** | AXGroup 内含通话 icon + 时长/状态 | 记录为 "[通话] {时长/状态}"；已取消/未接等单行状态用 `type="call"` | `"call"` |
+
+`type` 取值汇总：`"text"`、`"system"`、`"link_card"`、`"image"`、`"video"`、`"voice"`、`"call"`、`"unsupported"`（文件等无法完整解析时）、`"other"`（兜底）。
 
 ### 3.4 发送者 + 时间戳提取
 
