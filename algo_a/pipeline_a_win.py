@@ -30,6 +30,7 @@ def _strip_emojis_and_whitespace(text: str) -> str:
     """Removes emojis and leading/trailing whitespace from a string."""
     if not text:
         return ""
+    text = text.replace("…", "...").replace("⋯", "...")
     emoji_pattern = re.compile(
         "["
         "\U0001F600-\U0001F64F" 
@@ -62,6 +63,13 @@ def _is_chat_name_match(ui_name: str, config_name: str) -> bool:
         return clean_ui_name == clean_config_name
 
 
+def _scroll_sidebar_to_top(driver, window: int) -> None:
+    print("[*] Scrolling sidebar to the top...")
+    for _ in range(10):
+        driver.scroll_sidebar(window, "up")
+        time.sleep(0.1)
+
+
 def run_pipeline_a(config: WeclawConfig) -> None:
     """Run the full message collection pipeline."""
     assert config is not None
@@ -74,10 +82,7 @@ def run_pipeline_a(config: WeclawConfig) -> None:
         print("[ERROR] Pipeline failed: Could not find WeChat window.")
         return
 
-    print("[*] Scrolling sidebar to the top...")
-    for _ in range(10):
-        driver.scroll_sidebar(window, "up")
-        time.sleep(0.1)
+    _scroll_sidebar_to_top(driver, window)
 
     print(f"[*] Searching for unread target chats: {config.groups_to_monitor}")
     unread_target_chats = list_target_chats(driver, window, config.groups_to_monitor)
@@ -91,6 +96,14 @@ def run_pipeline_a(config: WeclawConfig) -> None:
     for i, chat in enumerate(unread_target_chats):
         print(f"\n--- Processing chat {i + 1}/{len(unread_target_chats)}: {chat.name} ---")
 
+        _scroll_sidebar_to_top(driver, window)
+        refreshed_matches = list_target_chats(driver, window, [chat.name])
+        if not refreshed_matches:
+            print(f"[ERROR] Could not re-locate unread target chat '{chat.name}' before clicking. Skipping.")
+            continue
+
+        chat = refreshed_matches[0]
+
         click_successful = False
         for i in range(3):
             print(f"[*] Attempting to click '{chat.name}' (Attempt {i + 1}/3)")
@@ -98,7 +111,8 @@ def run_pipeline_a(config: WeclawConfig) -> None:
             time.sleep(2)
 
             current_chat_name = driver.get_current_chat_name()
-            if _is_chat_name_match(current_chat_name, chat.name):
+            is_match = _is_chat_name_match(current_chat_name, chat.name)
+            if is_match:
                 print(f"[+] Successfully clicked and verified chat: '{chat.name}'")
                 click_successful = True
                 break

@@ -25,7 +25,6 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from shared.platform_api import PlatformDriver
-
 MAX_SCROLL_ITERATIONS = 10
 
 
@@ -43,7 +42,11 @@ def _collect_visible_chats(driver: PlatformDriver, window: Any) -> list[ChatInfo
     for row in rows:
         is_unread = row.badge_text is not None and row.badge_text != ""
         results.append(
-            ChatInfo(name=row.name, ui_element=row, is_unread=is_unread)
+            ChatInfo(
+                name=row.name,
+                ui_element=row,
+                is_unread=is_unread,
+            )
         )
     return results
 
@@ -52,6 +55,7 @@ def _strip_emojis_and_whitespace(text: str) -> str:
     """Removes emojis and leading/trailing whitespace from a string."""
     if not text:
         return ""
+    text = text.replace("…", "...").replace("⋯", "...")
     emoji_pattern = re.compile(
         "["
         "\U0001F600-\U0001F64F"
@@ -82,7 +86,6 @@ def list_target_chats(driver: PlatformDriver, window: Any, targets: list[str]) -
     found_chats: dict[str, ChatInfo] = {}
     all_seen_chat_names = set()
     seen_target_names = set()
-
     print(f"[*] Starting sidebar scan for unread target chats. Targets: {targets}")
 
     for i in range(MAX_SCROLL_ITERATIONS):
@@ -111,6 +114,7 @@ def list_target_chats(driver: PlatformDriver, window: Any, targets: list[str]) -
             print(f"  - Seen: '{chat.name}' (Clean: '{clean_chat_name}', Is Target: {is_target}, Is Unread: {chat.is_unread})")
 
             if is_target:
+                assert matched_clean_name is not None
                 original_target_name = clean_target_map[matched_clean_name]
                 seen_target_names.add(original_target_name)
                 if chat.is_unread:

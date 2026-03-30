@@ -128,17 +128,18 @@ Example:
 
 CHAT_PANEL_SAFE_CLICK_PROMPT = '''
 Analyze the provided image, which is a screenshot of a chat application's message panel.
-Your task is to identify a "safe" coordinate to click that will activate the window without triggering any actions like opening a link, an image, or a user profile.
-A safe spot is typically a blank, empty area within the message history. Avoid clicking on text bubbles, usernames, images, videos, or any interactive elements.
-Respond with the JSON coordinates of the center of a safe-to-click bounding box.
+Your task is to identify the largest clearly empty rectangular area that is safe to click and then scroll from.
+The area must be completely empty background inside the message history, not on or touching message bubbles, usernames, avatars, timestamps, images, links, or other interactive elements.
+Do not use the header area, the input box area, or the bottom-most part of the visible history where floating controls often appear.
+Prefer a spacious empty area in the upper-middle part of the visible message history.
+Return a bbox only if the empty area is comfortably large, at least about 80x60 in the 1000x1000 coordinate space.
+If no such clearly empty area exists, return {"bbox": null}.
 
 Example Response:
 {
-  "bbox": [500, 750, 520, 770]
+  "bbox": [420, 260, 620, 420]
 }
 '''
-
-
 class WinDriver(PlatformDriver):
     def __init__(self):
         self.hwnd: int = 0
@@ -455,6 +456,11 @@ class WinDriver(PlatformDriver):
         response_str = self.vision_ai.query(CHAT_PANEL_SAFE_CLICK_PROMPT, chat_panel_image)
 
         safe_click_coords = None
+        bbox = None
+        bbox_width = None
+        bbox_height = None
+        bbox_center_y = None
+        bbox_valid = False
         if response_str:
             try:
                 if "```json" in response_str:
@@ -464,6 +470,15 @@ class WinDriver(PlatformDriver):
                 data = json.loads(json_str)
                 bbox = data.get("bbox")
                 if bbox and len(bbox) == 4:
+                    bbox_width = bbox[2] - bbox[0]
+                    bbox_height = bbox[3] - bbox[1]
+                    bbox_center_y = (bbox[1] + bbox[3]) / 2
+                    bbox_valid = (
+                        bbox_width >= 80
+                        and bbox_height >= 60
+                        and bbox_center_y <= 750
+                    )
+                if bbox_valid:
                     # The AI is assumed to return coordinates in a 1000x1000 space
                     img_width, img_height = chat_panel_image.size
                     scaled_x1 = int(bbox[0] / 1000 * img_width)
@@ -478,6 +493,8 @@ class WinDriver(PlatformDriver):
                     abs_y = window_top + chat_panel_y1 + center_y
                     safe_click_coords = (abs_x, abs_y)
                     print(f"[+] AI identified safe click spot at: {safe_click_coords}")
+                elif bbox:
+                    print(f"[WARN] AI returned an unsafe click bbox: {bbox}")
             except Exception as e:
                 print(f"[WARN] Could not parse safe click response from AI: {e}. Falling back to default.")
 

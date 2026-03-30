@@ -186,6 +186,10 @@ user32 = ctypes.windll.user32
 def _force_foreground_window(hwnd: int):
     """A multi-layered, forceful method to bring a window to the foreground."""
 
+    if win32gui.IsIconic(hwnd):
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        time.sleep(0.2)
+
     # 1. Simple method
     try:
         win32gui.SetForegroundWindow(hwnd)
