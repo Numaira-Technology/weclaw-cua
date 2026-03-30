@@ -126,18 +126,15 @@ Example:
 ```
 '''
 
+CHAT_PANEL_SAFE_CLICK_PROMPT = '''
+Analyze the provided image, which is a screenshot of a chat application's message panel.
+Your task is to identify a "safe" coordinate to click that will activate the window without triggering any actions like opening a link, an image, or a user profile.
+A safe spot is typically a blank, empty area within the message history. Avoid clicking on text bubbles, usernames, images, videos, or any interactive elements.
+Respond with the JSON coordinates of the center of a safe-to-click bounding box.
 
-SAFE_CLICK_PROMPT = '''
-You are a UI automation assistant. Analyze the provided screenshot of a chat application's main chat panel.
-Your task is to find a single "safe" coordinate to click that is guaranteed to NOT be on a message bubble, user avatar, image, link, or any other interactive element.
-The ideal location is the empty background of the chat panel.
-
-You MUST return your response as a single, valid JSON object with one key, "safe_coord", which is a list of two integers: [x, y].
-The coordinates must be relative to the top-left corner of the provided image.
-
-Example:
+Example Response:
 {
-  "safe_coord": [250, 400]
+  "bbox": [500, 750, 520, 770]
 }
 '''
 
@@ -340,22 +337,9 @@ class WinDriver(PlatformDriver):
         """
         print(f"[*] Starting message extraction for '{chat_name}'...")
 
-        print("[*] Activating chat panel with a safe click...")
-        safe_coords = self._get_safe_click_coords()
-        if safe_coords:
-            pyautogui.moveTo(safe_coords[0], safe_coords[1], duration=0.2)
-            pyautogui.click()
-            time.sleep(0.5)
-        else:
-            print("[WARN] Could not find a safe coordinate. Falling back to clicking the center of the chat panel.")
-            window_rect = win32gui.GetWindowRect(self.hwnd)
-            window_left, window_top, _, _ = window_rect
-            chat_panel_region = self._get_chat_panel_region()
-            click_x = window_left + (chat_panel_region[0] + chat_panel_region[2]) // 2
-            click_y = window_top + (chat_panel_region[1] + chat_panel_region[3]) // 2
-            pyautogui.moveTo(click_x, click_y, duration=0.2)
-            pyautogui.click()
-            time.sleep(0.5)
+        self._activate_chat_panel_safely()
+
+        self.click_new_messages_button()
 
         screenshots = []
         for i in range(10):
@@ -445,53 +429,68 @@ class WinDriver(PlatformDriver):
         print(f"[*] Finished processing all chunks. Total messages extracted: {len(all_messages)}")
         return all_messages
 
-    def _get_safe_click_coords(self) -> tuple[int, int] | None:
-        """
-        Captures the chat panel and uses AI to find a safe coordinate to click,
-        avoiding interactive elements.
-        """
-        print("[*] Finding a safe coordinate to click in the chat panel...")
+    def _activate_chat_panel_safely(self) -> None:
+        """Finds a safe spot in the chat panel to click to activate the window."""
+        print("[*] Activating chat panel with a safe click...")
+        _force_foreground_window(self.hwnd)
+        time.sleep(0.5) # Wait for window to be focused
+
         full_screenshot = capture_window(self.hwnd)
         if not full_screenshot:
-            print("[WARN] Failed to capture window for safe click detection.")
-            return None
+            print("[WARN] Failed to capture window for safe click.")
+            return
 
         window_rect = win32gui.GetWindowRect(self.hwnd)
         window_left, window_top, _, _ = window_rect
 
-        chat_panel_rel_region = self._get_chat_panel_region()
-        chat_panel_image = full_screenshot.crop(chat_panel_rel_region)
+        # Define and crop to the chat panel region
+        chat_panel_x1 = int(full_screenshot.width * 0.31)
+        chat_panel_y1 = 50 # Avoid header
+        chat_panel_x2 = int(full_screenshot.width * 0.95)
+        chat_panel_y2 = full_screenshot.height - 50 # Avoid input area
+        chat_panel_crop_box = (chat_panel_x1, chat_panel_y1, chat_panel_x2, chat_panel_y2)
+        chat_panel_image = full_screenshot.crop(chat_panel_crop_box)
 
-        response_str = self.vision_ai.query(SAFE_CLICK_PROMPT, chat_panel_image)
+        # Query AI for a safe spot
+        response_str = self.vision_ai.query(CHAT_PANEL_SAFE_CLICK_PROMPT, chat_panel_image)
 
-        if not response_str:
-            print("[ERROR] Received no response from Vision AI for safe coordinate.")
-            return None
+        safe_click_coords = None
+        if response_str:
+            try:
+                if "```json" in response_str:
+                    json_str = response_str.split("```json\n")[1].split("\n```")[0]
+                else:
+                    json_str = response_str
+                data = json.loads(json_str)
+                bbox = data.get("bbox")
+                if bbox and len(bbox) == 4:
+                    # The AI is assumed to return coordinates in a 1000x1000 space
+                    img_width, img_height = chat_panel_image.size
+                    scaled_x1 = int(bbox[0] / 1000 * img_width)
+                    scaled_y1 = int(bbox[1] / 1000 * img_height)
+                    scaled_x2 = int(bbox[2] / 1000 * img_width)
+                    scaled_y2 = int(bbox[3] / 1000 * img_height)
 
-        try:
-            if "```json" in response_str:
-                json_str = response_str.split("```json\n")[1].split("\n```")[0]
-            else:
-                json_str = response_str
-            
-            data = json.loads(json_str)
-            rel_coords = data.get("safe_coord")
+                    # Calculate center and convert to absolute screen coordinates
+                    center_x = (scaled_x1 + scaled_x2) // 2
+                    center_y = (scaled_y1 + scaled_y2) // 2
+                    abs_x = window_left + chat_panel_x1 + center_x
+                    abs_y = window_top + chat_panel_y1 + center_y
+                    safe_click_coords = (abs_x, abs_y)
+                    print(f"[+] AI identified safe click spot at: {safe_click_coords}")
+            except Exception as e:
+                print(f"[WARN] Could not parse safe click response from AI: {e}. Falling back to default.")
 
-            if not rel_coords or len(rel_coords) != 2:
-                print(f"[WARN] AI returned invalid safe coordinates: {rel_coords}")
-                return None
+        # If AI fails or doesn't provide a spot, fall back to clicking the center
+        if not safe_click_coords:
+            print("[INFO] AI did not provide a safe click spot. Falling back to center of chat panel.")
+            fallback_x = window_left + (chat_panel_x1 + chat_panel_x2) // 2
+            fallback_y = window_top + (chat_panel_y1 + chat_panel_y2) // 2
+            safe_click_coords = (fallback_x, fallback_y)
 
-            # The coordinate is relative to the chat_panel_image, so we need to add the panel's offset
-            abs_x = window_left + chat_panel_rel_region[0] + rel_coords[0]
-            abs_y = window_top + chat_panel_rel_region[1] + rel_coords[1]
-
-            print(f"[+] Safe coordinate found: ({abs_x}, {abs_y})")
-            return (abs_x, abs_y)
-
-        except (json.JSONDecodeError, KeyError) as e:
-            print(f"[ERROR] Failed to parse safe coordinate response. Exception: {e}")
-            print(f"Raw response was: {response_str}")
-            return None
+        pyautogui.moveTo(safe_click_coords[0], safe_click_coords[1], duration=0.2)
+        pyautogui.click()
+        time.sleep(0.5)
 
     def get_current_chat_name(self) -> str | None:
         """Captures the sidebar and uses AI to get the name of the currently selected (highlighted) chat."""
@@ -582,22 +581,14 @@ class WinDriver(PlatformDriver):
             data = json.loads(json_str)
             bbox = data.get("bbox")
 
-            if not bbox or len(bbox) != 4:
+            if not bbox:
                 print("[DEBUG] No 'new messages' button found by AI.")
                 return False
 
-            # Scale coordinates from AI's 0-1000 range to the chat panel image dimensions
-            img_width, img_height = chat_panel_screenshot.size
-            scaled_x1 = int(bbox[0] / 1000 * img_width)
-            scaled_y1 = int(bbox[1] / 1000 * img_height)
-            scaled_x2 = int(bbox[2] / 1000 * img_width)
-            scaled_y2 = int(bbox[3] / 1000 * img_height)
-
-            # Calculate absolute screen coordinates by adding window and panel offsets
-            abs_x1 = window_left + chat_panel_region[0] + scaled_x1
-            abs_y1 = window_top + chat_panel_region[1] + scaled_y1
-            abs_x2 = window_left + chat_panel_region[0] + scaled_x2
-            abs_y2 = window_top + chat_panel_region[1] + scaled_y2
+            abs_x1 = window_left + chat_panel_region[0] + bbox[0]
+            abs_y1 = window_top + chat_panel_region[1] + bbox[1]
+            abs_x2 = window_left + chat_panel_region[0] + bbox[2]
+            abs_y2 = window_top + chat_panel_region[1] + bbox[3]
 
             center_x = (abs_x1 + abs_x2) // 2
             center_y = (abs_y1 + abs_y2) // 2
@@ -629,8 +620,10 @@ class WinDriver(PlatformDriver):
 
         center_x, center_y = coords
 
-        # Per instruction, do not offset click on retries.
         y_offset = 0
+        if attempt > 0:
+            y_offset = -10 * attempt 
+
         adjusted_y = center_y + y_offset
 
         print(f"[*] Preparing to click on row '{row.name}'. Attempt: {attempt + 1}, Coords: ({center_x}, {adjusted_y})")
