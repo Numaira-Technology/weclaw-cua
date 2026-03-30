@@ -25,7 +25,7 @@ if project_root not in sys.path:
 
 from shared.platform_api import PlatformDriver
 
-MAX_SCROLL_ITERATIONS = 50
+MAX_SCROLL_ITERATIONS = 10
 
 
 @dataclass

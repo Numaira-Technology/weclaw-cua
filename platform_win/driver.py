@@ -70,10 +70,11 @@ Respond in JSON format with a single key "bbox" which is a list of four numbers 
 If no such button is visible, return {"bbox": null}.
 '''
 
-CHAT_HEADER_PROMPT = '''
-You are a UI analysis assistant. Analyze the provided screenshot of a chat application's header.
-Your task is to identify the name of the currently open chat or group.
-Return a single JSON object with one key, "chat_name".
+CURRENT_CHAT_PROMPT = '''
+You are a UI analysis assistant. Analyze the provided screenshot of a chat application's sidebar.
+One of the chat items in the sidebar is highlighted (has a different background color), indicating it is currently selected.
+Your task is to identify the name of this single highlighted chat item.
+Return a single JSON object with one key, "chat_name". If no item is highlighted, return null.
 
 Example:
 {
@@ -180,10 +181,16 @@ class WinDriver(PlatformDriver):
                 print(f"[DEBUG] Raw AI response for invalid bbox: {response_str}")
                 return None
 
-            abs_x1 = window_left + win_rel_bbox[0]
-            abs_y1 = window_top + win_rel_bbox[1]
-            abs_x2 = window_left + win_rel_bbox[2]
-            abs_y2 = window_top + win_rel_bbox[3]
+            img_width, img_height = full_screenshot.size
+            scaled_x1 = int(win_rel_bbox[0] / 1000 * img_width)
+            scaled_y1 = int(win_rel_bbox[1] / 1000 * img_height)
+            scaled_x2 = int(win_rel_bbox[2] / 1000 * img_width)
+            scaled_y2 = int(win_rel_bbox[3] / 1000 * img_height)
+
+            abs_x1 = window_left + scaled_x1
+            abs_y1 = window_top + scaled_y1
+            abs_x2 = window_left + scaled_x2
+            abs_y2 = window_top + scaled_y2
 
             center_x = (abs_x1 + abs_x2) // 2
             center_y = (abs_y1 + abs_y2) // 2
@@ -234,16 +241,22 @@ class WinDriver(PlatformDriver):
             return []
 
         sidebar_rows = []
+        img_width, img_height = sidebar_image.size
         for item in sidebar_data:
             relative_bbox = item.get("bbox")
             if not relative_bbox or len(relative_bbox) != 4:
                 print(f"[WARN] Skipping item with invalid bbox: {item}")
                 continue
 
-            abs_x1 = window_left + relative_bbox[0]
-            abs_y1 = window_top + relative_bbox[1]
-            abs_x2 = window_left + relative_bbox[2]
-            abs_y2 = window_top + relative_bbox[3]
+            scaled_x1 = int(relative_bbox[0] / 1000 * img_width)
+            scaled_y1 = int(relative_bbox[1] / 1000 * img_height)
+            scaled_x2 = int(relative_bbox[2] / 1000 * img_width)
+            scaled_y2 = int(relative_bbox[3] / 1000 * img_height)
+
+            abs_x1 = window_left + scaled_x1
+            abs_y1 = window_top + scaled_y1
+            abs_x2 = window_left + scaled_x2
+            abs_y2 = window_top + scaled_y2
 
             sidebar_rows.append(
                 SidebarRow(
@@ -352,9 +365,9 @@ class WinDriver(PlatformDriver):
         window_width = window_rect[2] - window_rect[0]
         window_height = window_rect[3] - window_rect[1]
         scroll_region = CropRegion(
-            x=int(window_width * 0.31),
+            x=int(window_width * 0.30),
             y=50,
-            w=int(window_width * 0.64),
+            w=int(window_width * 0.69),
             h=window_height - 100
         )
 
@@ -417,22 +430,18 @@ class WinDriver(PlatformDriver):
         return all_messages
 
     def get_current_chat_name(self) -> str | None:
-        """Captures the header of the chat panel and uses AI to get the current chat name."""
-        print("[*] Identifying current chat name...")
+        """Captures the sidebar and uses AI to get the name of the currently selected (highlighted) chat."""
+        print("[*] Identifying current chat name from sidebar highlight...")
         full_screenshot = capture_window(self.hwnd)
         if not full_screenshot:
             print("[WARN] Failed to capture window for chat name verification.")
             return None
 
-        header_crop_box = (
-            int(full_screenshot.width * 0.31),
-            0,
-            int(full_screenshot.width * 0.9),
-            int(full_screenshot.height * 0.1)
-        )
-        header_image = full_screenshot.crop(header_crop_box)
+        sidebar_width = int(full_screenshot.width * 0.3)
+        sidebar_crop_box = (0, 0, sidebar_width, full_screenshot.height)
+        sidebar_image = full_screenshot.crop(sidebar_crop_box)
 
-        response_str = self.vision_ai.query(CHAT_HEADER_PROMPT, header_image)
+        response_str = self.vision_ai.query(CURRENT_CHAT_PROMPT, sidebar_image)
 
         if not response_str:
             print(f"[ERROR] Received no response from Vision AI for chat name.")
