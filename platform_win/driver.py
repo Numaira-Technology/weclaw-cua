@@ -311,22 +311,9 @@ class WinDriver(PlatformDriver):
         return row.badge_text
 
     def scroll_chat_panel(self, direction: str = "down") -> None:
-        """Scrolls the chat panel area up or down."""
-        print(f"[*] Scrolling chat panel {direction}...")
-        window_rect = win32gui.GetWindowRect(self.hwnd)
-        window_left, window_top, _, _ = window_rect
-
-        chat_panel_region = self._get_chat_panel_region()
-        
-        scroll_x = window_left + (chat_panel_region[0] + chat_panel_region[2]) // 2
-        scroll_y = window_top + (chat_panel_region[1] + chat_panel_region[3]) // 2
-
-        pyautogui.moveTo(scroll_x, scroll_y, duration=0.2)
-
-        pyautogui.click()
-
+        """Scrolls the chat panel area up or down by pressing PageUp/PageDown."""
         key_to_press = 'pagedown' if direction == "down" else 'pageup'
-        print(f"[*] Scrolling {direction} using '{key_to_press}' key.")
+        print(f"[*] Scrolling chat panel {direction} using '{key_to_press}' key.")
         pyautogui.press(key_to_press)
         time.sleep(1.0)
 
@@ -338,12 +325,21 @@ class WinDriver(PlatformDriver):
         """
         print(f"[*] Starting message extraction for '{chat_name}'...")
 
+        print("[*] Activating chat panel with a single click...")
+        window_rect = win32gui.GetWindowRect(self.hwnd)
+        window_left, window_top, _, _ = window_rect
+        chat_panel_region = self._get_chat_panel_region()
+        click_x = window_left + (chat_panel_region[0] + chat_panel_region[2]) // 2
+        click_y = window_top + (chat_panel_region[1] + chat_panel_region[3]) // 2
+        pyautogui.moveTo(click_x, click_y, duration=0.2)
+        pyautogui.click()
+        time.sleep(0.5)
+
         self.click_new_messages_button()
 
         screenshots = []
         for i in range(10):
             self.scroll_chat_panel(direction="up")
-            time.sleep(0.5)
             screenshot = capture_window(self.hwnd)
             if screenshot:
                 screenshots.append(screenshot)
