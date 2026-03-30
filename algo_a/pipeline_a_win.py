@@ -8,6 +8,7 @@ import os
 import json
 import time
 from dataclasses import asdict
+import re
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
@@ -23,6 +24,42 @@ def _create_driver():
         return WinDriver()
     else:
         raise NotImplementedError(f"Platform {sys.platform} is not supported yet.")
+
+
+def _strip_emojis_and_whitespace(text: str) -> str:
+    """Removes emojis and leading/trailing whitespace from a string."""
+    if not text:
+        return ""
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F" 
+        "\U0001F300-\U0001F5FF"
+        "\U0001F680-\U0001F6FF"
+        "\U0001F1E0-\U0001F1FF"
+        "\U0001F900-\U0001F9FF"
+        "\u2600-\u26FF" 
+        "\u2700-\u27BF"
+        "\uFE0F"
+        "]+",
+        flags=re.UNICODE)
+    return emoji_pattern.sub(r'', text).strip()
+
+
+def _is_chat_name_match(ui_name: str, config_name: str) -> bool:
+    """
+    Compares a chat name from the UI with a name from the config,
+    handling cases where the UI name is truncated with '...' and ignoring emojis.
+    """
+    if not ui_name or not config_name:
+        return False
+
+    clean_ui_name = _strip_emojis_and_whitespace(ui_name)
+    clean_config_name = _strip_emojis_and_whitespace(config_name)
+    
+    if clean_ui_name.endswith('...'):
+        return clean_config_name.startswith(clean_ui_name[:-3])
+    else:
+        return clean_ui_name == clean_config_name
 
 
 def run_pipeline_a(config: WeclawConfig) -> None:
@@ -61,7 +98,7 @@ def run_pipeline_a(config: WeclawConfig) -> None:
             time.sleep(2)
 
             current_chat_name = driver.get_current_chat_name()
-            if current_chat_name and chat.name in current_chat_name:
+            if _is_chat_name_match(current_chat_name, chat.name):
                 print(f"[+] Successfully clicked and verified chat: '{chat.name}'")
                 click_successful = True
                 break
