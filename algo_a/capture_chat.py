@@ -43,6 +43,9 @@ class CaptureSettings:
 
     min_pass_index_for_stop：日志里 pass N 的 N 达到该值后才允许用「新内容少 + 边缘/滚动条静止」
     判停；否则首轮滚动易被误判为已到顶，导致只滚一次就结束。
+
+    dup_stop_streak：near-duplicate 连续次数达到该值才停（单次易误判动画/抖动）。
+    重复帧仍会更新 prev_crop，使下一帧与「刚截到的图」比，避免与多 pass 前的帧比而永远达不到 2 连击。
     """
     max_passes: int = 15
     scroll_clicks: int = 5
@@ -55,6 +58,7 @@ class CaptureSettings:
     header_skip_ratio: float = 0.07
     footer_skip_ratio: float = 0.11
     min_pass_index_for_stop: int = 3
+    dup_stop_streak: int = 2
 
 DEFAULT_SETTINGS = CaptureSettings()
 
@@ -223,10 +227,16 @@ def capture_scroll_screenshots(
 
         if _crops_identical(prev_crop, chat_crop) or _frames_near_duplicate(prev_crop, chat_crop):
             dup_streak += 1
-            print(f"[capture_chat] pass {idx}: near-duplicate (streak={dup_streak}) — skip")
-            if dup_streak >= 2:
-                print(f"[capture_chat] stop: scroll had no effect")
+            need = cfg.dup_stop_streak
+            print(
+                f"[capture_chat] pass {idx}: near-duplicate (streak={dup_streak}/{need}) — "
+                f"skip append; 连续 {need} 次滚动后画面仍几乎不变则判定到顶/到底"
+            )
+            if dup_streak >= need:
+                print(f"[capture_chat] stop: scroll had no effect ({dup_streak} consecutive near-duplicates)")
                 break
+            prev_crop = chat_crop
+            prev_window_img = window_img
             continue
         dup_streak = 0
 

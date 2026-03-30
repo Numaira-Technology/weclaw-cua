@@ -14,7 +14,7 @@ Pipeline steps:
     1. Auto-detect platform, create PlatformDriver
     2. driver.ensure_permissions()
     3. driver.find_wechat_window(config.wechat_app_name)
-    4. list_unread_chats(driver, window) -> filter by groups_to_monitor
+    4. list_unread_chats(driver) -> filter by groups_to_monitor
     5. For each unread chat:
        a. click_into_chat(driver, window, chat)
        b. scroll_chat_to_bottom(driver, window)
@@ -24,6 +24,7 @@ Pipeline steps:
 
 import sys
 
+from algo_a.list_unread_chats import filter_chats_by_groups_to_monitor, list_unread_chats
 from config.weclaw_config import WeclawConfig
 
 
@@ -43,7 +44,6 @@ def run_pipeline_a(config: WeclawConfig) -> list[str]:
     """Run the full message collection pipeline and return written JSON paths."""
     assert config is not None
 
-    from algo_a.list_unread_chats import list_unread_chats
     from algo_a.click_into_chat import click_into_chat
     from algo_a.scroll_chat_to_bottom import scroll_chat_to_bottom
     from algo_a.read_messages_from_uitree import read_messages_from_uitree
@@ -52,10 +52,11 @@ def run_pipeline_a(config: WeclawConfig) -> list[str]:
     driver = _create_driver()
     driver.ensure_permissions()
     window = driver.find_wechat_window(config.wechat_app_name)
-    unread_chats = list_unread_chats(driver, window)
+    unread_chats = list_unread_chats(driver)
 
-    monitor_set = set(config.groups_to_monitor)
-    target_chats = [c for c in unread_chats if c.name in monitor_set]
+    target_chats = filter_chats_by_groups_to_monitor(
+        unread_chats, config.groups_to_monitor
+    )
 
     written_paths: list[str] = []
     for chat in target_chats:

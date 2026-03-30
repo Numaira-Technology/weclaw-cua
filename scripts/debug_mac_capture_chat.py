@@ -139,7 +139,9 @@ def main():
     print(f"    click point: ({cx}, {cy})")
     time.sleep(0.5)
 
-    result = wait_chat_panel_ready(driver, target.name, timeout=5.0)
+    result = wait_chat_panel_ready(
+        driver, target.name, timeout=5.0, anchor_row_rect=target.row_rect,
+    )
     if result.ready:
         print(f"    ✓ 右侧面板已切换到: {result.detected_title}")
     else:

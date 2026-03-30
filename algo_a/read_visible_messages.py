@@ -18,7 +18,9 @@ from PIL import Image
 
 from algo_a.extract_messages import DEFAULT_EXTRACT_MODEL
 from algo_a.llm_image_prep import DEFAULT_MAX_SIDE_PIXELS, downscale_max_side
-from algo_a.llm_openrouter_headers import ensure_openrouter_ascii_env, headers_for_model
+from algo_a.llm_openrouter_headers import ensure_openrouter_ascii_env, openrouter_completion_headers
+from shared.openrouter_api_key import resolve_openrouter_api_key
+from shared.openrouter_litellm_model import litellm_openrouter_model
 from platform_mac.chat_panel_detector import crop_chat_viewport
 
 
@@ -32,10 +34,17 @@ class Message:
     type: str  # text | system | link_card | image | video | voice | call | unsupported | other
 
 
+def _sanitize_chat_name_for_prompt(chat_name: str) -> str:
+    s = chat_name.replace("\u201c", '"').replace("\u201d", '"')
+    s = s.replace("\u2018", "'").replace("\u2019", "'").replace("\uff02", '"')
+    return s
+
+
 def _build_prompt(chat_name: str) -> str:
+    label = _sanitize_chat_name_for_prompt(chat_name)
     return (
         f"You are reading a WeChat group chat screenshot. "
-        f"The chat name is: \"{chat_name}\"\n\n"
+        f"The chat name is: \"{label}\"\n\n"
         "Extract ALL visible messages from this screenshot and return JSON only.\n\n"
         "Rules:\n"
         "1. Follow the JSON schema exactly.\n"
@@ -157,9 +166,11 @@ def _extract_once(
         flush=True,
         file=sys.stderr,
     )
-    h = headers_for_model(model)
+    litellm_model = litellm_openrouter_model(model)
+    key = resolve_openrouter_api_key()
+    h = openrouter_completion_headers(litellm_model, key)
     response = litellm.completion(
-        model=model,
+        model=litellm_model,
         messages=[{
             "role": "user",
             "content": [
@@ -168,13 +179,14 @@ def _extract_once(
             ],
         }],
         timeout=timeout,
-        **({"headers": h} if h else {}),
+        api_key=key,
+        headers=h,
     )
     raw_text: str = response.choices[0].message.content or ""
     messages = _parse_response(raw_text, chat_name)
     meta = {
         "raw_text": raw_text,
-        "model": model,
+        "model": litellm_model,
         "message_count": len(messages),
         "source_image_size": list(orig_sz),
         "llm_image_size": list(final_sz),

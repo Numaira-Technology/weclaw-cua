@@ -6,7 +6,7 @@
   {群名}/      — long_image.png、中间产物（与 process_one_chat 一致）
 
 用法：
-  export OPENROUTER_API_KEY=...
+  默认读取仓库 config/config.json（wechat_app_name、groups_to_monitor、llm_model、openrouter_api_key）。
   python3 scripts/debug_mac_multiple_chats.py
   python3 scripts/debug_mac_multiple_chats.py --max-chats 2
   python3 scripts/debug_mac_multiple_chats.py --passes 8 --max-side 768
@@ -33,10 +33,10 @@ def main() -> None:
     repo_root = os.path.join(root, "..")
     sys.path.insert(0, repo_root)
 
+    from config import load_config
     from platform_mac.driver import MacDriver
     from algo_a.capture_chat import CaptureSettings
-    from algo_a.extract_messages import DEFAULT_EXTRACT_MODEL
-    from algo_a.list_unread_chats import list_unread_chats
+    from algo_a.list_unread_chats import filter_chats_by_groups_to_monitor, list_unread_chats
     from algo_a.llm_image_prep import DEFAULT_MAX_SIDE_PIXELS
     from algo_a.process_multiple_chats import UnreadBatchConfig, process_unread_chats_batch
 
@@ -44,12 +44,23 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="多未读会话批量处理（调试用）")
     parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="config.json 路径（默认 <仓库>/config/config.json）",
+    )
+    parser.add_argument(
         "--max-chats",
         type=int,
         default=None,
         help="最多处理几个未读（默认全部）",
     )
-    parser.add_argument("--model", type=str, default=DEFAULT_EXTRACT_MODEL)
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="vision 模型（默认使用 config.json 的 llm_model）",
+    )
     parser.add_argument("--passes", type=int, default=15, help="每群滚动截图最大帧数")
     parser.add_argument(
         "--direction",
@@ -123,33 +134,88 @@ def main() -> None:
         print("[!] --chunks 须在 1～10", flush=True)
         sys.exit(1)
 
+    config_path = args.config or os.path.join(repo_root, "config", "config.json")
+    cfg = load_config(config_path)
+    model = args.model if args.model is not None else cfg.llm_model
+
     os.makedirs(output_dir, exist_ok=True)
 
     print("=" * 60, flush=True)
     print("  多未读群批量处理", flush=True)
     print("=" * 60, flush=True)
-    print("[提示] 需已配置 OPENROUTER_API_KEY；每群含滚动与 LLM，总耗时可能很长。", flush=True)
+    print(f"[config] {os.path.abspath(config_path)}", flush=True)
+    print(
+        f"  wechat_app_name={cfg.wechat_app_name!r}  "
+        f"groups_to_monitor 共 {len(cfg.groups_to_monitor)} 项: {cfg.groups_to_monitor!r}",
+        flush=True,
+    )
+    print(
+        "[提示] OpenRouter：export OPENROUTER_API_KEY，或在 config 中填写 openrouter_api_key；"
+        "每群含滚动与 LLM，总耗时可能很长。",
+        flush=True,
+    )
 
     driver = MacDriver()
     driver.ensure_permissions()
-    driver.find_wechat_window()
+    driver.find_wechat_window(cfg.wechat_app_name)
     driver.activate_wechat()
     time.sleep(0.4)
 
     print("[debug] 扫描未读会话（list_unread_chats）…", flush=True)
-    unread = list_unread_chats(driver)
+    all_unread = list_unread_chats(driver)
+    unread = filter_chats_by_groups_to_monitor(all_unread, cfg.groups_to_monitor)
+    print(
+        f"[debug] 按 groups_to_monitor 过滤：{len(all_unread)} → {len(unread)} 个会话",
+        flush=True,
+    )
+    if len(all_unread) > len(unread):
+        allowed = {g.strip() for g in cfg.groups_to_monitor if g and str(g).strip()}
+        skipped = [c for c in all_unread if c.name.strip() not in allowed]
+        if skipped:
+            print(
+                "[debug] 未读但未在 groups_to_monitor（须与 OCR 解析名完全一致）:",
+                flush=True,
+            )
+            for c in skipped:
+                print(
+                    f"    跳过: name={c.name!r}  badge={c.badge_type}  unread={c.unread_count}",
+                    flush=True,
+                )
+    if all_unread and not unread:
+        print(
+            "[!] 侧栏扫到未读行，但群名与 config 的 groups_to_monitor 无精确匹配。"
+            " 名称区 OCR（解析名 | 原始行@置信度）：",
+            flush=True,
+        )
+        head = all_unread[:12]
+        for i, c in enumerate(head, start=1):
+            raw = c.name_ocr_raw.strip() or "(名称子区域无 OCR 文本)"
+            print(f"    {i}. 解析={c.name!r}  |  {raw}", flush=True)
+        if head and all(not c.name_ocr_raw.strip() for c in head):
+            print(
+                "[!] 仍无 Vision 文本时：未读行由红点检出，名称 ROI 可能落在空白/头像上；"
+                "或列表行高与代码中 ROW_HEIGHT_DEFAULT=136 不一致。请跑 "
+                "scripts/debug_mac_sidebar_unread.py 对照青框 name 与 name_preview。",
+                flush=True,
+            )
     if args.max_chats is not None:
         unread = unread[: max(0, args.max_chats)]
 
     print(f"[debug] 将处理 {len(unread)} 个会话:", flush=True)
     for i, c in enumerate(unread):
+        extra = f"  ocr_raw={c.name_ocr_raw!r}" if c.name_ocr_raw.strip() else ""
         print(
-            f"    {i + 1}. {c.name!r}  badge={c.badge_type}  unread={c.unread_count}",
+            f"    {i + 1}. {c.name!r}  badge={c.badge_type}  unread={c.unread_count}{extra}",
             flush=True,
         )
 
     if not unread:
-        print("[!] 无未读会话，退出。", flush=True)
+        if not all_unread:
+            print(
+                "[!] 无未读会话（红点未检出或窗口非聊天列表）。"
+                "可跑 scripts/debug_mac_sidebar_unread.py 看侧栏裁切与逐行检测。",
+                flush=True,
+            )
         sys.exit(0)
 
     if not any(c.name and str(c.name).strip() for c in unread):
@@ -169,7 +235,7 @@ def main() -> None:
             max_passes=args.passes,
             scroll_direction=args.direction,
         ),
-        model=args.model,
+        model=model,
         save_frames=args.save_frames,
         vision_max_side_pixels=args.max_side,
         extract_backend=eb,

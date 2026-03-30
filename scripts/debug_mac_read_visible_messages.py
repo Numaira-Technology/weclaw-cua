@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Mac Step 4：根据 Step 3 产出的长图提取消息（不另截图、不裁 viewport）。
 
-默认读取：debug_outputs/capture/long_image.png（与 debug_mac_capture_chat.py 输出一致）。
+默认长图（未传 --long-image 时）：
+  - 若提供 --chat：优先 debug_outputs/batch_multichat/{会话安全名}/long_image.png（与 debug_mac_multiple_chats 一致）
+  - 否则：debug_outputs/capture/long_image.png（与 debug_mac_capture_chat.py 一致）
 
 输出到 debug_outputs/read_visible/
   long_image.png   — 从输入复制一份，便于对照
@@ -40,7 +42,30 @@ from algo_a.read_long_image_messages import read_messages_from_long_image_file
 
 REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
 OUTPUT_DIR = os.path.join(REPO_ROOT, "debug_outputs", "read_visible")
-DEFAULT_LONG_IMAGE = os.path.join(REPO_ROOT, "debug_outputs", "capture", "long_image.png")
+CAPTURE_LONG_IMAGE = os.path.join(REPO_ROOT, "debug_outputs", "capture", "long_image.png")
+BATCH_MULTICHAT_ROOT = os.path.join(REPO_ROOT, "debug_outputs", "batch_multichat")
+
+
+def _safe_chat_dir(chat: str) -> str:
+    return chat.replace("/", "_").replace("\\", "_").replace(":", "_")
+
+
+def _resolve_long_image_path(long_image_arg: str | None, chat: str | None) -> tuple[str, str]:
+    """返回 (绝对路径, 来源说明)。long_image_arg 非空时始终使用该路径。"""
+    if long_image_arg:
+        return os.path.abspath(long_image_arg), f"--long-image ({long_image_arg})"
+    if chat and chat.strip():
+        safe = _safe_chat_dir(chat.strip())
+        batch_p = os.path.join(BATCH_MULTICHAT_ROOT, safe, "long_image.png")
+        if os.path.isfile(batch_p):
+            return os.path.abspath(batch_p), f"batch_multichat/{safe}/long_image.png"
+    cap = os.path.abspath(CAPTURE_LONG_IMAGE)
+    if os.path.isfile(cap):
+        return cap, "debug_outputs/capture/long_image.png"
+    if chat and chat.strip():
+        batch_p = os.path.join(BATCH_MULTICHAT_ROOT, _safe_chat_dir(chat.strip()), "long_image.png")
+        return os.path.abspath(batch_p), f"batch_multichat/{_safe_chat_dir(chat.strip())}/long_image.png (不存在)"
+    return cap, "debug_outputs/capture/long_image.png (不存在)"
 
 
 def _ensure_dir(path: str) -> None:
@@ -76,8 +101,8 @@ def main() -> None:
     parser.add_argument(
         "--long-image",
         type=str,
-        default=DEFAULT_LONG_IMAGE,
-        help="Step 3 输出的长图路径",
+        default=None,
+        help="长图路径；省略时：有 --chat 则先试 batch_multichat/{chat}/long_image.png，再试 capture/long_image.png",
     )
     parser.add_argument("--chat", type=str, default=None, help="会话名（注入 LLM）")
     parser.add_argument("--model", type=str, default=DEFAULT_EXTRACT_MODEL)
@@ -126,10 +151,13 @@ def main() -> None:
         print("[!] --chunks 须在 1～10")
         sys.exit(1)
 
-    long_path = os.path.abspath(args.long_image)
+    long_path, long_src = _resolve_long_image_path(args.long_image, args.chat)
     if not os.path.isfile(long_path):
         print(f"[!] 找不到长图: {long_path}")
-        print("    请先运行: python3 scripts/debug_mac_capture_chat.py")
+        print(f"    解析来源: {long_src}")
+        print("    可指定: --long-image /path/to/long_image.png")
+        print("    或先跑: python3 scripts/debug_mac_multiple_chats.py")
+        print("         或: python3 scripts/debug_mac_capture_chat.py")
         sys.exit(1)
 
     _ensure_dir(OUTPUT_DIR)
@@ -163,7 +191,9 @@ def main() -> None:
             print("[2] 点击进入...")
             click_chat_row(driver, target)
             time.sleep(0.5)
-            result = wait_chat_panel_ready(driver, chat_name, timeout=5.0)
+            result = wait_chat_panel_ready(
+                driver, chat_name, timeout=5.0, anchor_row_rect=target.row_rect,
+            )
             if result.ready:
                 print(f"    OK — 标题: {result.detected_title}")
             else:
@@ -174,6 +204,7 @@ def main() -> None:
         sys.exit(1)
 
     print(f"\n[读取] 长图: {long_path}")
+    print(f"        来源: {long_src}")
     print(
         f"[LLM]  model={args.model}  max_side={args.max_side}px  "
         f"chunk_max_height={args.chunk_max_height}  chunks_fixed={args.chunks}",

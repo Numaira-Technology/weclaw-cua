@@ -13,12 +13,18 @@ Output spec:
 config.json schema:
     {
         "wechat_app_name": "WeChat",
-        "groups_to_monitor": ["Group A", "Group B"],
+        "groups_to_monitor": ["Group A", "Group B", "..."],
         "report_custom_prompt": "Summarize key decisions and action items.",
         "openrouter_api_key": "sk-or-...",
         "llm_model": "google/gemini-3-flash-preview",
         "output_dir": "output"
     }
+
+    groups_to_monitor 可为任意长度列表；程序未写死条数。批量处理条数 =
+    「当前有未读红点且侧栏 OCR 名与列表某项完全一致」的会话数，与列表长度无必然相等。
+
+    resolve_openrouter_api_key() 优先使用环境变量 OPENROUTER_API_KEY（或 LITELLM_API_KEY），
+    未设置时再读取上述 JSON 中的 openrouter_api_key（路径为仓库 config/config.json）。
 """
 
 import json
@@ -44,9 +50,12 @@ def load_config(config_path: str) -> WeclawConfig:
         raw = json.load(f)
 
     assert isinstance(raw, dict)
+    gtm = raw["groups_to_monitor"]
+    assert isinstance(gtm, list), "groups_to_monitor 必须是 JSON 数组"
+    assert all(isinstance(x, str) for x in gtm), "groups_to_monitor 每项须为字符串"
     return WeclawConfig(
         wechat_app_name=raw["wechat_app_name"],
-        groups_to_monitor=raw["groups_to_monitor"],
+        groups_to_monitor=list(gtm),
         report_custom_prompt=raw["report_custom_prompt"],
         openrouter_api_key=raw["openrouter_api_key"],
         llm_model=raw["llm_model"],

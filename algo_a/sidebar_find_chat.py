@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from typing import Optional
 
-from platform_mac.chat_panel_detector import titles_match
+from platform_mac.chat_panel_detector import strict_chat_name_match, titles_match
 from platform_mac.sidebar_detector import ChatInfo
 
 from algo_a.click_into_chat import rescan_unread
@@ -21,7 +21,10 @@ _SETTLE_SEC = 0.3
 
 
 def find_unread_chat_by_name(driver, target_name: str) -> Optional[ChatInfo]:
-    """在未读会话中按名称查找；找不到则向下滚动 sidebar 继续找。"""
+    """在未读会话中按名称查找；找不到则向下滚动 sidebar 继续找。
+
+    先按 strict_chat_name_match 精确对齐 config 群名，再 titles_match 兜底 OCR 轻微偏差。
+    """
     assert target_name
     driver.activate_wechat()
     time.sleep(0.2)
@@ -30,6 +33,9 @@ def find_unread_chat_by_name(driver, target_name: str) -> Optional[ChatInfo]:
 
     for _ in range(_MAX_SCROLL_STEPS):
         fresh = rescan_unread(driver)
+        for c in fresh:
+            if c.name and strict_chat_name_match(c.name, target_name):
+                return c
         for c in fresh:
             if c.name and titles_match(c.name, target_name):
                 return c

@@ -50,7 +50,7 @@ python3 scripts/debug_mac_capture_chat.py
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-v1-你的key"
-python3 scripts/debug_mac_read_visible_messages.py --chat "会话名"
+python3 scripts/debug_mac_read_visible_messages.py --chat "test-1"
 ```
 
 常用可选参数：`--max-side` 缩小长图；`--chunk-max-height` 默认 2400（按高度自动分段，最多 `--chunk-max-count 10`）；`--chunk-max-height 0` 时用 `--chunks` 固定条数（1～10）。示例：

@@ -2,20 +2,20 @@
 
 流程：
   1. activate_wechat
-  2. capture_wechat_window
-  3. scan_sidebar_once
+  2. capture_wechat_window_with_bounds（整窗截图，路径在 platform_mac/screenshot）
+  3. detect_sidebar_region → scan_sidebar_once（require_name=False，与 rescan_unread 一致）
   4. scroll_sidebar → capture → scan → 去重
   5. 停止条件满足后返回 ChatInfo[]
 
 去重规则：
-  - 优先按 name 去重（name 非空时）
-  - name 为空时按 badge 特征做弱去重
+  - 有名称按名称去重
+  - 无名称按 row_rect 坐标 + badge，避免同屏多条未读被合并成一条
 """
 
 from __future__ import annotations
 
 import time
-from typing import List
+from typing import List, Optional
 
 from platform_mac.sidebar_detector import (
     ChatInfo,
@@ -25,7 +25,7 @@ from platform_mac.sidebar_detector import (
     sidebar_images_similar,
 )
 
-__all__ = ["ChatInfo", "list_unread_chats"]
+__all__ = ["ChatInfo", "list_unread_chats", "filter_chats_by_groups_to_monitor"]
 
 MAX_SCROLL_ITERATIONS = 15
 SCROLL_DELTA = -5
@@ -33,9 +33,29 @@ SETTLE_DELAY = 0.3
 
 
 def _dedup_key(c: ChatInfo) -> str:
-    if c.name:
-        return c.name
+    """有名称按名称去重；无名称时用行位置 + badge，减少同屏多条未读被合并成一条。"""
+    if c.name and c.name.strip():
+        return c.name.strip()
+    pr = c.row_rect
+    if pr is not None:
+        return f"__anon_{c.badge_type}_{c.unread_count}_{pr.x}_{pr.y}"
     return f"__anon_{c.badge_type}_{c.unread_count}"
+
+
+def filter_chats_by_groups_to_monitor(
+    chats: List[ChatInfo],
+    groups_to_monitor: Optional[List[str]],
+) -> List[ChatInfo]:
+    """只保留会话名在 groups_to_monitor 中的条目（与 config.json 的 groups_to_monitor 一致）。
+
+    groups_to_monitor 为 None 或空列表时，不保留任何会话（与 run_pipeline_a 的过滤语义一致）。
+    """
+    if not groups_to_monitor:
+        return []
+    allowed = {g.strip() for g in groups_to_monitor if g and str(g).strip()}
+    if not allowed:
+        return []
+    return [c for c in chats if c.name.strip() in allowed]
 
 
 def list_unread_chats(driver) -> List[ChatInfo]:
@@ -63,7 +83,7 @@ def list_unread_chats(driver) -> List[ChatInfo]:
         visible = scan_sidebar_once(
             img,
             only_unread=True,
-            require_name=True,
+            require_name=False,
             window_bounds=win_rect,
         )
 

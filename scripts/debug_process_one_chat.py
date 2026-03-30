@@ -40,11 +40,11 @@ def main() -> None:
     repo_root = os.path.join(root, "..")
     sys.path.insert(0, repo_root)
 
+    from config import load_config
     from platform_mac.driver import MacDriver
     from platform_mac.sidebar_detector import ChatInfo, Rect, scan_sidebar_once
     from platform_mac.chat_panel_detector import titles_match
     from algo_a.capture_chat import CaptureSettings
-    from algo_a.extract_messages import DEFAULT_EXTRACT_MODEL
     from algo_a.llm_image_prep import DEFAULT_MAX_SIDE_PIXELS
     from algo_a.process_one_chat import ProcessResult, process_one_chat
 
@@ -128,6 +128,12 @@ def main() -> None:
             print(f"\n  消息预览失败: {e}")
 
     parser = argparse.ArgumentParser(description="单群闭环处理调试")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="config.json（默认 <仓库>/config/config.json，用于 wechat_app_name、llm_model）",
+    )
     parser.add_argument("--chat", type=str, default=None, help="指定会话名称")
     parser.add_argument(
         "--skip-click",
@@ -138,8 +144,8 @@ def main() -> None:
     parser.add_argument(
         "--model",
         type=str,
-        default=DEFAULT_EXTRACT_MODEL,
-        help="LLM 模型（默认与 whole_pic_message_extractor 一致）",
+        default=None,
+        help="vision 模型（默认 config.json 的 llm_model）",
     )
     parser.add_argument(
         "--direction",
@@ -195,11 +201,17 @@ def main() -> None:
         print("[!] --chunks 须在 1～10", flush=True)
         sys.exit(1)
 
+    config_path = args.config or os.path.join(repo_root, "config", "config.json")
+    cfg = load_config(config_path)
+    model = args.model if args.model is not None else cfg.llm_model
+
     os.makedirs(output_dir, exist_ok=True)
 
     print("=" * 60, flush=True)
     print("  单群闭环处理调试", flush=True)
     print("=" * 60, flush=True)
+    print(f"[config] {os.path.abspath(config_path)}", flush=True)
+    print(f"  wechat_app_name={cfg.wechat_app_name!r}  llm_model={model!r}", flush=True)
     print(
         "[提示] 滚动截图约 1–3 分钟；LLM 分析长图可能数分钟。",
         flush=True,
@@ -208,7 +220,7 @@ def main() -> None:
 
     driver = MacDriver()
     driver.ensure_permissions()
-    driver.find_wechat_window()
+    driver.find_wechat_window(cfg.wechat_app_name)
     driver.activate_wechat()
     time.sleep(0.5)
     print("[debug] 微信已激活，正在选会话…", flush=True)
@@ -242,7 +254,7 @@ def main() -> None:
             chat_info=target,
             output_dir=output_dir,
             capture_settings=settings,
-            model=args.model,
+            model=model,
             skip_click=args.skip_click,
             save_frames=args.save_frames,
             vision_max_side_pixels=args.max_side,

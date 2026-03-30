@@ -13,14 +13,49 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, List, Optional
+
+from PIL import Image
 
 from platform_mac.sidebar_detector import ChatInfo, Rect, scan_sidebar_once
 from platform_mac.chat_panel_detector import (
     extract_chat_header_title,
+    strict_chat_name_match,
     titles_match,
 )
+
+
+def _sidebar_confirms_target_chat(
+    window_img: Image.Image,
+    window_rect: Rect,
+    target_name: str,
+    anchor_row_rect: Optional[Rect],
+) -> bool:
+    chats = scan_sidebar_once(
+        window_img,
+        only_unread=False,
+        window_bounds=window_rect,
+    )
+    matches: List[ChatInfo] = []
+    for c in chats:
+        if not c.name:
+            continue
+        if strict_chat_name_match(c.name, target_name) or titles_match(c.name, target_name):
+            matches.append(c)
+    if not matches:
+        return False
+    if anchor_row_rect is None:
+        return any(strict_chat_name_match(c.name, target_name) for c in matches)
+    ay = anchor_row_rect.y + anchor_row_rect.height // 2
+    slack = max(120, int(anchor_row_rect.height * 1.4))
+    for c in matches:
+        if c.row_rect is None:
+            continue
+        ry = c.row_rect.y + c.row_rect.height // 2
+        if abs(ry - ay) <= slack:
+            return True
+    return len(matches) == 1
 
 
 @dataclass
@@ -60,12 +95,17 @@ def click_chat_row(driver, chat_info: ChatInfo) -> tuple[int, int]:
     return click_x, click_y
 
 
-def wait_chat_panel_ready(driver, target_name: str,
-                          timeout: float = 5.0,
-                          interval: float = 0.3) -> ClickResult:
+def wait_chat_panel_ready(
+    driver,
+    target_name: str,
+    timeout: float = 5.0,
+    interval: float = 0.3,
+    anchor_row_rect: Optional[Rect] = None,
+) -> ClickResult:
     """循环截图检测右侧 header title，确认已切换到目标会话。
 
-    需要连续两次检测到匹配的标题才算 ready（防止过渡动画误判）。
+    需要连续两次稳定信号才算 ready。除标题 OCR 外，若提供 anchor_row_rect（点击前的侧栏行），
+    则在标题未识别时用语义匹配 + 行位置核对侧栏，避免 header 裁切/Vision 失败导致误判超时。
     """
     start = time.time()
     attempts = 0
@@ -74,23 +114,30 @@ def wait_chat_panel_ready(driver, target_name: str,
 
     while time.time() - start < timeout:
         attempts += 1
-        img = driver.capture_wechat_window()
-        title = extract_chat_header_title(img)
+        img, wb = driver.capture_wechat_window_with_bounds()
+        win_rect = Rect(wb.x, wb.y, wb.width, wb.height)
+        title = extract_chat_header_title(img, match_hint=target_name)
+        header_ok = bool(title and titles_match(title, target_name))
+        sidebar_ok = False
+        if anchor_row_rect is not None and not header_ok:
+            sidebar_ok = _sidebar_confirms_target_chat(
+                img, win_rect, target_name, anchor_row_rect,
+            )
 
-        if title and titles_match(title, target_name):
-            if title == prev_title:
+        if header_ok or sidebar_ok:
+            sig = title if header_ok else target_name
+            if sig == prev_title:
                 stable_count += 1
             else:
                 stable_count = 1
-            prev_title = title
-
+            prev_title = sig
             if stable_count >= 2:
                 return ClickResult(
                     ready=True,
                     target_name=target_name,
-                    detected_title=title,
+                    detected_title=title if header_ok else target_name,
                     attempts=attempts,
-                    reason="title_matched",
+                    reason="title_matched" if header_ok else "sidebar_matched",
                 )
         else:
             prev_title = title or ""
@@ -146,7 +193,12 @@ def click_into_chat(driver, chat_info: ChatInfo,
         cx, cy = click_chat_row(driver, chat_info)
         time.sleep(0.3)
 
-        result = wait_chat_panel_ready(driver, chat_info.name, timeout=timeout)
+        result = wait_chat_panel_ready(
+            driver,
+            chat_info.name,
+            timeout=timeout,
+            anchor_row_rect=chat_info.row_rect,
+        )
         result.click_point = (cx, cy)
         result.retries_used = retry
 
@@ -176,22 +228,15 @@ def _rescan_all(driver) -> List[ChatInfo]:
 
 
 def _find_chat_by_name(chats: List[ChatInfo], name: str) -> Optional[ChatInfo]:
-    """在 ChatInfo 列表中按名称模糊查找。"""
+    """在 ChatInfo 列表中按名称查找：先精确再模糊（与 find_unread_chat_by_name 一致）。"""
     if not name:
         return None
     for c in chats:
-        if c.name == name:
+        if c.name and strict_chat_name_match(c.name, name):
             return c
     for c in chats:
-        if c.name and (c.name in name or name in c.name):
+        if c.name and titles_match(c.name, name):
             return c
-    # 字符级重叠兜底（容忍 OCR 差异）
-    for c in chats:
-        if c.name and len(c.name) >= 2 and len(name) >= 2:
-            short, long_ = (c.name, name) if len(c.name) <= len(name) else (name, c.name)
-            common = sum(1 for ch in short if ch in long_)
-            if common >= max(2, len(short) * 0.6):
-                return c
     return None
 
 

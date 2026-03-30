@@ -1,21 +1,32 @@
 #!/usr/bin/env python3
 """Mac sidebar 未读扫描 — 可视化调试脚本。
 
+默认只做截图 + 侧栏检测 + 列表，不点击会话。与批量 pipeline 相同的点击/等标题逻辑见：
+  --click-first  （调用 algo_a.click_into_chat.click_into_chat）
+
 输出到 debug_outputs/ ：
   window_full.png       — 原始窗口截图
   sidebar_crop.png      — sidebar 裁切
   sidebar_annotated.png — 标注了 row/badge_region/name_region/badge_box 的可视化图
+  header_after_click.png — 仅 --click-first：点击后主标题带裁切
   终端输出              — 每行 ChatInfo 详情
+
+用法：
+  python3 scripts/debug_mac_sidebar_unread.py
+  python3 scripts/debug_mac_sidebar_unread.py --click-first
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import time
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from config import load_config
 from PIL import Image, ImageDraw, ImageFont
 
 from platform_mac.driver import MacDriver
@@ -29,7 +40,13 @@ from platform_mac.sidebar_detector import (
     extract_chat_name,
     scan_sidebar_once,
 )
-from algo_a.list_unread_chats import list_unread_chats
+from algo_a.click_into_chat import click_into_chat
+from algo_a.list_unread_chats import filter_chats_by_groups_to_monitor, list_unread_chats
+from platform_mac.chat_panel_detector import (
+    extract_chat_header_title,
+    get_header_image,
+    list_header_ocr_lines,
+)
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "..", "debug_outputs")
 
@@ -150,10 +167,28 @@ def annotate_sidebar(sidebar_img: Image.Image) -> tuple[Image.Image, list[dict]]
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Sidebar 未读扫描调试（默认不点击）")
+    parser.add_argument(
+        "--click-first",
+        action="store_true",
+        help="对 groups_to_monitor 过滤后的第一个未读会话执行 click_into_chat（与批量脚本一致）",
+    )
+    parser.add_argument(
+        "--click-timeout",
+        type=float,
+        default=12.0,
+        help="--click-first 时 wait_chat_panel_ready 超时秒数（默认 12）",
+    )
+    args = parser.parse_args()
+
     _ensure_dir(OUTPUT_DIR)
+    repo_root = Path(__file__).resolve().parent.parent
+    cfg = load_config(str(repo_root / "config" / "config.json"))
+
     print("=" * 60)
     print("  WeChat Mac Sidebar Unread Scanner — Debug")
     print("=" * 60)
+    print(f"  config: wechat_app_name={cfg.wechat_app_name!r}  groups_to_monitor={cfg.groups_to_monitor!r}")
 
     driver = MacDriver()
 
@@ -162,6 +197,7 @@ def main():
     print("    ✓ Accessibility 已授权")
 
     print("[2] 激活微信...")
+    driver.find_wechat_window(cfg.wechat_app_name)
     driver.activate_wechat()
     print(f"    ✓ WeChat PID={driver._window.pid}")
 
@@ -242,6 +278,42 @@ def main():
               f"conf={c.confidence:.2f}  name={c.name!r}")
 
     print(f"\n  共 {len(all_chats)} 个未读会话（去重后）")
+
+    monitored = filter_chats_by_groups_to_monitor(all_chats, cfg.groups_to_monitor)
+    print("\n" + "-" * 60)
+    print(f"  按 config groups_to_monitor 过滤：{len(all_chats)} → {len(monitored)} 个")
+    print("-" * 60)
+    for i, c in enumerate(monitored):
+        print(f"  [{i+1}]  {c.badge_type:>5s}  count={str(c.unread_count):>4s}  "
+              f"conf={c.confidence:.2f}  name={c.name!r}")
+
+    if args.click_first:
+        print("\n" + "-" * 60)
+        print("  --click-first：与 process_unread_chats_batch 相同点击 + 标题就绪检测")
+        print("-" * 60)
+        if not monitored:
+            print("  (groups_to_monitor 过滤后无未读，跳过点击)")
+        else:
+            target = monitored[0]
+            print(f"  目标: name={target.name!r}  badge={target.badge_type}  unread={target.unread_count}")
+            res = click_into_chat(
+                driver,
+                target,
+                timeout=args.click_timeout,
+                max_retries=3,
+            )
+            print(f"  ready={res.ready}  detected_title={res.detected_title!r}  reason={res.reason!r}")
+            if res.error:
+                print(f"  error: {res.error}")
+            win = driver.capture_wechat_window()
+            hp = os.path.join(OUTPUT_DIR, "header_after_click.png")
+            get_header_image(win).save(hp)
+            print(f"  主标题带截图 → {hp}")
+            lines = list_header_ocr_lines(win)
+            print(f"  多 band OCR 行（去重）: {lines!r}")
+            hint = target.name.strip() if target.name else ""
+            picked = extract_chat_header_title(win, match_hint=hint or None)
+            print(f"  extract_chat_header_title(match_hint={hint!r}) → {picked!r}")
 
     # ── 全窗口标注 ──
     print("\n[6] 生成全窗口标注图...")

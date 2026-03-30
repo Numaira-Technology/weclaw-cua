@@ -2,7 +2,7 @@
 
 策略分两层：
   Layer 1 — 颜色/形状规则检测红色 badge 和 muted 小红点
-  Layer 2 — 仅在需要时对 badge 数字和 chat name 做局部 OCR
+  Layer 2 — 仅在需要时对 badge 数字和 chat name 做局部 OCR（macOS Vision，无 OpenRouter）
 
 **核心原则**：所有检测均在 row-local 坐标系中完成。
 每个 row 独立 crop → 独立检测 → badge/name 不会跨 row 污染。
@@ -12,13 +12,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 import numpy as np
 from PIL import Image
 
-from platform_mac.ocr import ocr_image
+from platform_mac.ocr import OCRResult, ocr_image, prepare_image_for_vision_ocr
 
 
 # ── 数据结构 ──────────────────────────────────────────────
@@ -67,6 +67,7 @@ class ChatInfo:
     confidence: float = 0.0
     row_rect: Optional[Rect] = None     # 行在窗口截图中的绝对像素坐标
     window_rect: Optional[Rect] = None  # 微信窗口在屏幕上的逻辑坐标
+    name_ocr_raw: str = ""               # 名称子区域 OCR 原文（调试用，含置信度）
 
 
 # ── 布局常量（Retina 2x，可调） ──────────────────────────
@@ -83,8 +84,8 @@ SIDEBAR_SEARCH_MAX = 0.45
 
 # ── Row 子区域比例（相对 row 宽高）──────────────────────
 # Badge 出现在 avatar 右上角（行左侧），只扫上半部分防止跨行
-ROW_BADGE_X0 = 0.15
-ROW_BADGE_X1 = 0.50
+ROW_BADGE_X0 = 0.08
+ROW_BADGE_X1 = 0.52
 ROW_BADGE_Y0 = 0.0
 ROW_BADGE_Y1 = 0.55
 
@@ -100,17 +101,22 @@ ROW_PREVIEW_X1 = 0.85
 ROW_PREVIEW_Y0 = 0.48
 ROW_PREVIEW_Y1 = 0.88
 
+ROW_NAME_WIDE_X0 = 0.11
+ROW_NAME_WIDE_X1 = 0.93
+ROW_NAME_WIDE_Y0 = 0.0
+ROW_NAME_WIDE_Y1 = 0.66
+
 # ── Badge 检测阈值 ───────────────────────────────────────
 
-RED_R_MIN = 195
-RED_G_MAX = 115
-RED_B_MAX = 115
-RED_LOOSE_R_MIN = 185
-RED_LOOSE_DIFF = 70
+RED_R_MIN = 185
+RED_G_MAX = 130
+RED_B_MAX = 130
+RED_LOOSE_R_MIN = 175
+RED_LOOSE_DIFF = 55
 
-BADGE_PIXEL_MIN = 40
-DOT_MAX_DIMENSION = 26
-BADGE_FILL_RATIO = 0.12
+BADGE_PIXEL_MIN = 28
+DOT_MAX_DIMENSION = 28
+BADGE_FILL_RATIO = 0.08
 BADGE_OCR_MIN_SIZE = 48
 
 # badge 中心 y 占行高比例的最大值，超过此值视为跨行污染
@@ -348,7 +354,7 @@ def _no_badge() -> dict:
 
 
 def _ocr_badge_number(row_img: Image.Image, badge_rect: Rect) -> int | None:
-    """对 badge 小区域做 OCR 提取数字。"""
+    """对 badge 小区域做 OCR 提取数字（macOS Vision）。"""
     from PIL import ImageOps
 
     pad = 8
@@ -390,22 +396,72 @@ def _clean_chat_name(raw: str) -> str:
     return s.strip()
 
 
-def extract_chat_name(row_img: Image.Image) -> str:
-    """只在 row_img 的 name 子区域内做 OCR 提取 chat name。
-
-    遍历 OCR 结果，跳过单数字/badge-like 文本（避免把 badge 数字当作名字）。
-    """
+def _name_ocr_crops_for_row(row_img: Image.Image) -> List[Tuple[str, Image.Image]]:
     w, h = row_img.size
     regions = compute_row_subregions(w, h)
     nr = regions.name
+    tight = row_img.crop((nr.x, nr.y, nr.x2, nr.y2))
+    wx0 = int(w * ROW_NAME_WIDE_X0)
+    wy0 = int(h * ROW_NAME_WIDE_Y0)
+    wx1 = max(wx0 + 1, int(w * ROW_NAME_WIDE_X1))
+    wy1 = max(wy0 + 1, int(h * ROW_NAME_WIDE_Y1))
+    wide = row_img.crop((wx0, wy0, wx1, wy1))
+    return [("name", tight), ("name_preview", wide)]
 
-    region = row_img.crop((nr.x, nr.y, nr.x2, nr.y2))
-    results = ocr_image(region, min_confidence=0.2)
-    for r in results:
-        cleaned = _clean_chat_name(r.text)
-        if _is_valid_chat_name(cleaned):
-            return cleaned
+
+def _name_from_ocr_results(results: List[OCRResult]) -> str:
+    ordered = sorted(results, key=lambda r: (r.pixel_y, r.x))
+    for min_c in (0.2, 0.12, 0.05, 0.0):
+        for r in ordered:
+            if r.confidence < min_c:
+                continue
+            cleaned = _clean_chat_name(r.text)
+            if _is_valid_chat_name(cleaned):
+                return cleaned
     return ""
+
+
+def _preview_from_ocr_results(results: List[OCRResult]) -> str:
+    ordered = sorted(results, key=lambda r: (r.pixel_y, r.x))
+    parts: List[str] = []
+    for r in ordered:
+        t = r.text.replace("\n", " ").strip()
+        if t:
+            parts.append(f"{t!r}@{r.confidence:.2f}")
+    return " | ".join(parts)
+
+
+def extract_chat_name_with_preview(
+    row_img: Image.Image,
+    *,
+    include_preview: bool = True,
+    max_preview_chars: int = 400,
+) -> tuple[str, str]:
+    chunks: List[str] = []
+    chosen = ""
+    for tag, crop in _name_ocr_crops_for_row(row_img):
+        prepared = prepare_image_for_vision_ocr(crop)
+        results = ocr_image(prepared, min_confidence=0.0)
+        if include_preview and results:
+            chunks.append(f"{tag}: " + _preview_from_ocr_results(results))
+        if not chosen:
+            chosen = _name_from_ocr_results(results)
+    preview_out = " ; ".join(chunks)
+    if len(preview_out) > max_preview_chars:
+        preview_out = preview_out[: max_preview_chars - 3] + "..."
+    return chosen, preview_out
+
+
+def extract_chat_name(row_img: Image.Image) -> str:
+    n, _ = extract_chat_name_with_preview(row_img, include_preview=False)
+    return n
+
+
+def name_region_ocr_preview(row_img: Image.Image, *, max_chars: int = 400) -> str:
+    _, p = extract_chat_name_with_preview(
+        row_img, include_preview=True, max_preview_chars=max_chars
+    )
+    return p
 
 
 # ── 7. 单次全扫描 ────────────────────────────────────────
@@ -443,7 +499,7 @@ def scan_sidebar_once(window_img: Image.Image,
             continue
 
         # ── row-local name OCR ──
-        name = extract_chat_name(row_img)
+        name, ocr_raw = extract_chat_name_with_preview(row_img)
 
         if require_name and not _is_valid_chat_name(name):
             continue
@@ -464,6 +520,7 @@ def scan_sidebar_once(window_img: Image.Image,
             confidence=conf,
             row_rect=abs_row,
             window_rect=window_bounds,
+            name_ocr_raw=ocr_raw,
         ))
     return results
 

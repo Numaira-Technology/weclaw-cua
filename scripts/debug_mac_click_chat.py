@@ -115,7 +115,9 @@ def _click_one_chat(driver, target: ChatInfo, chat_dir: str,
         print(f"      click ({cx},{cy})")
         time.sleep(0.3)
 
-        result = wait_chat_panel_ready(driver, target.name, timeout=timeout)
+        result = wait_chat_panel_ready(
+            driver, target.name, timeout=timeout, anchor_row_rect=target.row_rect,
+        )
         result.click_point = (cx, cy)
         result.retries_used = retry
 

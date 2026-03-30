@@ -14,7 +14,9 @@ from algo_a.llm_image_prep import (
     pil_rgb_open,
     pil_to_b64_png,
 )
-from algo_a.llm_openrouter_headers import ensure_openrouter_ascii_env, headers_for_model
+from algo_a.llm_openrouter_headers import ensure_openrouter_ascii_env, openrouter_completion_headers
+from shared.openrouter_api_key import resolve_openrouter_api_key
+from shared.openrouter_litellm_model import litellm_openrouter_model
 
 
 EXTRACT_PROMPT = (
@@ -131,26 +133,28 @@ def _extract_once(
             ],
         }
     ]
-    h = headers_for_model(model)
+    litellm_model = litellm_openrouter_model(model)
+    key = resolve_openrouter_api_key()
+    h = openrouter_completion_headers(litellm_model, key)
     response = litellm.completion(
-        model=model,
+        model=litellm_model,
         messages=messages,
         timeout=timeout,
-        **({"headers": h} if h else {}),
+        api_key=key,
+        headers=h,
     )
     raw: str = response.choices[0].message.content or ""
     raw = _sanitize_surrogates(raw)
     parsed = _parse_payload(raw)
     parsed["raw_text"] = raw
-    parsed["model"] = model
+    parsed["model"] = litellm_model
     parsed["source_image_size"] = list(orig_sz)
     parsed["llm_image_size"] = list(final_sz)
     parsed["max_side_pixels"] = max_side_pixels
     return parsed
 
 
-# 与 wechat-admin-bot-main/modules/whole_pic_message_extractor.py 默认一致
-DEFAULT_EXTRACT_MODEL = "openrouter/google/gemini-3-flash-preview"
+DEFAULT_EXTRACT_MODEL = "google/gemini-3-flash-preview"
 
 
 def extract_messages(

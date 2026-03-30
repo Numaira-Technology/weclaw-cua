@@ -20,6 +20,18 @@ class OCRResult:
     pixel_y: int = 0  # 在原图中的像素 y（用于排序）
 
 
+def prepare_image_for_vision_ocr(img: Image.Image, min_side: int = 56) -> Image.Image:
+    """转为 RGB，并在最短边过小时整体放大，减少 Vision 对小图返回空结果的情况。"""
+    out = img.convert("RGB")
+    w, h = out.size
+    m = min(w, h)
+    assert m > 0
+    if m < min_side:
+        scale = max(2, (min_side + m - 1) // m)
+        out = out.resize((w * scale, h * scale), Image.Resampling.LANCZOS)
+    return out
+
+
 def ocr_image(
     img: Image.Image,
     languages: list[str] | None = None,
