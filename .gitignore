@@ -6,3 +6,4 @@ output/
 .DS_Store
 .venv/
 *.egg-info/
+report.md

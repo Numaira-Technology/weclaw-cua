@@ -1,0 +1,51 @@
+[
+  {
+    "chat_name": "Cathy",
+    "sender": "Cathy",
+    "time": "22:47",
+    "content": "你要是已经睡了就明早看，物业刚在群里通知，明天 10 点到 12 点停水。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Cathy",
+    "sender": "Cathy",
+    "time": "22:49",
+    "content": "最好早点接点水，厨房那个桶还空着。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Cathy",
+    "sender": "Me",
+    "time": "23:03",
+    "content": "刚看到... 那洗衣机里那批要今晚开掉还是明早？",
+    "type": "text"
+  },
+  {
+    "chat_name": "Cathy",
+    "sender": "Cathy",
+    "time": "23:05",
+    "content": "明早吧，今晚太吵了。你起床先开就行。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Cathy",
+    "sender": "Cathy",
+    "time": "23:06",
+    "content": "还有牛奶也快没了，回来的时候顺手买一盒 1L 的。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Cathy",
+    "sender": "Cathy",
+    "time": null,
+    "content": "物业通知截图",
+    "type": "image"
+  },
+  {
+    "chat_name": "Cathy",
+    "sender": "Me",
+    "time": "23:17",
+    "content": "收到，早上我先弄水和洗衣机。",
+    "type": "text"
+  }
+]

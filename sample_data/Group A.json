@@ -1,0 +1,86 @@
+[
+  {
+    "chat_name": "Group A",
+    "sender": "Alice",
+    "time": "20:56",
+    "content": "@所有人 场地方刚来电话，明早 9:30 前要给最后人数，不然这个教室先给别人。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group A",
+    "sender": "Bob",
+    "time": "21:04",
+    "content": "我这边先数了一下，现在 18 组，可能还有 2 个家长没填表但是口头说来。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group A",
+    "sender": "Cathy",
+    "time": "21:06",
+    "content": "如果上 20 组以上，签到那边最好再加一个人，不然会堵。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group A",
+    "sender": "Eve",
+    "time": "21:18",
+    "content": "海报我改好了，但是时间我先没写死，怕又变。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group A",
+    "sender": "David",
+    "time": "21:31",
+    "content": "我晚点把排班表再整理一下，早上 8:50 前发。谁不能到直接群里说，别私聊我漏了。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group A",
+    "sender": "System",
+    "time": "21:36",
+    "content": "Bob 置顶了一条消息。",
+    "type": "system"
+  },
+  {
+    "chat_name": "Group A",
+    "sender": "Bob",
+    "time": "21:42",
+    "content": "另外有个问题，签到台到底放一楼还是活动室门口？场地方刚问我。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group A",
+    "sender": "Alice",
+    "time": "22:02",
+    "content": "我倾向一楼，不然家长到了会先在门口堵住。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group A",
+    "sender": "Cathy",
+    "time": "22:05",
+    "content": "一楼 +1，不过要有个指示牌。上次就有人找不到。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group A",
+    "sender": "Alice",
+    "time": "22:26",
+    "content": "风险先记一下：如果明天中午前人数还定不下来，教室可能保不住。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group A",
+    "sender": "Eve",
+    "time": null,
+    "content": "海报预览图",
+    "type": "image"
+  },
+  {
+    "chat_name": "Group A",
+    "sender": "David",
+    "time": "22:41",
+    "content": "我先睡了，明早 8 点多会看群。有人临时不来尽早说哈。",
+    "type": "text"
+  }
+]
