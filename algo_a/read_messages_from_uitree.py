@@ -12,7 +12,7 @@ Input spec:
 Output spec:
     - Returns list[dict] where each dict has keys:
       chat_name, sender, time, content, type.
-    - type is one of: "text", "system", "link_card", "image", "unsupported".
+    - type is one of: "text", "system", "link_card", "image", "video", "voice", "call", "unsupported", "other".
     - Messages are in chronological order (top to bottom in the UI).
 """
 
