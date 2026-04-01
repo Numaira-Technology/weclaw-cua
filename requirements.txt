@@ -1,9 +1,11 @@
+litellm
+numpy
+openai
+opencv-python
+Pillow
+pyautogui
 pyobjc-core
+pyobjc-framework-ApplicationServices
 pyobjc-framework-Cocoa
 pyobjc-framework-Quartz
-pyobjc-framework-ApplicationServices
 pyobjc-framework-Vision
-Pillow
-numpy
-opencv-python
-litellm
