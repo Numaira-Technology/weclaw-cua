@@ -1,0 +1,44 @@
+[
+  {
+    "chat_name": "Alice",
+    "sender": "Alice",
+    "time": "21:57",
+    "content": "我刚和客户助理通完电话，她说你们明天中午那场大概率不改时间，但还在等老板最后点头。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Alice",
+    "sender": "Alice",
+    "time": "22:03",
+    "content": "她让我先跟你说一声，别按 1 点以后排别的会。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Alice",
+    "sender": "Alice",
+    "time": "22:19",
+    "content": "啊对，地点还是国金二楼那家，不是上次那个会议室。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Alice",
+    "sender": "Alice",
+    "time": "22:41",
+    "content": "客户助理回我了，定了，12:30，不改。你明早看到回我个收到就行。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Alice",
+    "sender": "Alice",
+    "time": null,
+    "content": "我把她发我的定位转你了",
+    "type": "link_card"
+  },
+  {
+    "chat_name": "Alice",
+    "sender": "Me",
+    "time": "23:08",
+    "content": "刚看到，明早确认。",
+    "type": "text"
+  }
+]

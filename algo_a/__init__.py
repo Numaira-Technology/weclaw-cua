@@ -1,1 +1,1 @@
-from algo_a.pipeline_a import run_pipeline_a
+from algo_a.pipeline_a_win import run_pipeline_a

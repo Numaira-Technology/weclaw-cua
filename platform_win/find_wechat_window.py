@@ -17,22 +17,33 @@ Notes:
     desktop's top-level windows and match by window title.
 """
 
-from dataclasses import dataclass
-from typing import Any
+import ctypes
+from ctypes import wintypes
+
+user32 = ctypes.windll.user32
 
 
-@dataclass
-class WechatWindow:
-    window_handle: int
-    automation_element: Any
-    pid: int
+def find_wechat_window(
+    class_name: str = "Qt51514QWindowIcon", app_name: str = "微信"
+) -> int:
+    """Finds the main WeChat window and returns its handle (HWND).
 
+    This function is more specific than searching by title alone, as it also
+    specifies the window class name, which is less likely to have duplicates.
 
-def find_wechat_window(app_name: str = "WeChat") -> WechatWindow:
-    """Find the running WeChat window and return a reference to its automation element."""
-    assert app_name
-    raise NotImplementedError(
-        "use comtypes UIAutomation.GetRootElement() to walk top-level windows, "
-        "match by Name property containing app_name, "
-        "extract HWND via CurrentNativeWindowHandle and pid via CurrentProcessId"
-    )
+    Args:
+        class_name: The class name of the WeChat window.
+        app_name: The window name (title) of the WeChat application.
+
+    Returns:
+        The window handle (HWND) as an integer, or 0 if not found.
+    """
+    hwnd = user32.FindWindowW(class_name, app_name)
+    if not hwnd:
+        print(
+            f"[ERROR] Window with class '{class_name}' and title '{app_name}' not found. "
+            f"Please ensure WeChat is running."
+        )
+        return 0
+    return hwnd
+

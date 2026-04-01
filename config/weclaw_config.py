@@ -46,7 +46,7 @@ def load_config(config_path: str) -> WeclawConfig:
     assert config_path
     assert os.path.isfile(config_path), f"config not found: {config_path}"
 
-    with open(config_path) as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         raw = json.load(f)
 
     assert isinstance(raw, dict)
