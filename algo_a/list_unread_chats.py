@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 from typing import List, Optional
 
+from platform_mac.chat_panel_detector import sidebar_name_matches_config_group
 from platform_mac.sidebar_detector import (
     ChatInfo,
     Rect,
@@ -25,7 +26,12 @@ from platform_mac.sidebar_detector import (
     sidebar_images_similar,
 )
 
-__all__ = ["ChatInfo", "list_unread_chats", "filter_chats_by_groups_to_monitor"]
+__all__ = [
+    "ChatInfo",
+    "list_unread_chats",
+    "filter_chats_by_groups_to_monitor",
+    "ocr_chat_allowed_by_groups_to_monitor",
+]
 
 MAX_SCROLL_ITERATIONS = 15
 SCROLL_DELTA = -5
@@ -42,20 +48,42 @@ def _dedup_key(c: ChatInfo) -> str:
     return f"__anon_{c.badge_type}_{c.unread_count}"
 
 
+def ocr_chat_allowed_by_groups_to_monitor(
+    ocr_name: str,
+    groups_to_monitor: Optional[List[str]],
+) -> bool:
+    """侧栏解析名是否被 groups_to_monitor 中任一项接受（含 config 含 emoji、OCR 无 emoji）。"""
+    if not groups_to_monitor or not ocr_name or not str(ocr_name).strip():
+        return False
+    allowed = [g.strip() for g in groups_to_monitor if g and str(g).strip()]
+    if not allowed:
+        return False
+    n = ocr_name.strip()
+    return any(sidebar_name_matches_config_group(n, g) for g in allowed)
+
+
 def filter_chats_by_groups_to_monitor(
     chats: List[ChatInfo],
     groups_to_monitor: Optional[List[str]],
 ) -> List[ChatInfo]:
     """只保留会话名在 groups_to_monitor 中的条目（与 config.json 的 groups_to_monitor 一致）。
 
+    config 可含 emoji；侧栏 OCR 通常无 emoji，故按「去掉 config 中 emoji 后与 OCR 严格一致」判定。
+
     groups_to_monitor 为 None 或空列表时，不保留任何会话（与 run_pipeline_a 的过滤语义一致）。
     """
     if not groups_to_monitor:
         return []
-    allowed = {g.strip() for g in groups_to_monitor if g and str(g).strip()}
+    allowed = [g.strip() for g in groups_to_monitor if g and str(g).strip()]
     if not allowed:
         return []
-    return [c for c in chats if c.name.strip() in allowed]
+    return [
+        c
+        for c in chats
+        if c.name
+        and c.name.strip()
+        and any(sidebar_name_matches_config_group(c.name.strip(), g) for g in allowed)
+    ]
 
 
 def list_unread_chats(driver) -> List[ChatInfo]:

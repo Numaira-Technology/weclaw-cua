@@ -21,7 +21,7 @@ from PIL import Image
 from platform_mac.sidebar_detector import ChatInfo, Rect, scan_sidebar_once
 from platform_mac.chat_panel_detector import (
     extract_chat_header_title,
-    strict_chat_name_match,
+    sidebar_name_matches_config_group,
     titles_match,
 )
 
@@ -41,12 +41,14 @@ def _sidebar_confirms_target_chat(
     for c in chats:
         if not c.name:
             continue
-        if strict_chat_name_match(c.name, target_name) or titles_match(c.name, target_name):
+        if sidebar_name_matches_config_group(c.name, target_name) or titles_match(
+            c.name, target_name,
+        ):
             matches.append(c)
     if not matches:
         return False
     if anchor_row_rect is None:
-        return any(strict_chat_name_match(c.name, target_name) for c in matches)
+        return any(sidebar_name_matches_config_group(c.name, target_name) for c in matches)
     ay = anchor_row_rect.y + anchor_row_rect.height // 2
     slack = max(120, int(anchor_row_rect.height * 1.4))
     for c in matches:
@@ -232,7 +234,7 @@ def _find_chat_by_name(chats: List[ChatInfo], name: str) -> Optional[ChatInfo]:
     if not name:
         return None
     for c in chats:
-        if c.name and strict_chat_name_match(c.name, name):
+        if c.name and sidebar_name_matches_config_group(c.name, name):
             return c
     for c in chats:
         if c.name and titles_match(c.name, name):
