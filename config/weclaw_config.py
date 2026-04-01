@@ -20,8 +20,8 @@ config.json schema:
         "output_dir": "output"
     }
 
-    groups_to_monitor 可为任意长度列表；程序未写死条数。批量处理条数 =
-    「当前有未读红点且侧栏 OCR 名与列表某项完全一致」的会话数，与列表长度无必然相等。
+    groups_to_monitor 可为任意长度列表；程序未写死条数。项可含 emoji（侧栏 OCR 通常无 emoji），
+    匹配规则为「OCR 名与该项全文一致，或与去掉 emoji/绘文字后的文本核严格一致」。
 
     resolve_openrouter_api_key() 优先使用环境变量 OPENROUTER_API_KEY（或 LITELLM_API_KEY），
     未设置时再读取上述 JSON 中的 openrouter_api_key（路径为仓库 config/config.json）。
