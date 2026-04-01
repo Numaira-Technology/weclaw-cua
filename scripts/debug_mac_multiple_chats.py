@@ -36,7 +36,11 @@ def main() -> None:
     from config import load_config
     from platform_mac.driver import MacDriver
     from algo_a.capture_chat import CaptureSettings
-    from algo_a.list_unread_chats import filter_chats_by_groups_to_monitor, list_unread_chats
+    from algo_a.list_unread_chats import (
+        filter_chats_by_groups_to_monitor,
+        list_unread_chats,
+        ocr_chat_allowed_by_groups_to_monitor,
+    )
     from algo_a.llm_image_prep import DEFAULT_MAX_SIDE_PIXELS
     from algo_a.process_multiple_chats import UnreadBatchConfig, process_unread_chats_batch
 
@@ -169,11 +173,14 @@ def main() -> None:
         flush=True,
     )
     if len(all_unread) > len(unread):
-        allowed = {g.strip() for g in cfg.groups_to_monitor if g and str(g).strip()}
-        skipped = [c for c in all_unread if c.name.strip() not in allowed]
+        skipped = [
+            c
+            for c in all_unread
+            if not ocr_chat_allowed_by_groups_to_monitor(c.name, cfg.groups_to_monitor)
+        ]
         if skipped:
             print(
-                "[debug] 未读但未在 groups_to_monitor（须与 OCR 解析名完全一致）:",
+                "[debug] 未读但未在 groups_to_monitor（文本一致，或 config 含 emoji 时与去 emoji 后文本核一致）:",
                 flush=True,
             )
             for c in skipped:
@@ -183,7 +190,7 @@ def main() -> None:
                 )
     if all_unread and not unread:
         print(
-            "[!] 侧栏扫到未读行，但群名与 config 的 groups_to_monitor 无精确匹配。"
+            "[!] 侧栏扫到未读行，但群名与 config 的 groups_to_monitor 无匹配（含去 emoji 文本核）。"
             " 名称区 OCR（解析名 | 原始行@置信度）：",
             flush=True,
         )
