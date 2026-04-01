@@ -252,6 +252,38 @@ def strict_chat_name_match(detected: str, target: str) -> bool:
     return a == b or a.casefold() == b.casefold()
 
 
+def _strip_emoji_pictograph_chars(s: str) -> str:
+    """去掉 emoji / 绘文字及常见修饰符，使含 emoji 的 config 名与侧栏 Vision OCR 文本对齐。"""
+    out: List[str] = []
+    for ch in s:
+        o = ord(ch)
+        if o in (0xFE0F, 0x200D, 0x200C):
+            continue
+        if 0xFE00 <= o <= 0xFE0F:
+            continue
+        if 0x1F1E6 <= o <= 0x1F1FF:
+            continue
+        if 0x1F300 <= o <= 0x1FAFF:
+            continue
+        if 0x2600 <= o <= 0x27BF:
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
+def sidebar_name_matches_config_group(sidebar_ocr_name: str, config_group: str) -> bool:
+    """侧栏 OCR 名是否与 config 中一项指同一会话：全文一致，或去掉 emoji 后文本核与 OCR 严格一致。
+
+    不使用 titles_match 的包含关系，避免 OCR「bitter」误命中 config「bittersweet💗」。
+    """
+    if not sidebar_ocr_name or not config_group:
+        return False
+    if strict_chat_name_match(sidebar_ocr_name, config_group):
+        return True
+    core = _strip_emoji_pictograph_chars(config_group).strip()
+    return bool(core) and strict_chat_name_match(sidebar_ocr_name, core)
+
+
 def titles_match(detected: str, target: str) -> bool:
     """模糊匹配：检测到的 header / 侧栏名是否与目标 chat name 对应。
 
