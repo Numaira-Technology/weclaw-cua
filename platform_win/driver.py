@@ -2,144 +2,35 @@
 Windows-specific implementation of the PlatformDriver protocol using AI Vision.
 """
 import json
-import shutil
+import os
 import time
-from pathlib import Path
 from typing import Any
 
 import pyautogui
 import win32gui
 
+from shared.datatypes import ChatMessage, SidebarRow
 from shared.platform_api import PlatformDriver
-from shared.datatypes import SidebarRow, ChatMessage
+from shared.sidebar_classification import (
+    parse_threads_json,
+    threads_to_sidebar_rows,
+)
+from shared.vision_ai import VisionAI
+from shared.vision_prompts import (
+    CHAT_PANEL_PROMPT,
+    CHAT_PANEL_SAFE_CLICK_PROMPT,
+    COORDS_PROMPT_TEMPLATE,
+    CURRENT_CHAT_PROMPT,
+    NEW_MESSAGES_BUTTON_PROMPT,
+    SIDEBAR_PROMPT,
+)
 from platform_win.find_wechat_window import find_wechat_window as find_window
-from platform_win.vision import capture_window, VisionAI, _force_foreground_window
-from utils.image_stitcher import stitch_screenshots, CropRegion
-from PIL import Image
+from platform_win.vision import _force_foreground_window, capture_window
+from shared.message_dedup import dedupe_chat_messages
+from shared.vision_response_json import parse_json_object_from_model_text
+from utils.image_stitcher import save_stitched_debug, stitch_screenshots
 
 
-SIDEBAR_PROMPT = '''
-You are an expert UI automation assistant. Analyze the provided screenshot of a chat application's sidebar.
-Your task is to identify every individual chat item visible.
-
-For each chat item, you must extract the following information:
-1.  `name`: The name of the person or group chat.
-2.  `last_message`: The preview of the last message. If there is no message preview, this should be null.
-3.  `badge_text`: The text content of any unread notification badge. This could be a number (e.g., "1", "99+"), a red dot (return "red_dot"), or a specific phrase (e.g., "[x条未读]"). If there is no badge, this should be null.
-4.  `bbox`: The precise bounding box for the entire chat item row, as a list of four integers: [x_min, y_min, x_max, y_max]. The coordinates must be relative to the provided image.
-
-You MUST return your response as a single, valid JSON object, which is a list of the chat items you found. Do not include any other text or explanations in your response.
-
-Example response format:
-[
-  {
-    "name": "Family Group",
-    "last_message": "Mom: See you tonight!",
-    "badge_text": "3",
-    "bbox": [5, 50, 250, 100]
-  },
-  {
-    "name": "John Doe",
-    "last_message": "Sounds good, thanks!",
-    "badge_text": null,
-    "bbox": [5, 101, 250, 151]
-  }
-]
-'''
-
-
-COORDS_PROMPT_TEMPLATE = '''
-You are a precision UI automation assistant. You will be given a screenshot of an entire chat application window.
-Your task is to find the exact bounding box (`bbox`) for the chat item with the name "{chat_name}", which is located in the sidebar on the left.
-Pay close attention to the exact name provided. You must find the item that precisely matches this name, not one with a similar name.
-
-You MUST return your response as a single, valid JSON object containing only the `bbox`.
-If the specified chat item cannot be found in the image, you MUST return a JSON object with a null `bbox`, like this: `{{ "bbox": null }}`.
-The coordinates must be relative to the top-left corner of the provided image.
-The `bbox` should be a list of four integers: [x_min, y_min, x_max, y_max].
-
-Example for a chat named "Family Group":
-{{
-  "bbox": [5, 50, 250, 100]
-}}
-'''
-
-NEW_MESSAGES_BUTTON_PROMPT = '''
-Analyze the screenshot of the chat panel. If you see a button indicating "xx new messages" or similar, return its bounding box.
-Respond in JSON format with a single key "bbox" which is a list of four numbers [x1, y1, x2, y2] representing the bounding box of the button.
-If no such button is visible, return {"bbox": null}.
-'''
-
-CURRENT_CHAT_PROMPT = '''
-You are a UI analysis assistant. Analyze the provided screenshot of a chat application's sidebar.
-One of the chat items in the sidebar is highlighted (has a different background color), indicating it is currently selected.
-Your task is to identify the name of this single highlighted chat item.
-Return a single JSON object with one key, "chat_name". If no item is highlighted, return null.
-
-Example:
-{
-  "chat_name": "Family Group"
-}
-'''
-
-CHAT_PANEL_PROMPT = '''
-You are an expert UI automation assistant. Analyze the provided screenshot of a chat application's main chat panel.
-Your task is to identify every individual message visible and extract its details.
-
-For each message, you must extract the following information:
-1.  `sender`: The name of the person who sent the message. If it's a system message (like a timestamp or notification), the sender should be `null`.
-2.  `content`: The text content of the message. For non-text messages like images or files, provide a placeholder like `[Image]` or `[File]`.
-3.  `time`: The timestamp associated with the message. This is often displayed near the message bubble or as a separate centered item (e.g., "Yesterday 10:45 PM"). If a message doesn't have an explicit timestamp right next to it, you can associate it with the nearest preceding timestamp in the chat. If no timestamp is visible for a message, set this to `null`.
-4.  `type`: The type of message. This can be 'text', 'image', 'file', 'system' (for timestamps or notifications like "You recalled a message"), 'recalled', etc.
-
-- Messages from others are on the left, with the sender's name above the message bubble.
-- Messages from "You" (the user) are on the right, and do not have a visible sender name. You should explicitly set the sender to "You".
-- System messages (like timestamps, "You recalled a message", etc.) are centered and have no sender. The sender should be `null` and the type should be 'system'.
-
-Respond with a JSON object containing a single key "messages", which is a list of message objects.
-Each message object must have the keys "sender", "content", "time", and "type".
-
-Example:
-```json
-{
-  "messages": [
-    {
-      "sender": "龚格非",
-      "content": "天呐",
-      "time": "2026年2月5日 0:53",
-      "type": "text"
-    },
-    {
-      "sender": "You",
-      "content": "好的",
-      "time": "2026年2月5日 0:54",
-      "type": "text"
-    },
-    {
-      "sender": null,
-      "content": "You recalled a message",
-      "time": "2026年2月5日 0:55",
-      "type": "recalled"
-    }
-  ]
-}
-```
-'''
-
-CHAT_PANEL_SAFE_CLICK_PROMPT = '''
-Analyze the provided image, which is a screenshot of a chat application's message panel.
-Your task is to identify the largest clearly empty rectangular area that is safe to click and then scroll from.
-The area must be completely empty background inside the message history, not on or touching message bubbles, usernames, avatars, timestamps, images, links, or other interactive elements.
-Do not use the header area, the input box area, or the bottom-most part of the visible history where floating controls often appear.
-Prefer a spacious empty area in the upper-middle part of the visible message history.
-Return a bbox only if the empty area is comfortably large, at least about 80x60 in the 1000x1000 coordinate space.
-If no such clearly empty area exists, return {"bbox": null}.
-
-Example Response:
-{
-  "bbox": [420, 260, 620, 420]
-}
-'''
 class WinDriver(PlatformDriver):
     def __init__(self):
         self.hwnd: int = 0
@@ -181,12 +72,7 @@ class WinDriver(PlatformDriver):
         print(f"[DEBUG] Raw AI response for precise coords:\n{response_str}")
 
         try:
-            if "```json" in response_str:
-                json_str = response_str.split("```json\n")[1].split("\n```")[0]
-            else:
-                json_str = response_str
-
-            data = json.loads(json_str)
+            data = parse_json_object_from_model_text(response_str)
             win_rel_bbox = data.get("bbox")
 
             if not win_rel_bbox or len(win_rel_bbox) != 4:
@@ -219,10 +105,6 @@ class WinDriver(PlatformDriver):
     def get_sidebar_rows(self, window: Any) -> list[SidebarRow]:
         """Gets all visible rows in the sidebar using the Vision AI."""
         hwnd = window
-        if not self.vision_ai.client:
-            print("[ERROR] Vision AI client not initialized. Cannot get sidebar rows.")
-            return []
-
         full_screenshot = capture_window(hwnd)
         if not full_screenshot:
             print("[WARN] Failed to capture window for sidebar row detection.")
@@ -242,44 +124,16 @@ class WinDriver(PlatformDriver):
             return []
 
         try:
-            if "```json" in response_str:
-                json_str = response_str.split("```json\n")[1].split("\n```")[0]
-            else:
-                json_str = response_str
-            
-            sidebar_data = json.loads(json_str)
-        except (json.JSONDecodeError, IndexError) as e:
-            print(f"[ERROR] Failed to parse JSON response from Vision AI: {e}")
+            threads = parse_threads_json(response_str)
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            print(f"[ERROR] Failed to parse sidebar classification JSON: {e}")
             print(f"Raw response was: {response_str}")
             return []
 
-        sidebar_rows = []
         img_width, img_height = sidebar_image.size
-        for item in sidebar_data:
-            relative_bbox = item.get("bbox")
-            if not relative_bbox or len(relative_bbox) != 4:
-                print(f"[WARN] Skipping item with invalid bbox: {item}")
-                continue
-
-            scaled_x1 = int(relative_bbox[0] / 1000 * img_width)
-            scaled_y1 = int(relative_bbox[1] / 1000 * img_height)
-            scaled_x2 = int(relative_bbox[2] / 1000 * img_width)
-            scaled_y2 = int(relative_bbox[3] / 1000 * img_height)
-
-            abs_x1 = window_left + scaled_x1
-            abs_y1 = window_top + scaled_y1
-            abs_x2 = window_left + scaled_x2
-            abs_y2 = window_top + scaled_y2
-
-            sidebar_rows.append(
-                SidebarRow(
-                    name=item.get("name", ""),
-                    last_message=item.get("last_message"),
-                    badge_text=item.get("badge_text"),
-                    bbox=(abs_x1, abs_y1, abs_x2, abs_y2),
-                )
-            )
-        
+        sidebar_rows = threads_to_sidebar_rows(
+            threads, img_width, img_height, window_left, window_top
+        )
         print(f"[+] AI identified {len(sidebar_rows)} sidebar rows.")
         return sidebar_rows
 
@@ -324,10 +178,22 @@ class WinDriver(PlatformDriver):
         return row.badge_text
 
     def scroll_chat_panel(self, direction: str = "down") -> None:
-        """Scrolls the chat panel area up or down by pressing PageUp/PageDown."""
-        key_to_press = 'pagedown' if direction == "down" else 'pageup'
-        print(f"[*] Scrolling chat panel {direction} using '{key_to_press}' key.")
-        pyautogui.press(key_to_press)
+        """Scrolls the chat panel via mouse wheel at the message area (same as scroll_messages)."""
+        if not self.hwnd:
+            raise RuntimeError("WeChat window not found. Call find_wechat_window() first.")
+        if direction == "up":
+            clicks = 500
+        elif direction == "down":
+            clicks = -500
+        else:
+            raise ValueError(f"Invalid scroll direction: '{direction}'. Must be 'up' or 'down'.")
+        _force_foreground_window(self.hwnd)
+        left, top, right, bottom = win32gui.GetWindowRect(self.hwnd)
+        message_panel_x = left + int((right - left) * 0.65)
+        message_panel_y = top + int((bottom - top) * 0.5)
+        print(f"[*] Scrolling chat panel {direction} with mouse wheel.")
+        pyautogui.moveTo(message_panel_x, message_panel_y, duration=0.1)
+        pyautogui.scroll(clicks)
         time.sleep(1.0)
 
     def get_chat_messages(self, chat_name: str) -> list[ChatMessage]:
@@ -362,32 +228,25 @@ class WinDriver(PlatformDriver):
 
         print(f"[*] Processing {len(screenshots)} screenshots in {len(screenshot_chunks)} chunks of size {chunk_size}.")
 
-        window_rect = win32gui.GetWindowRect(self.hwnd)
-        window_width = window_rect[2] - window_rect[0]
-        window_height = window_rect[3] - window_rect[1]
-        scroll_region = CropRegion(
-            x=int(window_width * 0.30),
-            y=50,
-            w=int(window_width * 0.69),
-            h=window_height - 100
-        )
-
         for i, chunk in enumerate(screenshot_chunks):
             print(f"--- Processing chunk {i+1}/{len(screenshot_chunks)} ---")
             if not chunk:
                 continue
 
-            stitched_image = stitch_screenshots(
-                images=chunk,
-                scroll_region=scroll_region
-            )
+            stitched_image = stitch_screenshots(images=chunk, scroll_region=None)
 
             if not stitched_image:
                 print(f"[ERROR] Failed to stitch chunk {i+1}.")
                 continue
 
+            debug_dir = os.environ.get("WECLAW_DEBUG_STITCH_DIR", "").strip()
+            if debug_dir:
+                save_stitched_debug(stitched_image, debug_dir, chat_name, i)
+
             try:
-                response_str = self.vision_ai.query(CHAT_PANEL_PROMPT, stitched_image)
+                response_str = self.vision_ai.query(
+                    CHAT_PANEL_PROMPT, stitched_image, max_tokens=16384
+                )
             except Exception as e:
                 print(f"[ERROR] Vision AI query for chunk {i+1} failed: {e}")
                 continue
@@ -397,12 +256,7 @@ class WinDriver(PlatformDriver):
                 continue
 
             try:
-                if "```json" in response_str:
-                    json_str = response_str.split("```json\n")[1].split("\n```")[0]
-                else:
-                    json_str = response_str
-
-                data = json.loads(json_str)
+                data = parse_json_object_from_model_text(response_str)
                 messages_data = data.get("messages", [])
                 chunk_messages = []
 
@@ -427,8 +281,9 @@ class WinDriver(PlatformDriver):
                 print(f"Raw response was: {response_str}")
                 continue
 
-        print(f"[*] Finished processing all chunks. Total messages extracted: {len(all_messages)}")
-        return all_messages
+        out = dedupe_chat_messages(all_messages)
+        print(f"[*] Finished processing all chunks. Total messages: {len(out)} ({len(all_messages)} raw).")
+        return out
 
     def _activate_chat_panel_safely(self) -> None:
         """Finds a safe spot in the chat panel to click to activate the window."""
@@ -463,11 +318,7 @@ class WinDriver(PlatformDriver):
         bbox_valid = False
         if response_str:
             try:
-                if "```json" in response_str:
-                    json_str = response_str.split("```json\n")[1].split("\n```")[0]
-                else:
-                    json_str = response_str
-                data = json.loads(json_str)
+                data = parse_json_object_from_model_text(response_str)
                 bbox = data.get("bbox")
                 if bbox and len(bbox) == 4:
                     bbox_width = bbox[2] - bbox[0]
@@ -528,12 +379,7 @@ class WinDriver(PlatformDriver):
             return None
 
         try:
-            if "```json" in response_str:
-                json_str = response_str.split("```json\n")[1].split("\n```")[0]
-            else:
-                json_str = response_str
-            
-            data = json.loads(json_str)
+            data = parse_json_object_from_model_text(response_str)
             chat_name = data.get("chat_name")
 
             if chat_name:
@@ -543,7 +389,7 @@ class WinDriver(PlatformDriver):
                 print(f"[WARN] AI did not return a chat_name.")
                 return None
 
-        except (json.JSONDecodeError, KeyError) as e:
+        except (AssertionError, KeyError) as e:
             print(f"[ERROR] Failed to parse chat name response. Exception: {e}")
             print(f"Raw response was: {response_str}")
             return None
@@ -590,12 +436,7 @@ class WinDriver(PlatformDriver):
             return False
 
         try:
-            if "```json" in response_str:
-                json_str = response_str.split("```json\n")[1].split("\n```")[0]
-            else:
-                json_str = response_str
-
-            data = json.loads(json_str)
+            data = parse_json_object_from_model_text(response_str)
             bbox = data.get("bbox")
 
             if not bbox:

@@ -5,7 +5,8 @@ Usage:
 
 Input spec:
     - Message fields: chat_name, sender, time (nullable), content, type.
-    - type is one of: "text", "system", "link_card", "image", "unsupported".
+    - type is one of: "text", "system", "link_card", "image", "file",
+      "recalled", "unsupported" (aligns with vision chat-panel extraction).
 
 Output spec:
     - messages_to_json: list[Message] -> JSON string.
@@ -16,7 +17,15 @@ import json
 from dataclasses import asdict, dataclass
 
 
-VALID_MESSAGE_TYPES = {"text", "system", "link_card", "image", "unsupported"}
+VALID_MESSAGE_TYPES = {
+    "text",
+    "system",
+    "link_card",
+    "image",
+    "file",
+    "recalled",
+    "unsupported",
+}
 
 
 @dataclass

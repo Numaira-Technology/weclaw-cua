@@ -44,15 +44,32 @@ def _matches_app_name(candidate_name: str, app_name: str) -> bool:
     return t in c or c in t
 
 
+def _bundle_is_lark_family(bundle_id: str) -> bool:
+    b = (bundle_id or "").lower()
+    return "lark" in b or "feishu" in b
+
+
 def _find_wechat_app(app_name: str) -> Any | None:
     running_apps = NSWorkspace.sharedWorkspace().runningApplications()
+    raw = (app_name or "").strip()
+    want = raw.lower()
+    lark_aliases = {"lark", "feishu", "飞书"}
+    wechat_want = want in {"wechat", "weixin"} or raw == "微信"
     for app in running_apps:
+        if app.isTerminated():
+            continue
         localized = app.localizedName() or ""
         bundle_id = app.bundleIdentifier() or ""
-        # 常见 bundle id（主要用于增强匹配）
-        if bundle_id in {"com.tencent.xinWeChat"} or _matches_app_name(localized, app_name):
-            if not app.isTerminated():
+        if bundle_id == "com.tencent.xinWeChat":
+            if wechat_want or _matches_app_name(localized, app_name):
                 return app
+            continue
+        if _bundle_is_lark_family(bundle_id):
+            if _matches_app_name(localized, app_name) or want in lark_aliases:
+                return app
+            continue
+        if _matches_app_name(localized, app_name):
+            return app
     return None
 
 

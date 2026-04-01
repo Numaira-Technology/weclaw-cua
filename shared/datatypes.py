@@ -4,10 +4,12 @@ from dataclasses import dataclass
 @dataclass
 class SidebarRow:
     """Represents a single chat row in the sidebar, identified by the Vision AI."""
+
     name: str
     last_message: str | None
     badge_text: str | None
-    bbox: tuple[int, int, int, int]  # Bounding box relative to the sidebar image crop
+    bbox: tuple[int, int, int, int]
+    is_group: bool = False
 
 
 @dataclass

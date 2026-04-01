@@ -8,12 +8,14 @@ import os
 import json
 import time
 from dataclasses import asdict
-import re
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+from algo_a.list_configured_chat_names import list_chats_by_configured_names
+from algo_a.list_target_chats_win import _normalize_chat_label, list_target_chats
+from algo_a.sidebar_scroll_to_top import scroll_sidebar_to_top
 from config.weclaw_config import WeclawConfig
 
 
@@ -21,29 +23,19 @@ def _create_driver():
     """Auto-detect the platform and return the appropriate PlatformDriver."""
     if sys.platform == "win32":
         from platform_win.driver import WinDriver
+
         return WinDriver()
-    else:
-        raise NotImplementedError(f"Platform {sys.platform} is not supported yet.")
+    if sys.platform == "darwin":
+        from platform_mac.mac_ai_driver import MacDriver
+
+        return MacDriver()
+    raise NotImplementedError(f"Platform {sys.platform} is not supported yet.")
 
 
-def _strip_emojis_and_whitespace(text: str) -> str:
-    """Removes emojis and leading/trailing whitespace from a string."""
-    if not text:
-        return ""
-    text = text.replace("…", "...").replace("⋯", "...")
-    emoji_pattern = re.compile(
-        "["
-        "\U0001F600-\U0001F64F" 
-        "\U0001F300-\U0001F5FF"
-        "\U0001F680-\U0001F6FF"
-        "\U0001F1E0-\U0001F1FF"
-        "\U0001F900-\U0001F9FF"
-        "\u2600-\u26FF" 
-        "\u2700-\u27BF"
-        "\uFE0F"
-        "]+",
-        flags=re.UNICODE)
-    return emoji_pattern.sub(r'', text).strip()
+def _groups_config_means_all_groups(names: list[str]) -> bool:
+    if not names:
+        return True
+    return len(names) == 1 and str(names[0]).strip() == "*"
 
 
 def _is_chat_name_match(ui_name: str, config_name: str) -> bool:
@@ -54,8 +46,8 @@ def _is_chat_name_match(ui_name: str, config_name: str) -> bool:
     if not ui_name or not config_name:
         return False
 
-    clean_ui_name = _strip_emojis_and_whitespace(ui_name)
-    clean_config_name = _strip_emojis_and_whitespace(config_name)
+    clean_ui_name = _normalize_chat_label(ui_name)
+    clean_config_name = _normalize_chat_label(config_name)
     
     if clean_ui_name.endswith('...'):
         return clean_config_name.startswith(clean_ui_name[:-3])
@@ -63,43 +55,64 @@ def _is_chat_name_match(ui_name: str, config_name: str) -> bool:
         return clean_ui_name == clean_config_name
 
 
-def _scroll_sidebar_to_top(driver, window: int) -> None:
-    print("[*] Scrolling sidebar to the top...")
-    for _ in range(10):
-        driver.scroll_sidebar(window, "up")
-        time.sleep(0.1)
-
-
-def run_pipeline_a(config: WeclawConfig) -> None:
-    """Run the full message collection pipeline."""
+def run_pipeline_a(config: WeclawConfig) -> list[str]:
+    """Run the full message collection pipeline. Return paths to written JSON files."""
     assert config is not None
 
-    from algo_a.list_target_chats_win import list_target_chats
+    if sys.platform == "darwin" and config.sidebar_unread_only:
+        from algo_a.pipeline_a_mac_nav import run_pipeline_a_mac_nav
+
+        return run_pipeline_a_mac_nav(config)
+
+    os.makedirs(config.output_dir, exist_ok=True)
+    written_paths: list[str] = []
 
     driver = _create_driver()
-    window = driver.find_wechat_window()
+    if sys.platform == "darwin":
+        driver.ensure_permissions()
+    window = driver.find_wechat_window(config.wechat_app_name)
     if not window:
         print("[ERROR] Pipeline failed: Could not find WeChat window.")
-        return
+        return written_paths
 
-    _scroll_sidebar_to_top(driver, window)
+    scroll_sidebar_to_top(driver, window)
 
-    print(f"[*] Searching for unread target chats: {config.groups_to_monitor}")
-    unread_target_chats = list_target_chats(driver, window, config.groups_to_monitor)
+    uo = config.sidebar_unread_only
+    if _groups_config_means_all_groups(config.groups_to_monitor):
+        print(
+            f"[*] Mode: ALL group chats (vision is_group). Unread filter: {uo}."
+        )
+        target_chats = list_target_chats(
+            driver, window, all_groups=True, unread_only=uo
+        )
+    else:
+        print(
+            f"[*] Mode: named chats from config. Unread filter: {uo}."
+        )
+        print(f"[*] Config names: {config.groups_to_monitor!r}")
+        target_chats = list_chats_by_configured_names(
+            driver, window, config.groups_to_monitor, unread_only=uo
+        )
 
-    if not unread_target_chats:
-        print("[+] No unread target chats found. Pipeline finished.")
-        return
+    if not target_chats:
+        if not _groups_config_means_all_groups(config.groups_to_monitor):
+            print(
+                "[HINT] No row matched those names. Example `Group A` is not a real WeChat title."
+                " Set groups_to_monitor to [] or [\"*\"] to capture every group the model marks"
+                " as is_group, or paste exact sidebar strings from your logs."
+            )
+        print("[+] No target chats found. Pipeline finished.")
+        return written_paths
 
-    print(f"[+] Located {len(unread_target_chats)} unread target chats. Proceeding to click them.")
+    print(f"[+] Located {len(target_chats)} target chat(s). Proceeding to click them.")
 
-    for i, chat in enumerate(unread_target_chats):
-        print(f"\n--- Processing chat {i + 1}/{len(unread_target_chats)}: {chat.name} ---")
+    for i, chat in enumerate(target_chats):
+        print(f"\n--- Processing chat {i + 1}/{len(target_chats)}: {chat.name} ---")
 
-        _scroll_sidebar_to_top(driver, window)
-        refreshed_matches = list_target_chats(driver, window, [chat.name])
+        scroll_sidebar_to_top(driver, window)
+        refreshed_matches = list_target_chats(driver, window, chat.name)
         if not refreshed_matches:
-            print(f"[ERROR] Could not re-locate unread target chat '{chat.name}' before clicking. Skipping.")
+            print(f"[ERROR] Could not re-locate target chat '{chat.name}' before clicking. Skipping.")
             continue
 
         chat = refreshed_matches[0]
@@ -128,18 +141,22 @@ def run_pipeline_a(config: WeclawConfig) -> None:
             print(f"[WARN] No messages were extracted from '{chat.name}'. Skipping save.")
             continue
 
-        safe_filename = "".join(c for c in chat.name if c.isalnum() or c in (' ', '_')).rstrip()
-        output_path = f"output/{safe_filename}.json"
+        safe_filename = "".join(c for c in chat.name if c.isalnum() or c in (" ", "_")).rstrip()
+        output_path = os.path.join(config.output_dir, f"{safe_filename}.json")
 
-        try:
-            with open(output_path, 'w', encoding='utf-8') as f:
-                messages_as_dict = [asdict(msg) for msg in messages]
-                json.dump(messages_as_dict, f, ensure_ascii=False, indent=2)
-            print(f"[SUCCESS] Successfully saved {len(messages)} messages to {output_path}")
-        except Exception as e:
-            print(f"[ERROR] Failed to save messages for '{chat.name}' to {output_path}. Exception: {e}")
+        with open(output_path, "w", encoding="utf-8") as f:
+            messages_as_dict = []
+            for msg in messages:
+                d = asdict(msg)
+                d["chat_name"] = chat.name
+                d["sender"] = d["sender"] or ""
+                messages_as_dict.append(d)
+            json.dump(messages_as_dict, f, ensure_ascii=False, indent=2)
+        print(f"[SUCCESS] Successfully saved {len(messages)} messages to {output_path}")
+        written_paths.append(output_path)
 
-    print("\n[SUCCESS] Pipeline finished processing all unread target chats.")
+    print("\n[SUCCESS] Pipeline finished processing all target chats.")
+    return written_paths
 
 
 if __name__ == "__main__":

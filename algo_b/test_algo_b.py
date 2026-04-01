@@ -100,7 +100,8 @@ class TestAlgoB(unittest.TestCase):
     def test_run_pipeline_b_wires_loading_prompt_and_generation(self) -> None:
         config = WeclawConfig(
             wechat_app_name="WeChat",
-            groups_to_monitor=["Project Alpha"],
+            groups_to_monitor=["*"],
+            sidebar_unread_only=False,
             report_custom_prompt="Summarize the key decisions.",
             openrouter_api_key="sk-or-test",
             llm_model="test-model",

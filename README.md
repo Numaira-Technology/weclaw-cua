@@ -10,6 +10,24 @@ OpenClaw skill for extracting unread WeChat messages and generating customized r
 
 Delivery channels (Telegram, Feishu, etc.) are handled by OpenClaw, not this repo.
 
+### OpenClaw packaging
+
+- Skill source: `openclaw_skill/weclaw/SKILL.md` (AgentSkills / OpenClaw frontmatter).
+- Host entry writes **`last_run.json`** in your configured `output_dir` after each `./run.sh` (paths to message JSON, ok/error for cron and agents).
+- Install into the active workspace `skills/weclaw/`:
+
+  ```bash
+  ./scripts/install_openclaw_skill.sh
+  ```
+
+  Override workspace root with `OPENCLAW_WORKSPACE` if needed; when `openclaw` is on `PATH`, the script defaults to the `workspaceDir` reported by `openclaw skills list --json`.
+
+- Verify packaging without running WeChat:
+
+  ```bash
+  python3 scripts/verify_openclaw_packaging.py
+  ```
+
 ### Supported Platforms
 
 | Platform | Directory | UI Automation API |
@@ -102,7 +120,11 @@ python3 scripts/debug_mac_multiple_chats.py --read-visible --max-chats 3 --max-s
 
 ```
 weclaw/
-├── run.sh                              # one-command entry point
+├── run.sh                              # one-command entry point (runs scripts/run_full_pipeline.py)
+├── openclaw_skill/weclaw/SKILL.md      # OpenClaw / AgentSkills skill
+├── scripts/install_openclaw_skill.sh   # copy skill into OpenClaw workspace skills/
+├── scripts/run_full_pipeline.py        # algo_a + algo_b + last_run.json
+├── scripts/verify_openclaw_packaging.py
 ├── requirements.txt
 │
 ├── config/

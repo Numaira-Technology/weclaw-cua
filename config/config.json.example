@@ -1,9 +1,7 @@
 {
   "wechat_app_name": "WeChat",
-  "groups_to_monitor": [
-    "Group A",
-    "Group B"
-  ],
+  "groups_to_monitor": ["*"],
+  "sidebar_unread_only": true,
   "report_custom_prompt": "请基于全部未读聊天记录，生成一份中文晨间消息处理报告，重点说明今天早上最该优先处理什么、建议立即回复谁、有哪些待办、风险和可稍后处理的信息。",
   "openrouter_api_key": "sk-or-YOUR-KEY-HERE",
   "llm_model": "openai/gpt-4o",

@@ -11,8 +11,8 @@ else
 fi
 
 if [[ "$(uname -s)" == "Darwin" ]]; then
-	if ! "$PYTHON" -c "import AppKit, Quartz, numpy" 2>/dev/null; then
-		echo "WeClaw on macOS requires PyObjC (AppKit/Quartz) and numpy. Current interpreter:"
+	if ! "$PYTHON" -c "import AppKit, ApplicationServices, Quartz, numpy" 2>/dev/null; then
+		echo "WeClaw on macOS requires PyObjC (AppKit, ApplicationServices, Quartz) and numpy. Current interpreter:"
 		"$PYTHON" -c "import sys; print(sys.executable)"
 		echo ""
 		echo "Create a venv and install dependencies:"
@@ -26,17 +26,4 @@ fi
 
 export WECLAW_CONFIG_PATH="${1:-$SCRIPT_DIR/config/config.json}"
 
-"$PYTHON" -c "
-import os
-from config import load_config
-from algo_a import run_pipeline_a
-from algo_b import run_pipeline_b
-
-config = load_config(os.environ['WECLAW_CONFIG_PATH'])
-json_paths = run_pipeline_a(config)
-if json_paths:
-    report = run_pipeline_b(config, json_paths)
-    print(report)
-else:
-    print('No unread messages found.')
-"
+"$PYTHON" "$SCRIPT_DIR/scripts/run_full_pipeline.py"
