@@ -13,8 +13,30 @@ import click
 
 
 def _find_repo_root() -> str:
-    here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.abspath(os.path.join(here, ".."))
+    """Find the project root directory.
+
+    Priority:
+      1. WECLAW_ROOT env var (explicit override)
+      2. Walk up from cwd looking for pyproject.toml or config/
+      3. cwd itself as fallback
+    """
+    env_root = os.environ.get("WECLAW_ROOT", "").strip()
+    if env_root and os.path.isdir(env_root):
+        return os.path.abspath(env_root)
+
+    cwd = os.getcwd()
+    candidate = cwd
+    for _ in range(10):
+        if os.path.isfile(os.path.join(candidate, "pyproject.toml")):
+            return candidate
+        if os.path.isdir(os.path.join(candidate, "config")):
+            return candidate
+        parent = os.path.dirname(candidate)
+        if parent == candidate:
+            break
+        candidate = parent
+
+    return cwd
 
 
 def load_app_context(ctx) -> dict:
