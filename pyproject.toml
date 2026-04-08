@@ -1,21 +1,58 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=68.0,<82", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "weclaw"
 version = "0.1.0"
 description = "Vision-based WeChat message capture and report CLI for LLMs"
+readme = "README.md"
+license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
+authors = [
+    {name = "WeClaw Contributors"},
+]
+keywords = ["wechat", "weclaw", "cli", "vision", "llm", "ai", "message-capture"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "click>=8.1,<9",
-    "litellm",
     "numpy",
-    "openai",
     "opencv-python",
     "Pillow",
     "pyautogui",
 ]
+
+[project.optional-dependencies]
+llm = [
+    "litellm",
+    "openai",
+]
+macos = [
+    "pyobjc-core",
+    "pyobjc-framework-ApplicationServices",
+    "pyobjc-framework-Cocoa",
+    "pyobjc-framework-Quartz",
+    "pyobjc-framework-Vision",
+]
+dev = [
+    "build",
+    "twine",
+    "pyinstaller",
+]
+
+[project.urls]
+Homepage = "https://github.com/anthropic-ai/weclaw"
+Repository = "https://github.com/anthropic-ai/weclaw"
 
 [project.scripts]
 weclaw = "weclaw_cli.main:cli"

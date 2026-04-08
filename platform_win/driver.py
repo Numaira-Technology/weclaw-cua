@@ -15,7 +15,7 @@ from shared.sidebar_classification import (
     parse_threads_json,
     threads_to_sidebar_rows,
 )
-from shared.vision_ai import VisionAI
+from shared.vision_backend import VisionBackend, create_vision_backend
 from shared.vision_prompts import (
     CHAT_PANEL_PROMPT,
     CHAT_PANEL_SAFE_CLICK_PROMPT,
@@ -32,9 +32,9 @@ from utils.image_stitcher import save_stitched_debug, stitch_screenshots
 
 
 class WinDriver(PlatformDriver):
-    def __init__(self):
+    def __init__(self, vision_backend: VisionBackend | None = None):
         self.hwnd: int = 0
-        self.vision_ai = VisionAI()
+        self.vision_ai: VisionBackend = vision_backend or create_vision_backend("openrouter")
 
     def find_wechat_window(self, app_name: str = "微信") -> int:
         """Finds the WeChat window and stores its handle."""

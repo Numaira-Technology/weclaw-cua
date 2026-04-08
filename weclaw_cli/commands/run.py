@@ -1,11 +1,12 @@
 """run command — full pipeline: capture + report.
 
 Usage:
-    weclaw run                         # full pipeline
+    weclaw run                         # full pipeline with built-in LLM
+    weclaw run --no-llm                # stepwise: capture only, output images+prompts
     weclaw run --format text           # human-readable output
 
-Equivalent to running 'weclaw capture' then 'weclaw report'.
-Also writes last_run.json for automation/cron integration.
+In --no-llm mode, only capture runs (stepwise). Report generation is skipped
+because the agent handles LLM calls externally.
 """
 
 import click
@@ -14,18 +15,29 @@ from ..output.formatter import output
 
 
 @click.command()
+@click.option("--no-llm", is_flag=True, default=False,
+              help="Stepwise mode: output images+prompts for agent, skip report")
+@click.option("--work-dir", default=None,
+              help="Work directory for stepwise output")
 @click.option("--format", "fmt", default="json",
               type=click.Choice(["json", "text"]),
               help="Output format")
 @click.pass_context
-def run(ctx, fmt):
+def run(ctx, no_llm, work_dir, fmt):
     """Run full pipeline: capture unread chats + generate report.
 
     \b
-    Steps:
+    Default mode:
       1. Vision-capture all unread WeChat messages (algo_a)
-      2. Generate LLM triage report from captures (algo_b)
+      2. Generate LLM triage report (algo_b)
       3. Write last_run.json for automation
+
+    \b
+    Stepwise mode (--no-llm):
+      1. Vision-capture with stepwise backend (no LLM calls)
+      2. Output manifest + images + prompts for agent
+      3. Agent processes with own LLM, then runs `weclaw finalize`
+      4. Agent builds report prompt via `weclaw build-report-prompt`
     """
     import os
     import sys
@@ -39,6 +51,15 @@ def run(ctx, fmt):
 
     if root not in sys.path:
         sys.path.insert(0, root)
+
+    if no_llm:
+        ctx.invoke(
+            capture_cmd,
+            no_llm=True,
+            work_dir=work_dir,
+            fmt=fmt,
+        )
+        return
 
     from algo_a import run_pipeline_a
     from algo_b import run_pipeline_b
@@ -92,3 +113,6 @@ def run(ctx, fmt):
             output(report_text, "text")
         else:
             output("No unread messages found.", "text")
+
+
+from .capture import capture as capture_cmd

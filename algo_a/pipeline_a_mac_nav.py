@@ -52,12 +52,12 @@ def _allowed_chat_title(
     return any(sidebar_name_matches_config_group(t, g) for g in allowed)
 
 
-def run_pipeline_a_mac_nav(config: WeclawConfig) -> list[str]:
+def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[str]:
     assert config.sidebar_unread_only
     os.makedirs(config.output_dir, exist_ok=True)
     written_paths: list[str] = []
 
-    driver = MacDriver()
+    driver = MacDriver(vision_backend=vision_backend)
     driver.ensure_permissions()
     window = driver.find_wechat_window(config.wechat_app_name)
     if not window:

@@ -1,10 +1,18 @@
+# Core dependencies (always needed)
 click>=8.1,<9
-litellm
 numpy
-openai
 opencv-python
 Pillow
 pyautogui
+
+# LLM dependencies (optional, only for built-in OpenRouter mode)
+# Install with: pip install weclaw[llm]
+# Not needed in stepwise mode (agent handles LLM calls)
+litellm
+openai
+
+# macOS dependencies (only on macOS)
+# Install with: pip install weclaw[macos]
 pyobjc-core
 pyobjc-framework-ApplicationServices
 pyobjc-framework-Cocoa

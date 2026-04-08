@@ -12,10 +12,10 @@ Capture chats · Generate reports · Search messages · Export · Statistics
 
 - **Vision-based capture** — uses screenshots + vision LLM to extract messages, no database decryption needed
 - **Cross-platform** — macOS (Accessibility API + Quartz) and Windows (UI Automation)
-- **10 commands** — init, run, capture, report, sessions, history, search, export, stats, unread, new-messages
+- **No API key required** — stepwise mode lets the calling agent handle all LLM calls
 - **AI-first** — JSON output by default, designed for LLM agent tool calls
-- **Fully local** — all UI automation runs on your machine, data never leaves unless you choose an LLM provider
-- **Morning triage** — automatic report generation summarizing key decisions and action items
+- **Fully local** — all UI automation runs on your machine, no data leaves your machine
+- **13 commands** — init, run, capture, finalize, report, build-report-prompt, sessions, history, search, export, stats, unread, new-messages
 
 ---
 
@@ -39,24 +39,13 @@ This means WeClaw works with **any WeChat version** and requires **no key extrac
 ### pip (Recommended)
 
 ```bash
-pip install weclaw
+pip install weclaw                 # core only (stepwise mode, no LLM deps)
+pip install weclaw[llm]            # with built-in OpenRouter LLM support
+pip install weclaw[macos]          # with macOS-specific dependencies
+pip install weclaw[llm,macos]      # everything
 ```
 
 Requires Python >= 3.10.
-
-### npm
-
-```bash
-npm install -g @anthropic-ai/weclaw
-```
-
-> Currently ships a **macOS arm64** binary. Other platforms can use the pip method.
-
-**Update to the latest version:**
-
-```bash
-npm update -g @anthropic-ai/weclaw
-```
 
 ### From Source
 
@@ -76,12 +65,6 @@ Paste the following into Claude Code, Cursor, or any AI coding agent:
 
 ```
 Help me install and configure WeClaw: pip install weclaw
-```
-
-Or for npm:
-
-```
-Help me install: npm install -g @anthropic-ai/weclaw
 ```
 
 ---
@@ -143,56 +126,96 @@ weclaw search "deadline" --chat "Team"       # search
 
 ---
 
-## Using with AI Agents
+## Using with AI Agents (Stepwise Mode)
 
-WeClaw is designed as an AI agent tool. All commands output structured JSON by default.
+WeClaw is designed for AI agents. In **stepwise mode** (`--no-llm`), WeClaw handles
+all UI automation while the agent handles all LLM calls. No API key needed.
 
-### Claude Code
+### How Stepwise Mode Works
 
-Add to your project's `CLAUDE.md`:
+```
+Agent                          WeClaw                        WeChat
+  |                              |                              |
+  |-- weclaw capture --no-llm -->|                              |
+  |                              |-- screenshot, scroll ------->|
+  |                              |-- stitch images              |
+  |                              |<-- stitched images           |
+  |<-- manifest.json + images ---|                              |
+  |                              |                              |
+  |  (agent reads manifest.json)                                |
+  |  (for each task: send .png + .prompt.txt to own LLM)        |
+  |  (write response to .response.txt)                          |
+  |                              |                              |
+  |-- weclaw finalize ---------> |                              |
+  |<-- messages.json ----------- |                              |
+  |                              |                              |
+  |-- weclaw build-report-prompt |                              |
+  |<-- prompt text --------------|                              |
+  |  (agent sends prompt to own LLM, gets report)               |
+```
+
+### Step-by-Step for Agents
+
+1. **Capture** (no LLM needed):
+
+```bash
+weclaw capture --no-llm --work-dir /tmp/weclaw_work
+```
+
+This outputs a `manifest.json` listing all pending vision tasks, along with `.png` images and `.prompt.txt` files.
+
+2. **Process vision tasks** (agent's responsibility):
+
+For each task in `manifest.json`:
+- Read the `.png` image and `.prompt.txt`
+- Send to the agent's own vision LLM
+- Write the model response to `.response.txt`
+
+3. **Finalize** (produce message JSON):
+
+```bash
+weclaw finalize --work-dir /tmp/weclaw_work
+```
+
+4. **Get report prompt** (agent calls own LLM for report):
+
+```bash
+weclaw build-report-prompt
+```
+
+### Claude Code / Cursor Configuration
+
+Add to your `CLAUDE.md` or `.cursor/rules/`:
 
 ```markdown
 ## WeClaw
 
-You can use `weclaw` to capture and query my WeChat messages.
+You can use `weclaw` to capture and query WeChat messages.
 
-Common commands:
-- `weclaw run` — capture unread chats + generate report
-- `weclaw capture` — capture unread chats to JSON
+Stepwise workflow (you handle LLM calls):
+1. `weclaw capture --no-llm` — capture screenshots, no LLM needed
+2. Process each task in manifest.json with your vision model
+3. `weclaw finalize --work-dir <dir>` — produce message JSON
+4. `weclaw build-report-prompt` — get report prompt, call your own LLM
+
+Query commands (work on captured data, no LLM needed):
 - `weclaw sessions` — list captured chats
-- `weclaw history "NAME" --limit 20 --format text` — view chat messages
+- `weclaw history "NAME" --limit 20 --format text` — view messages
 - `weclaw search "KEYWORD" --chat "CHAT_NAME"` — search messages
-- `weclaw stats "CHAT" --format text` — chat statistics
+- `weclaw stats "CHAT" --format text` — statistics
 - `weclaw export "CHAT" --format markdown` — export chat
-- `weclaw unread` — scan sidebar for unread chats
 - `weclaw new-messages` — incremental new messages
-- `weclaw report` — generate report from captures
 ```
 
-Then you can ask Claude things like:
+### Direct Mode (Built-in LLM)
 
-- "Capture my unread WeChat messages and summarize them"
-- "Search for messages about the project deadline in the Team group"
-- "Export the AI discussion group chat as markdown"
-
-### Cursor / OpenClaw / MCP Integration
-
-WeClaw works with any AI tool that can execute shell commands:
+If you prefer WeClaw to handle LLM calls directly (requires OpenRouter API key):
 
 ```bash
-# Full pipeline
-weclaw run --format text
-
-# Capture only
-weclaw capture
-
-# Query captured data
-weclaw sessions --limit 5
-weclaw history "Alice" --limit 30 --format text
-weclaw search "report" --limit 10
-
-# Monitor for new messages
-weclaw new-messages --format text
+export OPENROUTER_API_KEY="sk-or-v1-your-key"
+weclaw run                    # capture + report in one step
+weclaw capture                # capture only
+weclaw report                 # report from existing captures
 ```
 
 ---
@@ -210,23 +233,40 @@ weclaw init --config-dir /path     # custom config directory
 ### `run` — Full Pipeline
 
 ```bash
-weclaw run                         # capture + report (JSON)
+weclaw run                         # capture + report (JSON, requires API key)
+weclaw run --no-llm                # stepwise: capture only, agent handles LLM
 weclaw run --format text           # human-readable output
 ```
 
 ### `capture` — Capture Messages
 
 ```bash
-weclaw capture                     # capture unread chats
+weclaw capture                     # capture with built-in LLM
+weclaw capture --no-llm            # stepwise: output images+prompts only
+weclaw capture --no-llm --work-dir /tmp/w  # custom work directory
 weclaw capture --format text       # human-readable output
+```
+
+### `finalize` — Process Agent Responses
+
+```bash
+weclaw finalize --work-dir /tmp/weclaw_work  # produce final JSON from agent responses
 ```
 
 ### `report` — Generate Report
 
 ```bash
-weclaw report                                    # from latest captures
+weclaw report                                    # full report (requires API key)
+weclaw report --prompt-only                      # output prompt only (no LLM call)
 weclaw report --input output/GroupA.json          # from specific files
 weclaw report --format text                      # human-readable
+```
+
+### `build-report-prompt` — Get Report Prompt
+
+```bash
+weclaw build-report-prompt                       # output prompt for agent's own LLM
+weclaw build-report-prompt --input output/A.json # from specific files
 ```
 
 ### `sessions` — List Captured Chats
@@ -360,7 +400,7 @@ weclaw/
 ├── weclaw_cli/                 # CLI layer (click commands)
 │   ├── main.py                # CLI entry point
 │   ├── context.py             # Config loading
-│   ├── commands/              # All CLI commands
+│   ├── commands/              # All CLI commands (capture, finalize, report, etc.)
 │   └── output/                # JSON/text formatter
 │
 ├── algo_a/                     # Vision-based message capture
@@ -385,8 +425,11 @@ weclaw/
 │
 ├── shared/                     # Cross-cutting utilities
 │   ├── platform_api.py        # PlatformDriver protocol
+│   ├── vision_backend.py      # VisionBackend protocol (pluggable LLM interface)
+│   ├── stepwise_backend.py    # StepwiseBackend (writes images+prompts for agent)
+│   ├── vision_ai.py           # OpenRouterBackend (built-in LLM, optional)
 │   ├── message_schema.py      # Message dataclass
-│   └── llm_client.py          # OpenRouter wrapper
+│   └── llm_client.py          # OpenRouter text wrapper (optional)
 │
 ├── npm/                        # npm binary distribution
 │   ├── weclaw/                # Main npm package

@@ -46,6 +46,8 @@ from .commands.init import init
 from .commands.run import run
 from .commands.capture import capture
 from .commands.report import report
+from .commands.finalize import finalize
+from .commands.build_report_prompt import build_report_prompt
 from .commands.sessions import sessions
 from .commands.history import history
 from .commands.search import search
@@ -58,6 +60,8 @@ cli.add_command(init)
 cli.add_command(run)
 cli.add_command(capture)
 cli.add_command(report)
+cli.add_command(finalize)
+cli.add_command(build_report_prompt)
 cli.add_command(sessions)
 cli.add_command(history)
 cli.add_command(search)

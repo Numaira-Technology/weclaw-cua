@@ -9,7 +9,7 @@ import pyautogui
 from shared.datatypes import ChatMessage, SidebarRow
 from shared.platform_api import PlatformDriver
 from shared.sidebar_classification import parse_threads_json, threads_to_sidebar_rows
-from shared.vision_ai import VisionAI
+from shared.vision_backend import VisionBackend, create_vision_backend
 from shared.vision_response_json import parse_json_object_from_model_text
 from shared.vision_prompts import COORDS_PROMPT_TEMPLATE, SIDEBAR_PROMPT
 from platform_mac.find_wechat_window import find_wechat_window as locate_wechat
@@ -25,9 +25,9 @@ from platform_mac.macos_window import (
 
 
 class MacDriver(MacDriverMessages, PlatformDriver):
-    def __init__(self) -> None:
+    def __init__(self, vision_backend: VisionBackend | None = None) -> None:
         self.pid: int = 0
-        self.vision_ai = VisionAI()
+        self.vision_ai: VisionBackend = vision_backend or create_vision_backend("openrouter")
         self._nav_messages_screen_pt: tuple[int, int] | None = None
 
     def ensure_permissions(self) -> None:

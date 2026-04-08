@@ -18,11 +18,11 @@ from shared.sidebar_classification import unread_cap_from_badge_text
 from utils.image_stitcher import save_stitched_debug, stitch_screenshots
 
 if TYPE_CHECKING:
-    from shared.vision_ai import VisionAI
+    from shared.vision_backend import VisionBackend
 
 class MacDriverMessages:
     pid: int
-    vision_ai: "VisionAI"
+    vision_ai: "VisionBackend"
 
     def scroll_chat_panel(self, direction: str = "down") -> None:
         assert direction in ("up", "down")

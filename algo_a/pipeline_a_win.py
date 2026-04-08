@@ -19,16 +19,16 @@ from algo_a.sidebar_scroll_to_top import scroll_sidebar_to_top
 from config.weclaw_config import WeclawConfig
 
 
-def _create_driver():
+def _create_driver(vision_backend=None):
     """Auto-detect the platform and return the appropriate PlatformDriver."""
     if sys.platform == "win32":
         from platform_win.driver import WinDriver
 
-        return WinDriver()
+        return WinDriver(vision_backend=vision_backend)
     if sys.platform == "darwin":
         from platform_mac.mac_ai_driver import MacDriver
 
-        return MacDriver()
+        return MacDriver(vision_backend=vision_backend)
     raise NotImplementedError(f"Platform {sys.platform} is not supported yet.")
 
 
@@ -55,19 +55,19 @@ def _is_chat_name_match(ui_name: str, config_name: str) -> bool:
         return clean_ui_name == clean_config_name
 
 
-def run_pipeline_a(config: WeclawConfig) -> list[str]:
+def run_pipeline_a(config: WeclawConfig, vision_backend=None) -> list[str]:
     """Run the full message collection pipeline. Return paths to written JSON files."""
     assert config is not None
 
     if sys.platform == "darwin" and config.sidebar_unread_only:
         from algo_a.pipeline_a_mac_nav import run_pipeline_a_mac_nav
 
-        return run_pipeline_a_mac_nav(config)
+        return run_pipeline_a_mac_nav(config, vision_backend=vision_backend)
 
     os.makedirs(config.output_dir, exist_ok=True)
     written_paths: list[str] = []
 
-    driver = _create_driver()
+    driver = _create_driver(vision_backend=vision_backend)
     if sys.platform == "darwin":
         driver.ensure_permissions()
     window = driver.find_wechat_window(config.wechat_app_name)
