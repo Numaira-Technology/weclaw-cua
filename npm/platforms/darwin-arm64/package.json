@@ -1,0 +1,12 @@
+{
+  "name": "@anthropic-ai/weclaw-darwin-arm64",
+  "version": "0.1.0",
+  "description": "weclaw binary for macOS arm64",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["bin/"],
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  }
+}

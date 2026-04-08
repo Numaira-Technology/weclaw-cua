@@ -1,198 +1,443 @@
 # WeClaw
 
-OpenClaw skill for extracting unread WeChat messages and generating customized reports.
+**Vision-based WeChat message capture and report generation from the command line.**
+
+License: Apache-2.0 Platform
+
+Capture chats · Generate reports · Search messages · Export · Statistics
+
+---
+
+## Highlights
+
+- **Vision-based capture** — uses screenshots + vision LLM to extract messages, no database decryption needed
+- **Cross-platform** — macOS (Accessibility API + Quartz) and Windows (UI Automation)
+- **10 commands** — init, run, capture, report, sessions, history, search, export, stats, unread, new-messages
+- **AI-first** — JSON output by default, designed for LLM agent tool calls
+- **Fully local** — all UI automation runs on your machine, data never leaves unless you choose an LLM provider
+- **Morning triage** — automatic report generation summarizing key decisions and action items
+
+---
 
 ## How It Works
 
-1. A **platform layer** (`platform_mac/` or `platform_win/`) interfaces with the OS to locate the WeChat window and read its UI tree.
-2. **algo_a** uses the platform layer to find unread chats, scroll through messages, and extract structured message data into JSON files.
-3. **algo_b** loads those JSON files, combines them with a user-customized prompt, and calls an LLM to generate a report.
+Unlike tools that decrypt WeChat's local SQLite databases, WeClaw uses a **pure vision approach**:
 
-Delivery channels (Telegram, Feishu, etc.) are handled by OpenClaw, not this repo.
+1. Locates the WeChat desktop window via OS-level APIs
+2. Scans the sidebar for unread chats using vision AI
+3. Clicks into each chat, scrolls through messages, captures screenshots
+4. Stitches screenshots into long images (OpenCV-based template matching)
+5. Sends stitched images to a vision LLM for structured message extraction
+6. Post-processes and deduplicates extracted messages into clean JSON
 
-### OpenClaw packaging
+This means WeClaw works with **any WeChat version** and requires **no key extraction or database access**.
 
-- Skill source: `openclaw_skill/weclaw/SKILL.md` (AgentSkills / OpenClaw frontmatter).
-- Host entry writes **`last_run.json`** in your configured `output_dir` after each `./run.sh` (paths to message JSON, ok/error for cron and agents).
-- Install into the active workspace `skills/weclaw/`:
+---
 
-  ```bash
-  ./scripts/install_openclaw_skill.sh
-  ```
+## Installation
 
-  Override workspace root with `OPENCLAW_WORKSPACE` if needed; when `openclaw` is on `PATH`, the script defaults to the `workspaceDir` reported by `openclaw skills list --json`.
-
-- Verify packaging without running WeChat:
-
-  ```bash
-  python3 scripts/verify_openclaw_packaging.py
-  ```
-
-### Supported Platforms
-
-| Platform | Directory | UI Automation API |
-|----------|-----------|-------------------|
-| macOS | `platform_mac/` | Accessibility API (AXUIElement via pyobjc) |
-| Windows | `platform_win/` | UI Automation (IUIAutomation via comtypes) |
-
-## Setup
-
-### 环境与依赖
+### pip (Recommended)
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+pip install weclaw
 ```
 
-### macOS：分步调试（按顺序）
+Requires Python >= 3.10.
 
-| Step | 脚本 | 说明 |
-|------|------|------|
-| 0 | `debug_mac_wechat_tree.py` | 可选，查看 AX 树 |
-| 1 | `debug_mac_sidebar_unread.py` | 扫描侧栏未读 |
-| 2 | `debug_mac_click_chat.py` | 点击进入会话 |
-| 3 | `debug_mac_capture_chat.py` | 滚动截图并拼接长图 → `debug_outputs/capture/long_image.png` |
-| 4 | 见下节 | 对长图做 LLM 提取 |
+### npm
 
 ```bash
-python3 scripts/debug_mac_wechat_tree.py
-python3 scripts/debug_mac_sidebar_unread.py
-python3 scripts/debug_mac_click_chat.py
-python3 scripts/debug_mac_capture_chat.py
+npm install -g @anthropic-ai/weclaw
 ```
 
-### 长图消息提取（OpenRouter）
+> Currently ships a **macOS arm64** binary. Other platforms can use the pip method.
 
-需设置 `OPENROUTER_API_KEY`。`--chat` 填微信窗口**标题栏**里的会话名（仅作 LLM 上下文，不是路径），应与 Step 3 时打开的会话一致。默认读取项目内 `debug_outputs/capture/long_image.png`。
+**Update to the latest version:**
 
 ```bash
-export OPENROUTER_API_KEY="sk-or-v1-你的key"
-python3 scripts/debug_mac_read_visible_messages.py --chat "test-1"
+npm update -g @anthropic-ai/weclaw
 ```
 
-常用可选参数：`--max-side` 缩小长图；`--chunk-max-height` 默认 2400（按高度自动分段，最多 `--chunk-max-count 10`）；`--chunk-max-height 0` 时用 `--chunks` 固定条数（1～10）。示例：
+### From Source
 
 ```bash
-python3 -u scripts/debug_mac_read_visible_messages.py \
-  --chat "会话名" \
-  --max-side 256 \
-  --model openrouter/google/gemini-3-flash-preview
+git clone https://github.com/anthropic-ai/weclaw.git
+cd weclaw
+python3 -m venv .venv
+./.venv/bin/pip install -r requirements.txt
+pip install -e .
 ```
 
-### 单群闭环（滚动 + LLM + JSON）
+---
 
-需已 `export OPENROUTER_API_KEY`。第二条与 Step 4 同款 `read_long_image` 路径；分段参数见上节。
+## Installation (For AI Agents)
+
+Paste the following into Claude Code, Cursor, or any AI coding agent:
+
+```
+Help me install and configure WeClaw: pip install weclaw
+```
+
+Or for npm:
+
+```
+Help me install: npm install -g @anthropic-ai/weclaw
+```
+
+---
+
+## Quick Start
+
+### Step 1 — Initialize
 
 ```bash
-python3 -u scripts/debug_process_one_chat.py
-python3 -u scripts/debug_process_one_chat.py --read-visible --chat "会话名"
+weclaw init
 ```
 
-### 多未读批量
+This creates `config/config.json` from the template and verifies platform prerequisites.
 
-`--read-visible` 与单群长图流程一致。
+#### macOS: Grant Accessibility Permission
+
+Before running, make sure your terminal app has **Accessibility** access:
+
+1. Open **System Settings > Privacy & Security > Accessibility**
+2. Add your terminal app (Terminal, iTerm2, or your IDE's terminal)
+3. Restart the terminal after enabling
+
+#### Windows: Match Elevation
+
+If WeChat is running as admin, run the script elevated too (`Run as Administrator`).
+
+### Step 2 — Configure
+
+Edit `config/config.json`:
+
+```json
+{
+  "wechat_app_name": "WeChat",
+  "groups_to_monitor": ["*"],
+  "sidebar_unread_only": true,
+  "report_custom_prompt": "Summarize key decisions and action items.",
+  "openrouter_api_key": "sk-or-YOUR-KEY-HERE",
+  "llm_model": "openai/gpt-4o",
+  "output_dir": "output"
+}
+```
+
+Set your API key either in the config or via environment variable:
 
 ```bash
-python3 scripts/debug_mac_multiple_chats.py
-python3 scripts/debug_mac_multiple_chats.py --read-visible --max-chats 3 --max-side 768
+export OPENROUTER_API_KEY="sk-or-v1-your-key"
 ```
 
-**macOS:** Accessibility permission is required. On first run, the system will prompt you to grant access in System Preferences > Privacy & Security > Accessibility.
-
-**Windows:** UI Automation generally works without extra permissions. If WeChat is running as admin, run the script elevated too (`Run as Administrator`).
-
-### macOS: 滚动拼接 / 长图提取
-
-长图拼接与 Step 4 消息提取已改为 **纯 NumPy**，不依赖 OpenCV。若你本地仍安装旧版脚本依赖的 `opencv-python` 且 `import cv2` 报错，可卸载或按官方说明重装 wheel；与本仓库当前主路径无关。
-
-**OpenRouter / litellm**：请求前会设置 ASCII 的 `OR_APP_NAME` / `OR_SITE_URL` 并注入 `X-Title`，避免 `OR_APP_NAME` 含中文导致 `ascii codec can't encode`。长图解析失败时仍会尽量保留 `long_image.png`（拼接阶段已写入；LLM 失败时再尝试写盘）。
-
-**长图送 LLM 分段**：默认按 `chunk_max_strip_height_px`（如 2400px）估算竖向条数，不超过 `chunk_max_count`（默认 10）。拼接接缝处的重复消息由 prompt、分段合并与后处理去重共同抑制。
-
-## Usage
+### Step 3 — Use It
 
 ```bash
-./run.sh                       
+weclaw run                                   # full pipeline: capture + report
+weclaw capture                               # capture only
+weclaw report                                # report from existing captures
+weclaw sessions                              # list captured chats
+weclaw history "Group A" --limit 20          # view messages
+weclaw search "deadline" --chat "Team"       # search
 ```
 
-## Directory Structure
+---
+
+## Using with AI Agents
+
+WeClaw is designed as an AI agent tool. All commands output structured JSON by default.
+
+### Claude Code
+
+Add to your project's `CLAUDE.md`:
+
+```markdown
+## WeClaw
+
+You can use `weclaw` to capture and query my WeChat messages.
+
+Common commands:
+- `weclaw run` — capture unread chats + generate report
+- `weclaw capture` — capture unread chats to JSON
+- `weclaw sessions` — list captured chats
+- `weclaw history "NAME" --limit 20 --format text` — view chat messages
+- `weclaw search "KEYWORD" --chat "CHAT_NAME"` — search messages
+- `weclaw stats "CHAT" --format text` — chat statistics
+- `weclaw export "CHAT" --format markdown` — export chat
+- `weclaw unread` — scan sidebar for unread chats
+- `weclaw new-messages` — incremental new messages
+- `weclaw report` — generate report from captures
+```
+
+Then you can ask Claude things like:
+
+- "Capture my unread WeChat messages and summarize them"
+- "Search for messages about the project deadline in the Team group"
+- "Export the AI discussion group chat as markdown"
+
+### Cursor / OpenClaw / MCP Integration
+
+WeClaw works with any AI tool that can execute shell commands:
+
+```bash
+# Full pipeline
+weclaw run --format text
+
+# Capture only
+weclaw capture
+
+# Query captured data
+weclaw sessions --limit 5
+weclaw history "Alice" --limit 30 --format text
+weclaw search "report" --limit 10
+
+# Monitor for new messages
+weclaw new-messages --format text
+```
+
+---
+
+## Command Reference
+
+### `init` — First-Time Setup
+
+```bash
+weclaw init                        # create config + verify permissions
+weclaw init --force                # overwrite existing config
+weclaw init --config-dir /path     # custom config directory
+```
+
+### `run` — Full Pipeline
+
+```bash
+weclaw run                         # capture + report (JSON)
+weclaw run --format text           # human-readable output
+```
+
+### `capture` — Capture Messages
+
+```bash
+weclaw capture                     # capture unread chats
+weclaw capture --format text       # human-readable output
+```
+
+### `report` — Generate Report
+
+```bash
+weclaw report                                    # from latest captures
+weclaw report --input output/GroupA.json          # from specific files
+weclaw report --format text                      # human-readable
+```
+
+### `sessions` — List Captured Chats
+
+```bash
+weclaw sessions                    # all captured chats (JSON)
+weclaw sessions --limit 10        # last 10
+weclaw sessions --format text     # human-readable
+```
+
+### `history` — View Chat Messages
+
+```bash
+weclaw history "Group A"                         # last 50 messages
+weclaw history "Group A" --limit 100 --offset 50 # pagination
+weclaw history "Alice" --type text               # text messages only
+weclaw history "Alice" --format text             # human-readable
+```
+
+**Options:** `--limit`, `--offset`, `--type`, `--format`
+
+### `search` — Search Messages
+
+```bash
+weclaw search "hello"                            # global search
+weclaw search "hello" --chat "Alice"             # in specific chat
+weclaw search "meeting" --chat "A" --chat "B"    # multiple chats
+weclaw search "report" --type text               # text only
+```
+
+**Options:** `--chat` (repeatable), `--limit`, `--offset`, `--type`, `--format`
+
+### `export` — Export Chat
+
+```bash
+weclaw export "Alice" --format markdown          # to stdout
+weclaw export "Alice" --format txt --output chat.txt  # to file
+weclaw export "Team" --limit 1000                # more messages
+```
+
+**Options:** `--format markdown|txt`, `--output`, `--limit`
+
+### `stats` — Chat Statistics
+
+```bash
+weclaw stats "Group A"             # JSON stats
+weclaw stats "Alice" --format text # human-readable
+```
+
+### `unread` — Scan for Unread Chats
+
+```bash
+weclaw unread                      # scan sidebar via vision AI
+weclaw unread --limit 10           # at most 10
+weclaw unread --format text        # human-readable
+```
+
+### `new-messages` — Incremental Messages
+
+```bash
+weclaw new-messages                # first: save state, return all
+weclaw new-messages                # subsequent: only new since last
+```
+
+State saved at `<output_dir>/last_check.json`. Delete to reset.
+
+---
+
+## Message Types
+
+The `--type` option (on `history` and `search`):
+
+| Value       | Description                  |
+|-------------|------------------------------|
+| text        | Text messages                |
+| system      | System messages              |
+| link_card   | Links and shared content     |
+| image       | Images                       |
+| file        | File attachments             |
+| recalled    | Recalled messages            |
+| unsupported | Unsupported message types    |
+
+---
+
+## System Requirements
+
+| Platform              | Status      | Notes                                          |
+|-----------------------|-------------|------------------------------------------------|
+| macOS (Apple Silicon) | Supported   | Requires Accessibility permission              |
+| macOS (Intel)         | Supported   | Requires Accessibility permission              |
+| Windows               | Supported   | Match elevation with WeChat if needed          |
+
+- **Python** >= 3.10
+- **WeChat Desktop** — any version (vision-based, no version dependency)
+- **OpenRouter API key** — for vision LLM message extraction and report generation
+
+---
+
+## Configuration
+
+### `config/config.json`
+
+```json
+{
+  "wechat_app_name": "WeChat",
+  "groups_to_monitor": ["*"],
+  "sidebar_unread_only": true,
+  "report_custom_prompt": "Summarize key decisions and action items.",
+  "openrouter_api_key": "",
+  "llm_model": "openai/gpt-4o",
+  "output_dir": "output"
+}
+```
+
+| Field                | Description                                                       |
+|----------------------|-------------------------------------------------------------------|
+| `wechat_app_name`    | Window title for WeChat (usually "WeChat")                        |
+| `groups_to_monitor`  | `["*"]` = all groups, or list specific chat names                 |
+| `sidebar_unread_only`| `true` = only process chats with unread badges                    |
+| `report_custom_prompt`| Custom instructions for the LLM report                           |
+| `openrouter_api_key` | API key (or use `OPENROUTER_API_KEY` env var)                     |
+| `llm_model`          | LLM model identifier for report generation                       |
+| `output_dir`         | Directory for output JSON files                                   |
+
+---
+
+## Architecture
 
 ```
 weclaw/
-├── run.sh                              # one-command entry point (runs scripts/run_full_pipeline.py)
-├── openclaw_skill/weclaw/SKILL.md      # OpenClaw / AgentSkills skill
-├── scripts/install_openclaw_skill.sh   # copy skill into OpenClaw workspace skills/
-├── scripts/run_full_pipeline.py        # algo_a + algo_b + last_run.json
-├── scripts/verify_openclaw_packaging.py
-├── requirements.txt
+├── weclaw_cli/                 # CLI layer (click commands)
+│   ├── main.py                # CLI entry point
+│   ├── context.py             # Config loading
+│   ├── commands/              # All CLI commands
+│   └── output/                # JSON/text formatter
 │
-├── config/
-│   ├── __init__.py
-│   ├── weclaw_config.py                # WeclawConfig dataclass + load_config()
-│   └── config.json.example
+├── algo_a/                     # Vision-based message capture
+│   ├── pipeline_a_win.py     # Main pipeline (both platforms)
+│   ├── capture_chat.py        # Screenshot scroll-capture engine
+│   ├── extract_messages.py    # Vision LLM message extraction
+│   └── ...                    # Sidebar scan, click, stitch, dedup
 │
-├── shared/                             # cross-cutting utilities
-│   ├── __init__.py
-│   ├── platform_api.py               # PlatformDriver Protocol (interface contract)
-│   ├── llm_client.py                  # thin OpenRouter API wrapper
-│   └── message_schema.py             # Message dataclass + serialization
+├── algo_b/                     # LLM report generation
+│   ├── pipeline_b.py         # Report pipeline
+│   ├── build_report_prompt.py # Prompt construction
+│   └── generate_report.py    # LLM call
 │
-├── platform_mac/                       # macOS platform layer (implements PlatformDriver)
-│   ├── __init__.py                    # exports create_driver()
-│   ├── driver.py                     # MacDriver class — all 14 methods to implement
-│   ├── grant_permissions.py           # check/prompt macOS Accessibility permission
-│   ├── find_wechat_window.py          # locate WeChat window, return WechatWindow
-│   └── ui_tree_reader.py             # generic AXUIElement tree traversal helpers
+├── platform_mac/               # macOS platform layer
+│   ├── driver.py              # Quartz screenshots + CGEvent
+│   ├── mac_ai_driver.py       # Vision AI driver
+│   └── ...                    # Window detection, OCR, stitching
 │
-├── platform_win/                       # Windows platform layer (implements PlatformDriver)
-│   ├── __init__.py                    # exports create_driver()
-│   ├── driver.py                     # WinDriver class — all 14 methods to implement
-│   ├── grant_permissions.py           # check Windows prerequisites (admin, platform)
-│   ├── find_wechat_window.py          # locate WeChat window via UI Automation
-│   └── ui_tree_reader.py             # generic IUIAutomation tree traversal helpers
+├── platform_win/               # Windows platform layer
+│   ├── driver.py              # Vision AI driver
+│   └── ...                    # Window detection, UI Automation
 │
-├── algo_a/                             # message collection (DONE)
-│   ├── __init__.py
-│   ├── pipeline_a.py                  # orchestrate: auto-detect platform, run collection
-│   ├── list_unread_chats.py           # scan sidebar for unread badges (scrolls if needed)
-│   ├── click_into_chat.py            # click sidebar row + wait for panel ready
-│   ├── scroll_chat_to_bottom.py      # scroll message panel to bottom
-│   ├── read_messages_from_uitree.py  # extract + classify messages from UI tree
-│   ├── write_messages_json.py         # write messages to JSON file
-│   ├── TESTING.md                    # test plan with edge cases
-│   └── DEVGUIDE.md                   # instructions for platform developers
+├── shared/                     # Cross-cutting utilities
+│   ├── platform_api.py        # PlatformDriver protocol
+│   ├── message_schema.py      # Message dataclass
+│   └── llm_client.py          # OpenRouter wrapper
 │
-├── algo_b/                             # report generation
-│   ├── __init__.py
-│   ├── pipeline_b.py                  # orchestrate full report flow
-│   ├── load_messages.py              # read JSON files from algo_a
-│   ├── build_report_prompt.py        # combine messages + custom prompt
-│   └── generate_report.py           # call LLM, return report
+├── npm/                        # npm binary distribution
+│   ├── weclaw/                # Main npm package
+│   ├── platforms/             # Per-platform binary packages
+│   └── scripts/build.py      # PyInstaller build script
 │
-└── test/
-    └── __init__.py
+├── config/                     # Configuration
+├── scripts/                    # Debug & utility scripts
+├── pyproject.toml              # Python package config
+├── entry.py                    # PyInstaller entry point
+└── run.sh                      # Shell entry point
 ```
+
+---
 
 ## Data Flow
 
 ```
-algo_a                                          algo_b
-┌─────────────────────────────────────┐        ┌──────────────────────────────┐
-│ list_unread_chats                   │        │ load_messages                │
-│         │                           │        │         │                    │
-│         v                           │        │         v                    │
-│ click_into_chat                     │        │ build_report_prompt          │
-│         │                           │        │         │                    │
-│         v                           │        │         v                    │
-│ scroll_chat_to_bottom               │        │ generate_report              │
-│         │                           │        │         │                    │
-│         v                           │        │         v                    │
-│ read_messages_from_uitree           │        │ report text (stdout/file)    │
-│         │                           │        └──────────────────────────────┘
-│         v                           │                  ^
-│ write_messages_json ── JSON files ──┼──────────────────┘
-│         │                           │
-│    (loop next chat)                 │
-└─────────────────────────────────────┘
+weclaw run / weclaw capture
+  │
+  ├─ algo_a (vision capture)
+  │   ├─ find WeChat window (OS API)
+  │   ├─ scan sidebar for unread (vision AI)
+  │   ├─ for each chat:
+  │   │   ├─ click into chat
+  │   │   ├─ scroll + capture screenshots
+  │   │   ├─ stitch into long image
+  │   │   ├─ vision LLM → structured JSON
+  │   │   └─ post-process + dedup
+  │   └─ write JSON files to output/
+  │
+  └─ algo_b (report generation)
+      ├─ load message JSONs
+      ├─ build report prompt
+      ├─ call LLM
+      └─ output report text
 ```
+
+---
+
+## License
+
+Apache License 2.0
+
+---
+
+## Disclaimer
+
+This project is a local UI automation tool for personal use only:
+
+- **Read-only** — captures what is visible on screen, does not modify WeChat data
+- **No database access** — uses pure vision, no decryption or memory scanning
+- **No cloud transmission** — all automation runs locally; only LLM API calls leave your machine (to your configured provider)
+- **Use at your own risk** — for personal learning and research purposes only

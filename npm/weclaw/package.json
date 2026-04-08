@@ -1,0 +1,30 @@
+{
+  "name": "@anthropic-ai/weclaw",
+  "version": "0.1.0",
+  "description": "Vision-based WeChat message capture & report CLI — designed for LLM agent integration.",
+  "bin": {
+    "weclaw": "bin/weclaw.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "bin/",
+    "install.js"
+  ],
+  "optionalDependencies": {
+    "@anthropic-ai/weclaw-darwin-arm64": "0.1.0"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "keywords": ["wechat", "weclaw", "cli", "vision", "llm", "ai", "message-capture"],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anthropic-ai/weclaw"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

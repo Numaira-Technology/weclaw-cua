@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "weclaw"
+version = "0.1.0"
+description = "Vision-based WeChat message capture and report CLI for LLMs"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.1,<9",
+    "litellm",
+    "numpy",
+    "openai",
+    "opencv-python",
+    "Pillow",
+    "pyautogui",
+]
+
+[project.scripts]
+weclaw = "weclaw_cli.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.setuptools.package-data]
+weclaw_cli = ["bin/*"]

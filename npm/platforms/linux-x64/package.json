@@ -1,0 +1,12 @@
+{
+  "name": "@anthropic-ai/weclaw-linux-x64",
+  "version": "0.1.0",
+  "description": "weclaw binary for Linux x64",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "files": ["bin/"],
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  }
+}
