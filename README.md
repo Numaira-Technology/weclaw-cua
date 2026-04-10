@@ -1,4 +1,4 @@
-# WeClaw
+# WeClaw-CUA
 
 **Vision-based WeChat message capture and report generation from the command line.**
 
@@ -21,7 +21,7 @@ Capture chats · Generate reports · Search messages · Export · Statistics
 
 ## How It Works
 
-Unlike tools that decrypt WeChat's local SQLite databases, WeClaw uses a **pure vision approach**:
+Unlike tools that decrypt WeChat's local SQLite databases, WeClaw-CUA uses a **pure vision approach**:
 
 1. Locates the WeChat desktop window via OS-level APIs
 2. Scans the sidebar for unread chats using vision AI
@@ -30,32 +30,48 @@ Unlike tools that decrypt WeChat's local SQLite databases, WeClaw uses a **pure 
 5. Sends stitched images to a vision LLM for structured message extraction
 6. Post-processes and deduplicates extracted messages into clean JSON
 
-This means WeClaw works with **any WeChat version** and requires **no key extraction or database access**.
+This means WeClaw-CUA works with **any WeChat version** and requires **no key extraction or database access**.
 
 ---
 
 ## Installation
 
-### pip (Recommended)
-
-```bash
-pip install weclaw                 # core only (stepwise mode, no LLM deps)
-pip install weclaw[llm]            # with built-in OpenRouter LLM support
-pip install weclaw[macos]          # with macOS-specific dependencies
-pip install weclaw[llm,macos]      # everything
-```
-
 Requires Python >= 3.10.
 
-### From Source
+### PyPI
+
+The PyPI project name `weclaw` is an **unrelated third-party package**. This project publishes as **`weclaw-cua`**. When available: `pip install weclaw-cua` (with extras `[llm]`, `[macos]` as needed). Until you see it on PyPI, use **From Source** below.
+
+### From Source (Recommended)
 
 ```bash
 git clone https://github.com/anthropic-ai/weclaw.git
 cd weclaw
 python3 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt
-pip install -e .
 ```
+
+Then install in editable mode (pick one):
+
+```bash
+./.venv/bin/pip install -e ".[macos,llm]"   # macOS: automation + LLM deps
+```
+
+On **Windows**, omit `macos`:
+
+```bash
+./.venv/bin/pip install -e ".[llm]"
+```
+
+Other variants:
+
+```bash
+./.venv/bin/pip install -e .              # core only (stepwise, no LLM deps)
+./.venv/bin/pip install -e ".[llm]"       # LLM deps (any OS)
+./.venv/bin/pip install -e ".[macos]"      # macOS-only deps
+```
+
+The `weclaw` console command remains an **alias** for `weclaw-cua`.
 
 ---
 
@@ -64,7 +80,7 @@ pip install -e .
 Paste the following into Claude Code, Cursor, or any AI coding agent:
 
 ```
-Help me install and configure WeClaw: pip install weclaw
+Help me install and configure WeClaw-CUA from the README "From Source" section (clone, venv, requirements.txt, pip install -e ".[macos,llm]" on macOS or ".[llm]" on Windows).
 ```
 
 ---
@@ -74,7 +90,7 @@ Help me install and configure WeClaw: pip install weclaw
 ### Step 1 — Initialize
 
 ```bash
-weclaw init
+weclaw-cua init
 ```
 
 This creates `config/config.json` from the template and verifies platform prerequisites.
@@ -116,27 +132,27 @@ export OPENROUTER_API_KEY="sk-or-v1-your-key"
 ### Step 3 — Use It
 
 ```bash
-weclaw run                                   # full pipeline: capture + report
-weclaw capture                               # capture only
-weclaw report                                # report from existing captures
-weclaw sessions                              # list captured chats
-weclaw history "Group A" --limit 20          # view messages
-weclaw search "deadline" --chat "Team"       # search
+weclaw-cua run                                   # full pipeline: capture + report
+weclaw-cua capture                               # capture only
+weclaw-cua report                                # report from existing captures
+weclaw-cua sessions                              # list captured chats
+weclaw-cua history "Group A" --limit 20          # view messages
+weclaw-cua search "deadline" --chat "Team"       # search
 ```
 
 ---
 
 ## Using with AI Agents (Stepwise Mode)
 
-WeClaw is designed for AI agents. In **stepwise mode** (`--no-llm`), WeClaw handles
+WeClaw-CUA is designed for AI agents. In **stepwise mode** (`--no-llm`), WeClaw-CUA handles
 all UI automation while the agent handles all LLM calls. No API key needed.
 
 ### How Stepwise Mode Works
 
 ```
-Agent                          WeClaw                        WeChat
+Agent                          WeClaw-CUA                    WeChat
   |                              |                              |
-  |-- weclaw capture --no-llm -->|                              |
+  |-- weclaw-cua capture --no-llm -->|                              |
   |                              |-- screenshot, scroll ------->|
   |                              |-- stitch images              |
   |                              |<-- stitched images           |
@@ -146,10 +162,10 @@ Agent                          WeClaw                        WeChat
   |  (for each task: send .png + .prompt.txt to own LLM)        |
   |  (write response to .response.txt)                          |
   |                              |                              |
-  |-- weclaw finalize ---------> |                              |
+  |-- weclaw-cua finalize ---------> |                              |
   |<-- messages.json ----------- |                              |
   |                              |                              |
-  |-- weclaw build-report-prompt |                              |
+  |-- weclaw-cua build-report-prompt |                              |
   |<-- prompt text --------------|                              |
   |  (agent sends prompt to own LLM, gets report)               |
 ```
@@ -159,7 +175,7 @@ Agent                          WeClaw                        WeChat
 1. **Capture** (no LLM needed):
 
 ```bash
-weclaw capture --no-llm --work-dir /tmp/weclaw_work
+weclaw-cua capture --no-llm --work-dir /tmp/weclaw_work
 ```
 
 This outputs a `manifest.json` listing all pending vision tasks, along with `.png` images and `.prompt.txt` files.
@@ -174,13 +190,13 @@ For each task in `manifest.json`:
 3. **Finalize** (produce message JSON):
 
 ```bash
-weclaw finalize --work-dir /tmp/weclaw_work
+weclaw-cua finalize --work-dir /tmp/weclaw_work
 ```
 
 4. **Get report prompt** (agent calls own LLM for report):
 
 ```bash
-weclaw build-report-prompt
+weclaw-cua build-report-prompt
 ```
 
 ### Claude Code / Cursor Configuration
@@ -188,34 +204,34 @@ weclaw build-report-prompt
 Add to your `CLAUDE.md` or `.cursor/rules/`:
 
 ```markdown
-## WeClaw
+## WeClaw-CUA
 
-You can use `weclaw` to capture and query WeChat messages.
+You can use `weclaw-cua` (or the `weclaw` alias) to capture and query WeChat messages.
 
 Stepwise workflow (you handle LLM calls):
-1. `weclaw capture --no-llm` — capture screenshots, no LLM needed
+1. `weclaw-cua capture --no-llm` — capture screenshots, no LLM needed
 2. Process each task in manifest.json with your vision model
-3. `weclaw finalize --work-dir <dir>` — produce message JSON
-4. `weclaw build-report-prompt` — get report prompt, call your own LLM
+3. `weclaw-cua finalize --work-dir <dir>` — produce message JSON
+4. `weclaw-cua build-report-prompt` — get report prompt, call your own LLM
 
 Query commands (work on captured data, no LLM needed):
-- `weclaw sessions` — list captured chats
-- `weclaw history "NAME" --limit 20 --format text` — view messages
-- `weclaw search "KEYWORD" --chat "CHAT_NAME"` — search messages
-- `weclaw stats "CHAT" --format text` — statistics
-- `weclaw export "CHAT" --format markdown` — export chat
-- `weclaw new-messages` — incremental new messages
+- `weclaw-cua sessions` — list captured chats
+- `weclaw-cua history "NAME" --limit 20 --format text` — view messages
+- `weclaw-cua search "KEYWORD" --chat "CHAT_NAME"` — search messages
+- `weclaw-cua stats "CHAT" --format text` — statistics
+- `weclaw-cua export "CHAT" --format markdown` — export chat
+- `weclaw-cua new-messages` — incremental new messages
 ```
 
 ### Direct Mode (Built-in LLM)
 
-If you prefer WeClaw to handle LLM calls directly (requires OpenRouter API key):
+If you prefer WeClaw-CUA to handle LLM calls directly (requires OpenRouter API key):
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-v1-your-key"
-weclaw run                    # capture + report in one step
-weclaw capture                # capture only
-weclaw report                 # report from existing captures
+weclaw-cua run                    # capture + report in one step
+weclaw-cua capture                # capture only
+weclaw-cua report                 # report from existing captures
 ```
 
 ---
@@ -225,65 +241,65 @@ weclaw report                 # report from existing captures
 ### `init` — First-Time Setup
 
 ```bash
-weclaw init                        # create config + verify permissions
-weclaw init --force                # overwrite existing config
-weclaw init --config-dir /path     # custom config directory
+weclaw-cua init                        # create config + verify permissions
+weclaw-cua init --force                # overwrite existing config
+weclaw-cua init --config-dir /path     # custom config directory
 ```
 
 ### `run` — Full Pipeline
 
 ```bash
-weclaw run                         # capture + report (JSON, requires API key)
-weclaw run --no-llm                # stepwise: capture only, agent handles LLM
-weclaw run --format text           # human-readable output
+weclaw-cua run                         # capture + report (JSON, requires API key)
+weclaw-cua run --no-llm                # stepwise: capture only, agent handles LLM
+weclaw-cua run --format text           # human-readable output
 ```
 
 ### `capture` — Capture Messages
 
 ```bash
-weclaw capture                     # capture with built-in LLM
-weclaw capture --no-llm            # stepwise: output images+prompts only
-weclaw capture --no-llm --work-dir /tmp/w  # custom work directory
-weclaw capture --format text       # human-readable output
+weclaw-cua capture                     # capture with built-in LLM
+weclaw-cua capture --no-llm            # stepwise: output images+prompts only
+weclaw-cua capture --no-llm --work-dir /tmp/w  # custom work directory
+weclaw-cua capture --format text       # human-readable output
 ```
 
 ### `finalize` — Process Agent Responses
 
 ```bash
-weclaw finalize --work-dir /tmp/weclaw_work  # produce final JSON from agent responses
+weclaw-cua finalize --work-dir /tmp/weclaw_work  # produce final JSON from agent responses
 ```
 
 ### `report` — Generate Report
 
 ```bash
-weclaw report                                    # full report (requires API key)
-weclaw report --prompt-only                      # output prompt only (no LLM call)
-weclaw report --input output/GroupA.json          # from specific files
-weclaw report --format text                      # human-readable
+weclaw-cua report                                    # full report (requires API key)
+weclaw-cua report --prompt-only                      # output prompt only (no LLM call)
+weclaw-cua report --input output/GroupA.json          # from specific files
+weclaw-cua report --format text                      # human-readable
 ```
 
 ### `build-report-prompt` — Get Report Prompt
 
 ```bash
-weclaw build-report-prompt                       # output prompt for agent's own LLM
-weclaw build-report-prompt --input output/A.json # from specific files
+weclaw-cua build-report-prompt                       # output prompt for agent's own LLM
+weclaw-cua build-report-prompt --input output/A.json # from specific files
 ```
 
 ### `sessions` — List Captured Chats
 
 ```bash
-weclaw sessions                    # all captured chats (JSON)
-weclaw sessions --limit 10        # last 10
-weclaw sessions --format text     # human-readable
+weclaw-cua sessions                    # all captured chats (JSON)
+weclaw-cua sessions --limit 10        # last 10
+weclaw-cua sessions --format text     # human-readable
 ```
 
 ### `history` — View Chat Messages
 
 ```bash
-weclaw history "Group A"                         # last 50 messages
-weclaw history "Group A" --limit 100 --offset 50 # pagination
-weclaw history "Alice" --type text               # text messages only
-weclaw history "Alice" --format text             # human-readable
+weclaw-cua history "Group A"                         # last 50 messages
+weclaw-cua history "Group A" --limit 100 --offset 50 # pagination
+weclaw-cua history "Alice" --type text               # text messages only
+weclaw-cua history "Alice" --format text             # human-readable
 ```
 
 **Options:** `--limit`, `--offset`, `--type`, `--format`
@@ -291,10 +307,10 @@ weclaw history "Alice" --format text             # human-readable
 ### `search` — Search Messages
 
 ```bash
-weclaw search "hello"                            # global search
-weclaw search "hello" --chat "Alice"             # in specific chat
-weclaw search "meeting" --chat "A" --chat "B"    # multiple chats
-weclaw search "report" --type text               # text only
+weclaw-cua search "hello"                            # global search
+weclaw-cua search "hello" --chat "Alice"             # in specific chat
+weclaw-cua search "meeting" --chat "A" --chat "B"    # multiple chats
+weclaw-cua search "report" --type text               # text only
 ```
 
 **Options:** `--chat` (repeatable), `--limit`, `--offset`, `--type`, `--format`
@@ -302,9 +318,9 @@ weclaw search "report" --type text               # text only
 ### `export` — Export Chat
 
 ```bash
-weclaw export "Alice" --format markdown          # to stdout
-weclaw export "Alice" --format txt --output chat.txt  # to file
-weclaw export "Team" --limit 1000                # more messages
+weclaw-cua export "Alice" --format markdown          # to stdout
+weclaw-cua export "Alice" --format txt --output chat.txt  # to file
+weclaw-cua export "Team" --limit 1000                # more messages
 ```
 
 **Options:** `--format markdown|txt`, `--output`, `--limit`
@@ -312,23 +328,23 @@ weclaw export "Team" --limit 1000                # more messages
 ### `stats` — Chat Statistics
 
 ```bash
-weclaw stats "Group A"             # JSON stats
-weclaw stats "Alice" --format text # human-readable
+weclaw-cua stats "Group A"             # JSON stats
+weclaw-cua stats "Alice" --format text # human-readable
 ```
 
 ### `unread` — Scan for Unread Chats
 
 ```bash
-weclaw unread                      # scan sidebar via vision AI
-weclaw unread --limit 10           # at most 10
-weclaw unread --format text        # human-readable
+weclaw-cua unread                      # scan sidebar via vision AI
+weclaw-cua unread --limit 10           # at most 10
+weclaw-cua unread --format text        # human-readable
 ```
 
 ### `new-messages` — Incremental Messages
 
 ```bash
-weclaw new-messages                # first: save state, return all
-weclaw new-messages                # subsequent: only new since last
+weclaw-cua new-messages                # first: save state, return all
+weclaw-cua new-messages                # subsequent: only new since last
 ```
 
 State saved at `<output_dir>/last_check.json`. Delete to reset.
@@ -448,7 +464,7 @@ weclaw/
 ## Data Flow
 
 ```
-weclaw run / weclaw capture
+weclaw-cua run / weclaw-cua capture
   │
   ├─ algo_a (vision capture)
   │   ├─ find WeChat window (OS API)

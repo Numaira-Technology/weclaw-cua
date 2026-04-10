@@ -1,7 +1,7 @@
 """Unit tests for algo_b message loading, prompt construction, and orchestration.
 
 Usage:
-    python3 -m unittest algo_b.test_algo_b
+    python3 -m pytest tests/test_algo_b.py
 
 Input spec:
     - Uses temporary JSON files that follow algo_a output schema.

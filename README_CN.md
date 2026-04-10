@@ -1,4 +1,4 @@
-# WeClaw
+# WeClaw-CUA
 
 **基于纯视觉的微信消息捕获与报告生成命令行工具。**
 
@@ -16,13 +16,11 @@
 
 ## 安装
 
-### pip（推荐）
-
-```bash
-pip install weclaw
-```
-
 需要 Python >= 3.10。
+
+### PyPI
+
+PyPI 上的项目名 `weclaw` 为**第三方无关包**。本项目以 **`weclaw-cua`** 发布；若已在 PyPI 上架，可使用 `pip install weclaw-cua`（按需加 `[llm]`、`[macos]`）。在此之前请使用 **从源码安装**。
 
 ### npm
 
@@ -30,15 +28,36 @@ pip install weclaw
 npm install -g @anthropic-ai/weclaw
 ```
 
-### 从源码安装
+### 从源码安装（推荐）
 
 ```bash
 git clone https://github.com/anthropic-ai/weclaw.git
 cd weclaw
 python3 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt
-pip install -e .
 ```
+
+再可编辑安装（任选其一）：
+
+```bash
+./.venv/bin/pip install -e ".[macos,llm]"   # macOS：自动化 + LLM 依赖
+```
+
+**Windows** 不要加 `macos`：
+
+```bash
+./.venv/bin/pip install -e ".[llm]"
+```
+
+其它组合：
+
+```bash
+./.venv/bin/pip install -e .                # 仅核心（stepwise，无 LLM 依赖）
+./.venv/bin/pip install -e ".[llm]"         # 含 LLM 依赖（各平台）
+./.venv/bin/pip install -e ".[macos]"       # 仅 macOS 依赖
+```
+
+命令行 **`weclaw`** 仍为 **`weclaw-cua`** 的别名。
 
 ---
 
@@ -47,7 +66,7 @@ pip install -e .
 ### 第一步 — 初始化
 
 ```bash
-weclaw init
+weclaw-cua init
 ```
 
 创建 `config/config.json` 并验证平台权限。
@@ -81,12 +100,12 @@ export OPENROUTER_API_KEY="sk-or-v1-你的key"
 ### 第三步 — 使用
 
 ```bash
-weclaw run                                   # 完整流程：捕获 + 报告
-weclaw capture                               # 仅捕获
-weclaw report                                # 从已有捕获生成报告
-weclaw sessions                              # 列出已捕获的会话
-weclaw history "群名" --limit 20             # 查看消息
-weclaw search "关键词" --chat "群名"          # 搜索消息
+weclaw-cua run                                   # 完整流程：捕获 + 报告
+weclaw-cua capture                               # 仅捕获
+weclaw-cua report                                # 从已有捕获生成报告
+weclaw-cua sessions                              # 列出已捕获的会话
+weclaw-cua history "群名" --limit 20             # 查看消息
+weclaw-cua search "关键词" --chat "群名"          # 搜索消息
 ```
 
 ---
@@ -116,16 +135,16 @@ weclaw search "关键词" --chat "群名"          # 搜索消息
 添加到你的 `CLAUDE.md`：
 
 ```markdown
-## WeClaw
+## WeClaw-CUA
 
-你可以用 `weclaw` 来捕获和查询我的微信消息。
+你可以用 `weclaw-cua`（或别名 `weclaw`）来捕获和查询我的微信消息。
 
 常用命令：
-- `weclaw run` — 捕获未读消息 + 生成报告
-- `weclaw sessions` — 列出已捕获的会话
-- `weclaw history "会话名" --limit 20 --format text` — 查看消息
-- `weclaw search "关键词" --chat "群名"` — 搜索消息
-- `weclaw new-messages` — 获取增量新消息
+- `weclaw-cua run` — 捕获未读消息 + 生成报告
+- `weclaw-cua sessions` — 列出已捕获的会话
+- `weclaw-cua history "会话名" --limit 20 --format text` — 查看消息
+- `weclaw-cua search "关键词" --chat "群名"` — 搜索消息
+- `weclaw-cua new-messages` — 获取增量新消息
 ```
 
 ---

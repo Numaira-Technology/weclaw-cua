@@ -1,10 +1,10 @@
 """Run a local smoke test for algo_b with existing message JSON files.
 
 Usage:
-    python3 -m algo_b.test_part_b_local
-    python3 -m algo_b.test_part_b_local --prompt-only
-    python3 -m algo_b.test_part_b_local --json-path "sample_data/Group A.json"
-    python3 -m algo_b.test_part_b_local --save-path report.md
+    python3 scripts/test_part_b_local.py
+    python3 scripts/test_part_b_local.py --prompt-only
+    python3 scripts/test_part_b_local.py --json-path "sample_data/Group A.json"
+    python3 scripts/test_part_b_local.py --save-path report.md
 
 Input spec:
     - config_path: path to a config JSON file compatible with load_config().
@@ -22,7 +22,6 @@ Output spec:
 
 import argparse
 import glob
-import os
 from pathlib import Path
 
 from algo_b.build_report_prompt import build_report_prompt

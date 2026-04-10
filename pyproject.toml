@@ -3,16 +3,16 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "weclaw"
-version = "0.1.0"
-description = "Vision-based WeChat message capture and report CLI for LLMs"
+name = "weclaw-cua"
+version = "0.1.5"
+description = "WeClaw-CUA — vision-based WeChat message capture and report CLI for LLMs"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [
-    {name = "WeClaw Contributors"},
+    {name = "WeClaw-CUA Contributors"},
 ]
-keywords = ["wechat", "weclaw", "cli", "vision", "llm", "ai", "message-capture"]
+keywords = ["wechat", "weclaw", "weclaw-cua", "cua", "cli", "vision", "llm", "ai", "message-capture"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -54,10 +54,30 @@ Homepage = "https://github.com/anthropic-ai/weclaw"
 Repository = "https://github.com/anthropic-ai/weclaw"
 
 [project.scripts]
+weclaw-cua = "weclaw_cli.main:cli"
 weclaw = "weclaw_cli.main:cli"
+
+[tool.setuptools]
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = [
+    "algo_a",
+    "algo_b",
+    "config",
+    "platform_mac",
+    "platform_win",
+    "shared",
+    "utils",
+    "weclaw_cli",
+    "weclaw_cli.commands",
+    "weclaw_cli.output",
+]
+exclude = [
+    "tests",
+    "tests.*",
+]
 
 [tool.setuptools.package-data]
 weclaw_cli = ["bin/*"]

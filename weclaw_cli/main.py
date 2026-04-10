@@ -1,42 +1,44 @@
-"""weclaw CLI entry point.
+"""WeClaw-CUA CLI entry point.
 
 Usage:
-    weclaw capture                   # capture unread chats via vision
-    weclaw report                    # generate report from captured messages
-    weclaw run                       # capture + report (full pipeline)
-    weclaw sessions                  # list captured message files
-    weclaw history "GroupName"       # show messages from a captured chat
-    weclaw search "keyword"          # search across captured messages
-    weclaw export "GroupName"        # export a chat as markdown/txt
-    weclaw stats "GroupName"         # message statistics
+    weclaw-cua capture               # capture unread chats via vision
+    weclaw-cua report                # generate report from captured messages
+    weclaw-cua run                   # capture + report (full pipeline)
+    weclaw-cua sessions              # list captured message files
+    weclaw-cua history "GroupName"   # show messages from a captured chat
+    weclaw-cua search "keyword"      # search across captured messages
+    weclaw-cua export "GroupName"    # export a chat as markdown/txt
+    weclaw-cua stats "GroupName"     # message statistics
+
+The weclaw command is an alias for weclaw-cua.
 """
 
 import sys
 
 import click
 
-_VERSION = "0.1.0"
+_VERSION = "0.1.5"
 
 
 @click.group()
-@click.version_option(version=_VERSION, prog_name="weclaw")
+@click.version_option(version=_VERSION, prog_name="weclaw-cua")
 @click.option("--config", "config_path", default=None,
               envvar="WECLAW_CONFIG_PATH",
               help="Path to config.json (default: auto-detect)")
 @click.pass_context
 def cli(ctx, config_path):
-    """WeClaw — vision-based WeChat message capture & report CLI
+    """WeClaw-CUA — vision-based WeChat message capture & report CLI
 
     \b
     Quick start:
-      weclaw init                                  # first-time setup
-      weclaw run                                   # capture + report
-      weclaw capture                               # capture unread chats
-      weclaw report                                # generate report from captures
-      weclaw sessions                              # list captured chats
-      weclaw history "Group A" --limit 20          # view chat messages
-      weclaw search "deadline" --chat "Team"       # search messages
-      weclaw export "Group A" --format markdown    # export chat
+      weclaw-cua init                              # first-time setup
+      weclaw-cua run                               # capture + report
+      weclaw-cua capture                           # capture unread chats
+      weclaw-cua report                            # generate report from captures
+      weclaw-cua sessions                          # list captured chats
+      weclaw-cua history "Group A" --limit 20      # view chat messages
+      weclaw-cua search "deadline" --chat "Team"   # search messages
+      weclaw-cua export "Group A" --format markdown # export chat
     """
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = config_path
