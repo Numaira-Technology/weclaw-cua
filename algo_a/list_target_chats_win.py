@@ -1,0 +1,187 @@
+"""Scan the WeChat sidebar for targets: unread groups, or configured names (config.json groups_to_monitor).
+
+Vision supplies `unread` + `is_group`. Pass `unread_only=True` to require `is_unread` for selection.
+
+Usage:
+    list_target_chats(driver, window)
+    list_target_chats(driver, window, all_groups=True)
+    list_target_chats(driver, window, name_filter="706-纽约2群")
+"""
+
+import os
+import re
+import sys
+import time
+import unicodedata
+from dataclasses import dataclass
+from typing import Any
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from shared.platform_api import PlatformDriver
+
+MAX_SCROLL_ITERATIONS = 10
+
+
+@dataclass
+class ChatInfo:
+    name: str
+    ui_element: Any
+    is_unread: bool
+    is_group: bool
+
+
+def _normalize_chat_label(text: str) -> str:
+    if not text:
+        return ""
+    t = unicodedata.normalize("NFKC", text)
+    t = t.replace("…", "...").replace("⋯", "...")
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"
+        "\U0001F300-\U0001F5FF"
+        "\U0001F680-\U0001F6FF"
+        "\U0001F1E0-\U0001F1FF"
+        "\U0001F900-\U0001F9FF"
+        "\U0001FA00-\U0001FAFF"
+        "\u2600-\u26FF"
+        "\u2700-\u27BF"
+        "\uFE0F\u200D\u200C"
+        "]+",
+        flags=re.UNICODE,
+    )
+    t = emoji_pattern.sub("", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _badge_means_unread(badge_text: str | None) -> bool:
+    if badge_text is None:
+        return False
+    s = str(badge_text).strip()
+    if not s:
+        return False
+    if s.lower() in ("null", "none"):
+        return False
+    return True
+
+
+def _sidebar_compact_compare(s: str) -> str:
+    t = s.replace(" ", "").replace("\u3000", "")
+    t = t.replace("·", "-").replace("・", "-")
+    return t
+
+
+def _sidebar_names_match(ui_name: str, filter_name: str) -> bool:
+    if not ui_name or not filter_name:
+        return False
+    clean_ui = _normalize_chat_label(ui_name)
+    want = _normalize_chat_label(filter_name)
+    if clean_ui.endswith("..."):
+        prefix = clean_ui[:-3]
+        return want.startswith(prefix) or _sidebar_compact_compare(want).startswith(
+            _sidebar_compact_compare(prefix)
+        )
+    if clean_ui == want:
+        return True
+    return _sidebar_compact_compare(clean_ui) == _sidebar_compact_compare(want)
+
+
+def _row_key(name: str) -> str:
+    n = _normalize_chat_label(name)
+    return n if n else name
+
+
+def _collect_visible_chats(driver: PlatformDriver, window: Any) -> list[ChatInfo]:
+    rows = driver.get_sidebar_rows(window)
+    results = []
+    for row in rows:
+        results.append(
+            ChatInfo(
+                name=row.name,
+                ui_element=row,
+                is_unread=_badge_means_unread(row.badge_text),
+                is_group=bool(getattr(row, "is_group", False)),
+            )
+        )
+    return results
+
+
+def list_target_chats(
+    driver: PlatformDriver,
+    window: Any,
+    name_filter: str | None = None,
+    *,
+    all_groups: bool = False,
+    unread_only: bool = False,
+) -> list[ChatInfo]:
+    assert window is not None
+    assert not (name_filter and all_groups)
+
+    found_chats: dict[str, ChatInfo] = {}
+    all_seen_chat_names = set()
+
+    if name_filter:
+        ur = " + unread badge" if unread_only else ""
+        print(f"[*] Sidebar scan (match name{ur}), re-locating: {name_filter!r}")
+    elif all_groups:
+        ur = " + unread badge" if unread_only else ""
+        print(f"[*] Sidebar scan: every group chat (is_group{ur}).")
+    else:
+        print("[*] Sidebar scan: unread group chats only (is_group + unread).")
+
+    for i in range(MAX_SCROLL_ITERATIONS):
+        visible_chats = _collect_visible_chats(driver, window)
+
+        if not visible_chats:
+            print("[WARN] Got no visible chats from driver. Stopping scan.")
+            break
+
+        new_chats_found_this_scroll = False
+
+        print(f"--- Iteration {i + 1}: Processing {len(visible_chats)} visible chats ---")
+        for chat in visible_chats:
+            clean = _normalize_chat_label(chat.name)
+            if name_filter:
+                want_row = _sidebar_names_match(chat.name, name_filter)
+                if unread_only:
+                    want_row = want_row and chat.is_unread
+            elif all_groups:
+                want_row = chat.is_group
+                if unread_only:
+                    want_row = want_row and chat.is_unread
+            else:
+                want_row = chat.is_unread and chat.is_group
+
+            print(
+                f"  - Seen: {chat.name!r} (Norm: {clean!r}, Is group: {chat.is_group}, "
+                f"Is Unread: {chat.is_unread}, Select: {want_row})"
+            )
+
+            if want_row:
+                key = _row_key(chat.name)
+                if key not in found_chats:
+                    print(f"    [+] Queued: {chat.name!r}")
+                    found_chats[key] = chat
+
+            if chat.name not in all_seen_chat_names:
+                new_chats_found_this_scroll = True
+                all_seen_chat_names.add(chat.name)
+
+        if i > 0 and not new_chats_found_this_scroll:
+            print("[*] Reached the end of the sidebar. Stopping scan.")
+            break
+
+        if name_filter and found_chats:
+            print("[*] Located filtered chat. Stopping scan.")
+            break
+
+        print(f"[*] Scrolling sidebar down... (iteration {i + 1}/{MAX_SCROLL_ITERATIONS})")
+        driver.scroll_sidebar(window, "down")
+        time.sleep(1)
+
+    out = list(found_chats.values())
+    print(f"[DEBUG] Returning {len(out)} sidebar match(es).")
+    return out

@@ -1,0 +1,47 @@
+---
+description: "General coding standards for Numaira development"
+alwaysApply: true
+---
+
+# Coding Standards
+
+## File Organization
+
+- One class per file, named after the class
+- One concept per file, group by purpose
+- 200 lines max per file; split by responsibility if exceeded
+- Minimal `__init__.py`: only re-export public interface
+- Lazy imports for heavy dependencies (import inside functions)
+
+## Error Handling
+
+- No fallback logic: crash on invalid input with `assert`
+- No defensive try/except: let errors propagate unless recovery is meaningful
+- Validate at entry points, not deep in call stack
+- When running into errors, do not creat workarounds and actually tackle the underlying problem
+
+## Comments
+
+- Top docstring only; no inline comments
+- Script docstrings must include: brief description, usage, input spec, output spec
+- For directories: show tree structure with representative files
+- For files (JSON, txt, etc.): show schema or example structure
+- Explain non-obvious fields or formats
+
+## Code Style
+
+- Prefer composition over inheritance
+- Use dataclasses for data structures
+- Keep functions pure when possible
+
+## Architecture
+
+- Separate CLI parsing from core logic, and use more CLI to enable flexibility
+- Always write a submit.sh file for large cli pipeline. 
+- Shared utilities in a dedicated directory, keep files organized in dirs! 
+
+## Naming
+
+- `snake_case`: files, functions, variables
+- `PascalCase`: classes
+- Descriptive names over abbreviations

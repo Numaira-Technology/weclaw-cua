@@ -1,0 +1,549 @@
+<div align="center">
+
+<img src="docs/assets/cover.png" alt="WeClaw-CUA" width="560">
+
+### Vision-based WeChat message capture and report generation from the command line.
+
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-%3E%3D3.10-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)](#system-requirements)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+**[Installation Guide](docs/installation.md)** &middot; **[中文文档](README_CN.md)**
+
+</div>
+
+---
+
+<details>
+<summary><strong>Table of Contents</strong></summary>
+
+- [Highlights](#highlights)
+- [How It Works](#how-it-works)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [OpenClaw Gateway Mode](#openclaw-gateway-mode)
+- [Using with AI Agents (Stepwise Mode)](#using-with-ai-agents-stepwise-mode)
+- [Command Reference](#command-reference)
+- [Message Types](#message-types)
+- [System Requirements](#system-requirements)
+- [Configuration](#configuration)
+- [Architecture](#architecture)
+- [Contributing](#contributing)
+- [License](#license)
+
+</details>
+
+---
+
+## Highlights
+
+| | |
+|:--|:--|
+| **Vision-based capture** | Screenshots + vision LLM to extract messages — no database decryption |
+| **Cross-platform** | macOS (Accessibility API + Quartz) and Windows (UI Automation) |
+| **No API key required** | Stepwise mode lets the calling agent handle all LLM calls |
+| **OpenClaw gateway** | Reuse your local OpenClaw gateway — no separate OpenRouter key |
+| **AI-first** | JSON output by default, designed for LLM agent tool calls |
+| **Fully local** | All UI automation runs on your machine; data never leaves your device |
+| **13 commands** | init, run, capture, finalize, report, build-report-prompt, sessions, history, search, export, stats, unread, new-messages |
+
+---
+
+## How It Works
+
+Unlike tools that decrypt WeChat's local SQLite databases, WeClaw-CUA uses a **pure vision approach**:
+
+1. Locates the WeChat desktop window via OS-level APIs
+2. Scans the sidebar for unread chats using vision AI
+3. Clicks into each chat, scrolls through messages, captures screenshots
+4. Stitches screenshots into long images (OpenCV-based template matching)
+5. Sends stitched images to a vision LLM for structured message extraction
+6. Post-processes and deduplicates extracted messages into clean JSON
+
+This means WeClaw-CUA works with **any WeChat version** and requires **no key extraction or database access**.
+
+---
+
+## Installation
+
+> Requires **Python >= 3.10**. For a full platform-by-platform walkthrough, see the **[Installation Guide](docs/installation.md)**.
+
+```bash
+# 1. Create a virtual environment (recommended)
+python3 -m venv .venv
+source .venv/bin/activate        # macOS / Linux
+.venv\Scripts\activate           # Windows PowerShell
+
+# 2. Install
+pip install "weclaw-cua[macos,llm]"   # macOS
+pip install "weclaw-cua[llm]"         # Windows
+pip install weclaw-cua                # core only (stepwise, no LLM deps)
+
+# 3. Verify
+weclaw-cua --version
+```
+
+> **Note:** The PyPI package `weclaw` (without `-cua`) is an unrelated third-party project. Always install **`weclaw-cua`**. The `weclaw` console command is an alias for `weclaw-cua`.
+
+<details>
+<summary>Install from source (for contributors)</summary>
+
+```bash
+git clone https://github.com/Numaira-Technology/weclaw-cua.git
+cd weclaw-cua
+python3 -m venv .venv
+
+# macOS
+./.venv/bin/pip install -e ".[macos,llm]"
+
+# Windows
+.venv\Scripts\pip install -e ".[llm]"
+```
+
+</details>
+
+---
+
+## Quick Start
+
+### Before You Start
+
+Make sure all of the following are true before the first run:
+
+- WeChat Desktop is installed, open, and already logged in
+- The WeChat window is visible on your desktop
+- You are running commands from the project directory (or a subdirectory containing access to `config/config.json`)
+- On macOS, your terminal already has Accessibility permission
+- On Windows, if WeChat is running as administrator, your terminal is elevated too
+
+### Step 1 &mdash; Initialize
+
+```bash
+weclaw-cua init
+```
+
+Creates `config/config.json` from the template and verifies platform prerequisites.
+
+> **macOS:** Grant your terminal app Accessibility access in **System Settings > Privacy & Security > Accessibility**, then restart the terminal.
+>
+> **Windows:** If WeChat is running as administrator, run your terminal elevated too.
+
+### Step 2 &mdash; Configure
+
+Edit `config/config.json`:
+
+```json
+{
+  "wechat_app_name": "WeChat",
+  "groups_to_monitor": ["*"],
+  "sidebar_unread_only": true,
+  "report_custom_prompt": "Summarize key decisions and action items.",
+  "openrouter_api_key": "",
+  "llm_model": "openai/gpt-4o",
+  "output_dir": "output"
+}
+```
+
+Fill `openrouter_api_key` only when using built-in OpenRouter mode. Leave it empty for OpenClaw gateway mode or stepwise mode.
+
+You can also set the OpenRouter API key via environment variable:
+
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-your-key"          # macOS
+```
+
+```powershell
+$env:OPENROUTER_API_KEY = "sk-or-v1-your-key"          # Windows PowerShell
+```
+
+### Step 3 &mdash; Run
+
+```bash
+weclaw-cua run --openclaw-gateway   # recommended: via local OpenClaw gateway
+weclaw-cua run                      # built-in OpenRouter mode
+weclaw-cua capture                  # capture only
+weclaw-cua report                   # report from existing captures
+weclaw-cua sessions                 # list captured chats
+weclaw-cua history "Group A" --limit 20
+weclaw-cua search "deadline" --chat "Team"
+```
+
+---
+
+## OpenClaw Gateway Mode
+
+Recommended for users who already run a local OpenClaw gateway — no separate OpenRouter key needed.
+
+### One-time gateway setup
+
+Enable the OpenAI-compatible HTTP endpoint in `~/.openclaw/openclaw.json`:
+
+```json5
+{
+  gateway: {
+    http: {
+      endpoints: {
+        chatCompletions: { enabled: true },
+      },
+    },
+  },
+}
+```
+
+Restart the OpenClaw gateway, then smoke-test it:
+
+```bash
+curl -sS http://127.0.0.1:18789/v1/models \
+  -H "Authorization: Bearer YOUR_GATEWAY_TOKEN"
+```
+
+A JSON response listing model IDs (e.g. `openclaw/default`) means the gateway is ready.
+
+### Run through OpenClaw
+
+```bash
+weclaw-cua run --openclaw-gateway
+```
+
+Most users do not need to set any `OPENCLAW_*` variables manually — WeClaw-CUA auto-discovers the gateway from `~/.openclaw/openclaw.json`.
+
+<details>
+<summary>Optional environment overrides</summary>
+
+```bash
+# macOS
+export OPENCLAW_GATEWAY_URL="http://127.0.0.1:18789/v1"
+export OPENCLAW_API_KEY="YOUR_GATEWAY_TOKEN"
+export OPENCLAW_MODEL="openclaw/default"
+export OPENCLAW_BACKEND_MODEL="openrouter/google/gemini-2.5-flash"
+```
+
+```powershell
+# Windows PowerShell
+$env:OPENCLAW_GATEWAY_URL = "http://127.0.0.1:18789/v1"
+$env:OPENCLAW_API_KEY = "YOUR_GATEWAY_TOKEN"
+$env:OPENCLAW_MODEL = "openclaw/default"
+$env:OPENCLAW_BACKEND_MODEL = "openrouter/google/gemini-2.5-flash"
+```
+
+</details>
+
+> WeClaw-CUA also auto-discovers `config/config.json` by walking up from the current directory. Set `WECLAW_CONFIG_PATH` or pass `--config <path>` only when running from outside the project tree.
+
+---
+
+## Using with AI Agents (Stepwise Mode)
+
+In **stepwise mode** (`--no-llm`), WeClaw-CUA handles all UI automation while the agent handles all LLM calls. No API key needed on the WeClaw-CUA side.
+
+```
+Agent                          WeClaw-CUA                    WeChat
+  |                              |                              |
+  |-- weclaw-cua capture --no-llm -->|                          |
+  |                              |-- screenshot, scroll ------->|
+  |                              |-- stitch images              |
+  |<-- manifest.json + images ---|                              |
+  |                              |                              |
+  |  (agent reads manifest.json)                                |
+  |  (for each task: send .png + .prompt.txt to own LLM)        |
+  |  (write response to .response.txt)                          |
+  |                              |                              |
+  |-- weclaw-cua finalize ------->|                             |
+  |<-- messages.json ------------|                              |
+  |                              |                              |
+  |-- weclaw-cua build-report-prompt                            |
+  |<-- prompt text --------------|                              |
+  |  (agent sends prompt to own LLM, gets report)               |
+```
+
+### Step-by-Step
+
+**1. Capture** (no LLM needed):
+
+```bash
+weclaw-cua capture --no-llm --work-dir ./weclaw_work
+```
+
+Outputs `manifest.json` listing all pending vision tasks, plus `.png` images and `.prompt.txt` files.
+
+**2. Process vision tasks** (agent's responsibility):
+
+For each task in `manifest.json`:
+- Read the `.png` image and `.prompt.txt`
+- Send to the agent's own vision LLM
+- Write the model response to `.response.txt`
+
+**3. Finalize** (produce message JSON):
+
+```bash
+weclaw-cua finalize --work-dir ./weclaw_work
+```
+
+Reads `.response.txt` files from `--work-dir` and writes structured message JSON to `output_dir` (configured in `config.json`). `--work-dir` is required.
+
+**4. Get report prompt** (agent calls own LLM for report):
+
+```bash
+weclaw-cua build-report-prompt
+```
+
+Reads all `*.json` capture files from `output_dir` — the same directory where `finalize` writes its output.
+
+<details>
+<summary>Claude Code / Cursor configuration snippet</summary>
+
+Add to your `CLAUDE.md` or `.cursor/rules/`:
+
+```markdown
+## WeClaw-CUA
+
+You can use `weclaw-cua` (or the `weclaw` alias) to capture and query WeChat messages.
+
+Stepwise workflow (you handle LLM calls):
+1. `weclaw-cua capture --no-llm` — capture screenshots, no LLM needed
+2. Process each task in manifest.json with your vision model
+3. `weclaw-cua finalize --work-dir <dir>` — produce message JSON
+4. `weclaw-cua build-report-prompt` — get report prompt, call your own LLM
+
+Query commands (work on captured data, no LLM needed):
+- `weclaw-cua sessions` — list captured chats
+- `weclaw-cua history "NAME" --limit 20 --format text` — view messages
+- `weclaw-cua search "KEYWORD" --chat "CHAT_NAME"` — search messages
+- `weclaw-cua stats "CHAT" --format text` — statistics
+- `weclaw-cua export "CHAT" --format markdown` — export chat
+- `weclaw-cua new-messages` — incremental new messages
+```
+
+</details>
+
+---
+
+## Command Reference
+
+| Command | Description |
+|:--------|:------------|
+| `init` | First-time setup: create config, verify permissions |
+| `run` | Full pipeline: capture + generate report |
+| `capture` | Vision-capture unread messages |
+| `finalize` | Process agent-provided LLM responses into JSON (`--work-dir` required) |
+| `report` | Generate LLM report from existing captured JSON |
+| `build-report-prompt` | Output the report prompt (for agent to call own LLM) |
+| `sessions` | List captured chat sessions |
+| `history` | View messages from a specific session |
+| `search` | Search across captured messages |
+| `export` | Export a session to markdown or plain text |
+| `stats` | Message statistics for a session |
+| `unread` | Scan sidebar for unread chats via vision AI |
+| `new-messages` | Incremental new messages since last check |
+
+All commands output JSON by default. Pass `--format text` for human-readable output.
+
+<details>
+<summary><strong>Per-command examples</strong></summary>
+
+### `init`
+
+```bash
+weclaw-cua init                        # create config + verify permissions
+weclaw-cua init --force                # overwrite existing config
+weclaw-cua init --config-dir /path     # custom config directory
+```
+
+### `run`
+
+```bash
+weclaw-cua run --openclaw-gateway      # recommended: via local OpenClaw gateway
+weclaw-cua run                         # built-in OpenRouter mode
+weclaw-cua run --no-llm                # stepwise: capture only, agent handles LLM
+weclaw-cua run --format text           # human-readable output
+```
+
+### `capture`
+
+```bash
+weclaw-cua capture                     # capture with built-in LLM
+weclaw-cua capture --no-llm            # stepwise: output images + prompts only
+weclaw-cua capture --no-llm --work-dir ./weclaw_work
+weclaw-cua capture --format text
+```
+
+### `finalize`
+
+```bash
+weclaw-cua finalize --work-dir ./weclaw_work
+```
+
+### `report`
+
+```bash
+weclaw-cua report                                     # full report (requires API key)
+weclaw-cua report --prompt-only                       # output prompt only
+weclaw-cua report --input output/GroupA.json          # from specific file
+weclaw-cua report --format text
+```
+
+### `build-report-prompt`
+
+```bash
+weclaw-cua build-report-prompt
+weclaw-cua build-report-prompt --input output/A.json
+```
+
+### `sessions`
+
+```bash
+weclaw-cua sessions                    # all captured chats (JSON)
+weclaw-cua sessions --limit 10
+weclaw-cua sessions --format text
+```
+
+### `history`
+
+```bash
+weclaw-cua history "Group A"                          # last 50 messages
+weclaw-cua history "Group A" --limit 100 --offset 50  # pagination
+weclaw-cua history "Alice" --type text                # text messages only
+weclaw-cua history "Alice" --format text
+```
+
+Options: `--limit`, `--offset`, `--type`, `--format`
+
+### `search`
+
+```bash
+weclaw-cua search "hello"
+weclaw-cua search "hello" --chat "Alice"
+weclaw-cua search "meeting" --chat "A" --chat "B"
+weclaw-cua search "report" --type text
+```
+
+Options: `--chat` (repeatable), `--limit`, `--offset`, `--type`, `--format`
+
+### `export`
+
+```bash
+weclaw-cua export "Alice" --format markdown
+weclaw-cua export "Alice" --format txt --output chat.txt
+weclaw-cua export "Team" --limit 1000
+```
+
+Options: `--format markdown|txt`, `--output`, `--limit`
+
+### `stats`
+
+```bash
+weclaw-cua stats "Group A"
+weclaw-cua stats "Alice" --format text
+```
+
+### `unread`
+
+```bash
+weclaw-cua unread
+weclaw-cua unread --limit 10
+weclaw-cua unread --format text
+```
+
+### `new-messages`
+
+```bash
+weclaw-cua new-messages    # first call: save state, return all messages
+weclaw-cua new-messages    # subsequent calls: only new since last check
+```
+
+State saved at `<output_dir>/last_check.json`. Delete to reset.
+
+</details>
+
+---
+
+## Message Types
+
+The `--type` option (on `history` and `search`):
+
+| Value | Description |
+|:------|:------------|
+| `text` | Text messages |
+| `system` | System messages |
+| `link_card` | Links and shared content |
+| `image` | Images |
+| `file` | File attachments |
+| `recalled` | Recalled messages |
+| `unsupported` | Unsupported message types |
+
+---
+
+## System Requirements
+
+| Platform | Status | Notes |
+|:---------|:-------|:------|
+| macOS (Apple Silicon) | Supported | Requires Accessibility permission |
+| macOS (Intel) | Supported | Requires Accessibility permission |
+| Windows 10 / 11 | Supported | Match elevation with WeChat if needed |
+| Linux | Not supported | Relies on macOS/Windows platform APIs |
+
+- **Python** >= 3.10
+- **WeChat Desktop** — any version (vision-based, no version lock-in)
+- **OpenRouter API key** — required for built-in LLM mode; not needed for stepwise or OpenClaw gateway mode
+
+---
+
+## Configuration
+
+### `config/config.json`
+
+```json
+{
+  "wechat_app_name": "WeChat",
+  "groups_to_monitor": ["*"],
+  "sidebar_unread_only": true,
+  "report_custom_prompt": "Summarize key decisions and action items.",
+  "openrouter_api_key": "",
+  "llm_model": "openai/gpt-4o",
+  "output_dir": "output"
+}
+```
+
+| Field | Description |
+|:------|:------------|
+| `wechat_app_name` | Window title for WeChat — usually `"WeChat"` for English locale or `"微信"` for Chinese locale |
+| `groups_to_monitor` | `["*"]` = all chats (both group chats and direct messages), or list specific chat names |
+| `sidebar_unread_only` | `true` = only process chats with unread badges |
+| `report_custom_prompt` | Custom instructions appended to the LLM report prompt |
+| `openrouter_api_key` | API key (or use `OPENROUTER_API_KEY` env var) |
+| `llm_model` | LLM model identifier for report generation |
+| `output_dir` | Directory for output JSON files |
+
+---
+
+## Architecture
+
+See [`docs/architecture.md`](docs/architecture.md) for directory structure and data flow diagrams.
+
+---
+
+## Contributing
+
+Contributions are welcome. Please see [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, and pull request guidelines.
+
+- **Bug reports** — [open an issue](https://github.com/Numaira-Technology/weclaw-cua/issues/new?template=bug_report.md)
+- **Feature requests** — [open an issue](https://github.com/Numaira-Technology/weclaw-cua/issues/new?template=feature_request.md)
+- **Questions** — [GitHub Discussions](https://github.com/Numaira-Technology/weclaw-cua/discussions)
+
+---
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE).
+
+---
+
+## Disclaimer
+
+This project is a local UI automation tool for personal use only:
+
+- **Read-only** — captures what is visible on screen, does not modify WeChat data
+- **No database access** — uses pure vision, no decryption or memory scanning
+- **No cloud transmission** — all automation runs locally; only LLM API calls leave your machine (to your configured provider)
+- **Use at your own risk** — for personal learning and research purposes only

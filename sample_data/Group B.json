@@ -1,0 +1,65 @@
+[
+  {
+    "chat_name": "Group B",
+    "sender": "Frank",
+    "time": "20:41",
+    "content": "客户刚又追了一条，说明早 10 点前先给一版简版陈列方案，详细版下午再补也行。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group B",
+    "sender": "Grace",
+    "time": "20:56",
+    "content": "库存我刚盘过，礼盒够，问题是展示架不够，明早可能得先去隔壁店借两组。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group B",
+    "sender": "Heidi",
+    "time": "21:03",
+    "content": "先别纠结太细，明早先交简版过客户早会，完整版我们下午再补。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group B",
+    "sender": "Frank",
+    "time": "21:08",
+    "content": "我 9:15 前把图片、尺寸还有昨天拍的现场图一起发你。你别忘了最终还是你来回客户。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group B",
+    "sender": "Grace",
+    "time": "21:19",
+    "content": "还有个坑，客户如果明天就要落地，安装团队最早也要下午两点后到。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group B",
+    "sender": "Heidi",
+    "time": "21:22",
+    "content": "那我们回复里别把“明天能装”说太满。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group B",
+    "sender": "Frank",
+    "time": null,
+    "content": "客户刚发来的参考图",
+    "type": "image"
+  },
+  {
+    "chat_name": "Group B",
+    "sender": "Grace",
+    "time": "22:07",
+    "content": "对了，A 款礼盒今晚又卖掉 6 盒，我怕明早数量再变，我 8:30 到店再看一次。",
+    "type": "text"
+  },
+  {
+    "chat_name": "Group B",
+    "sender": "Frank",
+    "time": "22:16",
+    "content": "我先去睡了，有事明早电话。客户那边 9 点后应该就在线。",
+    "type": "text"
+  }
+]

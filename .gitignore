@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+
+# PyInstaller
+*.spec
+
+# npm platform binaries (published to npm, not in git)
+npm/platforms/*/bin/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project-specific
+config/config.json
+output/
+report.md
+.env
+
+# Temp / debug
+*.tmp
+*.bak
+debug_*.png
