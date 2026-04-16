@@ -4,6 +4,7 @@ numpy
 opencv-python
 Pillow
 pyautogui
+pywin32; sys_platform == "win32"
 
 # LLM dependencies (optional, only for built-in OpenRouter mode)
 # Install with: pip install weclaw[llm]

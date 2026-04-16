@@ -1,9 +1,7 @@
 import ctypes
 import time
 
-import easyocr
 import numpy as np
-import win32api
 import win32con
 import win32gui
 import win32process

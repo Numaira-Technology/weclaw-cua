@@ -29,6 +29,7 @@ dependencies = [
     "opencv-python",
     "Pillow",
     "pyautogui",
+    "pywin32; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
@@ -72,6 +73,7 @@ include = [
     "utils",
     "weclaw_cli",
     "weclaw_cli.commands",
+    "weclaw_cli.output",
 ]
 exclude = [
     "tests",
