@@ -31,7 +31,7 @@ Thumbs.db
 
 # Project-specific
 config/config.json
-output/
+/output/
 report.md
 .env
 
