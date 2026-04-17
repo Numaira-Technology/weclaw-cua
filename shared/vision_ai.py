@@ -83,6 +83,7 @@ class VisionAI:
             try:
                 response = self.client.chat.completions.create(
                     model=self.model_name,
+                    temperature=0,
                     messages=[
                         {
                             "role": "user",

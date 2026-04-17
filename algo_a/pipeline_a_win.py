@@ -75,13 +75,12 @@ def run_pipeline_a(config: WeclawConfig, vision_backend=None) -> list[str]:
         print("[ERROR] Pipeline failed: Could not find WeChat window.")
         return written_paths
 
-    scroll_sidebar_to_top(driver, window)
-
     uo = config.sidebar_unread_only
     if _groups_config_means_all_groups(config.groups_to_monitor):
         print(
             f"[*] Mode: ALL group chats (vision is_group). Unread filter: {uo}."
         )
+        scroll_sidebar_to_top(driver, window)
         target_chats = list_target_chats(
             driver, window, all_groups=True, unread_only=uo
         )

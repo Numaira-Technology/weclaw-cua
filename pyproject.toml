@@ -37,6 +37,9 @@ llm = [
     "litellm",
     "openai",
 ]
+ocr = [
+    "rapidocr-onnxruntime>=1.3",
+]
 macos = [
     "pyobjc-core",
     "pyobjc-framework-ApplicationServices",

@@ -5,7 +5,7 @@ Sidebar list: verbatim `classification_prompt()` from remote branch
 """
 
 SIDEBAR_PROMPT = (
-    "这是微信会话列表的裁剪截图（宽218像素，高1440像素，仅显示左侧聊天列表栏）。"
+    "这是微信左侧会话列表的裁剪截图（仅显示聊天列表栏，不含全局导航图标）。"
     "分析截图中可见的每个会话，从上到下依次列出。"
     "判断是否为群聊时，优先使用以下特征：\n"
     "1. 头像图标：多人头像/九宫格 = 群聊，单人头像 = 可能是单聊或群聊（群聊可自定义单人头像）\n"
@@ -13,32 +13,39 @@ SIDEBAR_PROMPT = (
     "3. 如果无法确定，优先判断为群聊（宁可误判为群聊，不要漏掉真实的群聊）。"
     "记录每个会话的未读状态（是否有红色未读消息标记）。"
     "若有数字角标（1、2、…、99+），把角标上的原文写入 unread_badge 字符串；若只有小红点无数字，unread_badge 填 \"1\"；无未读时 unread 为 false，省略 unread_badge 或填 null。"
-    "对于每个会话，估算其头像中心点的Y坐标（0-1000归一化值，0=顶部，1000=底部）。"
-    "提示：第一个会话的头像中心大约在y=73，每个会话间隔约49。"
+    "对于每个会话，估算其头像中心点的Y坐标（使用 0-1000 归一化值，0=图片顶部边缘，1000=图片底部边缘）。"
     "直接输出JSON格式结果。"
-    'JSON格式：{"threads": [{"name": "会话名称", "y": 73, "is_group": true/false, "unread": true/false, "unread_badge": "3"}, ...]}'
+    'JSON格式：{"threads": [{"name": "会话名称", "y": 120, "is_group": true/false, "unread": true/false, "unread_badge": "3"}, ...]}'
     "只输出JSON，不要输出其他文字。"
 )
 
 COORDS_PROMPT_TEMPLATE = """
-You are a precision UI automation assistant. You will be given a screenshot of an entire chat application window.
-Your task is to find the exact bounding box (`bbox`) for the chat item with the name "{chat_name}", which is located in the sidebar on the left.
+You are a precision UI automation assistant. You will be given a screenshot of a chat application window.
+Your task is to find the bounding box for the chat item with the name "{chat_name}" in the sidebar on the left.
 Pay close attention to the exact name provided. You must find the item that precisely matches this name, not one with a similar name.
 
-You MUST return your response as a single, valid JSON object containing only the `bbox`.
-If the specified chat item cannot be found in the image, you MUST return a JSON object with a null `bbox`, like this: `{{ "bbox": null }}`.
-The coordinates must be relative to the top-left corner of the provided image.
-The `bbox` should be a list of four integers: [x_min, y_min, x_max, y_max].
+IMPORTANT: Return all coordinates in a NORMALIZED 0-1000 coordinate space where:
+- 0 = left/top edge of the image
+- 1000 = right/bottom edge of the image
 
-Example for a chat named "Family Group":
+You MUST return your response as a single, valid JSON object containing only the `bbox`.
+If the specified chat item cannot be found in the image, return: `{{ "bbox": null }}`.
+The `bbox` should be a list of four integers in normalized 0-1000 space: [x_min, y_min, x_max, y_max].
+
+Example for a chat named "Family Group" that occupies roughly the left 30% of the window width and a row near the top:
 {{
-  "bbox": [5, 50, 250, 100]
+  "bbox": [20, 95, 290, 145]
 }}
 """
 
 NEW_MESSAGES_BUTTON_PROMPT = """
 Analyze the screenshot of the chat panel. If you see a button indicating "xx new messages" or similar, return its bounding box.
-Respond in JSON format with a single key "bbox" which is a list of four numbers [x1, y1, x2, y2] representing the bounding box of the button.
+
+IMPORTANT: Return all coordinates in a NORMALIZED 0-1000 coordinate space where:
+- 0 = left/top edge of the image
+- 1000 = right/bottom edge of the image
+
+Respond in JSON format with a single key "bbox" which is a list of four numbers [x1, y1, x2, y2] in normalized 0-1000 space.
 If no such button is visible, return {"bbox": null}.
 """
 
@@ -51,6 +58,19 @@ Return a single JSON object with one key, "chat_name". If no item is highlighted
 Example:
 {
   "chat_name": "Family Group"
+}
+"""
+
+CURRENT_CHAT_Y_PROMPT = """
+You are a UI analysis assistant. Analyze the provided screenshot of a chat application's sidebar.
+One of the chat items in the sidebar is highlighted (has a different background color), indicating it is currently selected.
+Your task is to return ONLY the normalized Y coordinate (0-1000) of the CENTER of the highlighted chat item's row,
+where 0 = top edge of the image and 1000 = bottom edge of the image.
+Return a single JSON object with one key, "y". If no item is highlighted, set "y" to null.
+
+Example:
+{
+  "y": 456
 }
 """
 

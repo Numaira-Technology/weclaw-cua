@@ -24,14 +24,14 @@ from shared.vision_backend import VisionBackend, create_vision_backend
 from shared.vision_prompts import (
     CHAT_PANEL_PROMPT,
     CHAT_PANEL_SAFE_CLICK_PROMPT,
-    COORDS_PROMPT_TEMPLATE,
-    CURRENT_CHAT_PROMPT,
+    CURRENT_CHAT_Y_PROMPT,
     NEW_MESSAGES_BUTTON_PROMPT,
     SIDEBAR_PROMPT,
 )
 from platform_win.find_wechat_window import find_wechat_window as find_window
 from platform_win.vision import _force_foreground_window, capture_window
 from shared.message_dedup import dedupe_chat_messages
+from shared.ocr_paddle import get_ocr_engine
 from shared.vision_response_json import parse_json_object_from_model_text
 from utils.image_stitcher import save_stitched_debug, stitch_screenshots
 
@@ -53,11 +53,11 @@ class WinDriver(PlatformDriver):
 
     def _get_precise_row_coords(self, row: SidebarRow) -> tuple[int, int] | None:
         """
-        Captures the full window and uses the AI to find the precise coordinates
-        for a specific chat name. This is used for accurate clicking.
+        Uses PaddleOCR on the sidebar crop to find the pixel-exact center of the
+        target chat row. No VLM call needed — OCR gives pixel bboxes directly.
         """
         chat_name = row.name
-        print(f"[*] Getting precise coordinates for '{chat_name}' using full screenshot...")
+        print(f"[*] Getting precise coordinates for '{chat_name}' using OCR...")
         full_screenshot = capture_window(self.hwnd)
         if not full_screenshot:
             print(f"[WARN] Failed to capture window for precise coordinate detection.")
@@ -66,49 +66,30 @@ class WinDriver(PlatformDriver):
         window_rect = win32gui.GetWindowRect(self.hwnd)
         window_left, window_top, _, _ = window_rect
 
-        print(f"[DEBUG] Precise coord prompt chat_name: '{chat_name}'")
-        prompt = COORDS_PROMPT_TEMPLATE.format(chat_name=chat_name)
-        response_str = self.vision_ai.query(prompt, full_screenshot)
+        sidebar_width = int(full_screenshot.width * 0.3)
+        sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
 
-        if not response_str:
-            print(f"[ERROR] Received no response from Vision AI for precise coordinates.")
+        ocr_engine = get_ocr_engine()
+        raw_lines = ocr_engine.recognize(sidebar_image)
+        merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
+
+        hit = ocr_engine.match_target(merged_lines, chat_name)
+
+        if hit is None:
+            print(f"[WARN] OCR could not find '{chat_name}' in sidebar. Trying unmerged lines...")
+            hit = ocr_engine.match_target(raw_lines, chat_name)
+
+        if hit is None:
+            print(f"[ERROR] OCR could not locate '{chat_name}' in sidebar after two passes.")
             return None
 
-        print(f"[DEBUG] Raw AI response for precise coords:\n{response_str}")
-
-        try:
-            data = parse_json_object_from_model_text(response_str)
-            win_rel_bbox = data.get("bbox")
-
-            if not win_rel_bbox or len(win_rel_bbox) != 4:
-                print(f"[WARN] AI returned invalid bbox for '{chat_name}': {win_rel_bbox}")
-                print(f"[DEBUG] Raw AI response for invalid bbox: {response_str}")
-                return None
-
-            img_width, img_height = full_screenshot.size
-            scaled_x1 = int(win_rel_bbox[0] / 1000 * img_width)
-            scaled_y1 = int(win_rel_bbox[1] / 1000 * img_height)
-            scaled_x2 = int(win_rel_bbox[2] / 1000 * img_width)
-            scaled_y2 = int(win_rel_bbox[3] / 1000 * img_height)
-
-            abs_x1 = window_left + scaled_x1
-            abs_y1 = window_top + scaled_y1
-            abs_x2 = window_left + scaled_x2
-            abs_y2 = window_top + scaled_y2
-
-            center_x = (abs_x1 + abs_x2) // 2
-            center_y = (abs_y1 + abs_y2) // 2
-
-            print(f"[+] Precise coordinates for '{chat_name}' found: ({center_x}, {center_y})")
-            return (center_x, center_y)
-
-        except Exception as e:
-            print(f"[ERROR] Failed to parse precise coordinate response for '{chat_name}'. Exception type: {type(e)}, message: {e}")
-            print(f"Raw response was: {response_str}")
-            return None
+        abs_x = window_left + hit.center_x
+        abs_y = window_top + hit.center_y
+        print(f"[+] Precise coordinates for '{chat_name}' found via OCR: ({abs_x}, {abs_y})")
+        return (abs_x, abs_y)
 
     def get_sidebar_rows(self, window: Any) -> list[SidebarRow]:
-        """Gets all visible rows in the sidebar using the Vision AI."""
+        """Gets all visible rows in the sidebar using PaddleOCR (names) + VLM (semantics)."""
         hwnd = window
         full_screenshot = capture_window(hwnd)
         if not full_screenshot:
@@ -121,26 +102,110 @@ class WinDriver(PlatformDriver):
         sidebar_crop_box = (0, 0, sidebar_width, full_screenshot.height)
         sidebar_image = full_screenshot.crop(sidebar_crop_box)
 
-        print("[*] Querying Vision AI to analyze sidebar...")
-        response_str = self.vision_ai.query(SIDEBAR_PROMPT, sidebar_image)
-
-        if not response_str:
-            print("[ERROR] Received no response from Vision AI for sidebar analysis.")
-            return []
-
-        try:
-            threads = parse_threads_json(response_str)
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
-            print(f"[ERROR] Failed to parse sidebar classification JSON: {e}")
-            print(f"Raw response was: {response_str}")
-            return []
-
         img_width, img_height = sidebar_image.size
-        sidebar_rows = threads_to_sidebar_rows(
-            threads, img_width, img_height, window_left, window_top
-        )
-        print(f"[+] AI identified {len(sidebar_rows)} sidebar rows.")
-        return sidebar_rows
+
+        # --- Step 1: PaddleOCR — precise Chinese text + pixel bboxes ---
+        ocr_engine = get_ocr_engine()
+        raw_lines = ocr_engine.recognize(sidebar_image)
+        # Merge into chat-name rows (top text per vertical group)
+        merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
+
+        if not merged_lines:
+            print("[WARN] PaddleOCR returned no text; falling back to VLM-only mode.")
+            merged_lines = []
+
+        # Build OCR hint list for VLM to reduce hallucination
+        ocr_name_hints = [ln.text for ln in merged_lines]
+
+        # --- Step 2: VLM — is_group / unread / y_norm per row ---
+        hint_clause = ""
+        if ocr_name_hints:
+            names_csv = ", ".join(f'"{n}"' for n in ocr_name_hints)
+            hint_clause = (
+                f"\nThe OCR engine has confirmed these chat names visible top-to-bottom: [{names_csv}]. "
+                "Use EXACTLY these names in your JSON; only determine is_group and unread for each."
+            )
+
+        augmented_prompt = SIDEBAR_PROMPT + hint_clause
+
+        print(f"[DEBUG] OCR merged lines: {len(merged_lines)} rows, sending as hints to VLM.")
+
+        print("[*] Querying Vision AI to analyze sidebar...")
+        response_str = self.vision_ai.query(augmented_prompt, sidebar_image)
+
+        vlm_threads: list[dict] = []
+        if response_str:
+            try:
+                vlm_threads = parse_threads_json(response_str)
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
+                print(f"[WARN] Failed to parse sidebar VLM response: {e}. Using OCR names only.")
+        else:
+            print("[WARN] No VLM response for sidebar; using OCR names with defaults.")
+
+        # --- Step 3: Merge OCR rows with VLM semantics by name (primary) then y ---
+        # VLM is instructed to use exact OCR names, so name-match is reliable.
+        # Fall back to nearest-y only for rows the VLM named slightly differently.
+        def _vlm_y_px(thread: dict) -> int:
+            y_norm = float(thread.get("y", 0))
+            return int(y_norm / 1000.0 * img_height)
+
+        vlm_by_name: dict[str, dict] = {t.get("name", ""): t for t in vlm_threads}
+
+        def _best_vlm_thread(ocr_text: str, ocr_cy: int) -> dict:
+            # 1. Exact name match
+            if ocr_text in vlm_by_name:
+                return vlm_by_name[ocr_text]
+            # 2. Nearest-y fallback
+            if vlm_threads:
+                return min(vlm_threads, key=lambda t: abs(_vlm_y_px(t) - ocr_cy))
+            return {}
+
+        rows: list[SidebarRow] = []
+
+        if merged_lines:
+            for ocr_line in merged_lines:
+                ocr_cy = ocr_line.center_y
+                best_thread = _best_vlm_thread(ocr_line.text, ocr_cy)
+
+                is_group = bool(best_thread.get("is_group", False)) if best_thread else False
+                unread = bool(best_thread.get("unread", False)) if best_thread else False
+                unread_badge_raw = best_thread.get("unread_badge") if best_thread else None
+
+                if unread:
+                    badge = str(unread_badge_raw).strip() if unread_badge_raw else "1"
+                else:
+                    badge = None
+
+                # Pixel bbox of this OCR row → absolute screen coords
+                ox1, oy1, ox2, oy2 = ocr_line.bbox
+                # Expand row height to be at least 20px tall (for click accuracy)
+                row_half = max((oy2 - oy1) // 2, 10)
+                cy = (oy1 + oy2) // 2
+                y1 = max(0, cy - row_half)
+                y2 = min(img_height, cy + row_half)
+                box = (
+                    window_left,
+                    window_top + y1,
+                    window_left + sidebar_width,
+                    window_top + y2,
+                )
+                rows.append(
+                    SidebarRow(
+                        name=ocr_line.text,
+                        last_message=None,
+                        badge_text=badge,
+                        bbox=box,
+                        is_group=is_group,
+                    )
+                )
+        else:
+            # Full fallback: VLM only (original behaviour)
+            rows = threads_to_sidebar_rows(
+                vlm_threads, img_width, img_height, window_left, window_top
+            )
+
+        print(f"[+] AI identified {len(rows)} sidebar rows.")
+        return rows
 
     def ensure_permissions(self) -> None:
         raise NotImplementedError
@@ -385,7 +450,13 @@ class WinDriver(PlatformDriver):
         time.sleep(0.5)
 
     def get_current_chat_name(self) -> str | None:
-        """Captures the sidebar and uses AI to get the name of the currently selected (highlighted) chat."""
+        """Captures the sidebar and identifies the currently selected (highlighted) chat.
+
+        Strategy:
+        1. PaddleOCR → precise text + pixel bboxes for all visible rows.
+        2. VLM → returns the normalized y (0-1000) of the highlighted row only.
+        3. Map VLM y back to the nearest OCR line to get the accurate name.
+        """
         print("[*] Identifying current chat name from sidebar highlight...")
         full_screenshot = capture_window(self.hwnd)
         if not full_screenshot:
@@ -393,28 +464,43 @@ class WinDriver(PlatformDriver):
             return None
 
         sidebar_width = int(full_screenshot.width * 0.3)
-        sidebar_crop_box = (0, 0, sidebar_width, full_screenshot.height)
-        sidebar_image = full_screenshot.crop(sidebar_crop_box)
+        sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
+        img_height = sidebar_image.height
 
-        response_str = self.vision_ai.query(CURRENT_CHAT_PROMPT, sidebar_image)
+        # Step 1: OCR all text lines
+        ocr_engine = get_ocr_engine()
+        raw_lines = ocr_engine.recognize(sidebar_image)
+        merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
+
+        # Step 2: VLM — only ask for the y of the highlighted row
+        response_str = self.vision_ai.query(CURRENT_CHAT_Y_PROMPT, sidebar_image)
 
         if not response_str:
-            print(f"[ERROR] Received no response from Vision AI for chat name.")
+            print("[ERROR] No response from Vision AI for current chat identification.")
             return None
 
         try:
             data = parse_json_object_from_model_text(response_str)
-            chat_name = data.get("chat_name")
-
-            if chat_name:
-                print(f"[+] Current chat identified as: '{chat_name}'")
-                return chat_name
-            else:
-                print(f"[WARN] AI did not return a chat_name.")
+            y_norm = data.get("y")
+            if y_norm is None:
+                print("[WARN] VLM did not identify a highlighted row.")
                 return None
 
-        except (AssertionError, KeyError) as e:
-            print(f"[ERROR] Failed to parse chat name response. Exception: {e}")
+            y_px = int(float(y_norm) / 1000.0 * img_height)
+
+            # Step 3: Find nearest OCR line
+            lines_to_search = merged_lines or raw_lines
+            if not lines_to_search:
+                print("[WARN] OCR returned no lines; cannot map highlighted row.")
+                return None
+
+            nearest = min(lines_to_search, key=lambda ln: abs(ln.center_y - y_px))
+            chat_name = nearest.text
+            print(f"[+] Current chat identified as: '{chat_name}'")
+            return chat_name
+
+        except Exception as e:
+            print(f"[ERROR] Failed to parse current chat response. Exception: {e}")
             print(f"Raw response was: {response_str}")
             return None
 
@@ -467,10 +553,16 @@ class WinDriver(PlatformDriver):
                 print("[DEBUG] No 'new messages' button found by AI.")
                 return False
 
-            abs_x1 = window_left + chat_panel_region[0] + bbox[0]
-            abs_y1 = window_top + chat_panel_region[1] + bbox[1]
-            abs_x2 = window_left + chat_panel_region[0] + bbox[2]
-            abs_y2 = window_top + chat_panel_region[1] + bbox[3]
+            img_w, img_h = chat_panel_screenshot.size
+            px_x1 = int(bbox[0] / 1000 * img_w)
+            px_y1 = int(bbox[1] / 1000 * img_h)
+            px_x2 = int(bbox[2] / 1000 * img_w)
+            px_y2 = int(bbox[3] / 1000 * img_h)
+
+            abs_x1 = window_left + chat_panel_region[0] + px_x1
+            abs_y1 = window_top + chat_panel_region[1] + px_y1
+            abs_x2 = window_left + chat_panel_region[0] + px_x2
+            abs_y2 = window_top + chat_panel_region[1] + px_y2
 
             center_x = (abs_x1 + abs_x2) // 2
             center_y = (abs_y1 + abs_y2) // 2
