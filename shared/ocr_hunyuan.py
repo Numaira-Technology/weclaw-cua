@@ -165,6 +165,29 @@ class HunyuanOcrEngine(PaddleOcrEngine):
             line = self._mk_line(text, box, width, height, 0.9)
             if line is not None:
                 out.append(line)
+        if out:
+            return out
+        return self._parse_inline_pairs(raw_text, width, height)
+
+    def _parse_inline_pairs(self, raw_text: str, width: int, height: int) -> list[OcrLine]:
+        pair_pat = re.compile(
+            r"\(\s*(\d+(?:\.\d+)?)\s*[,，]\s*(\d+(?:\.\d+)?)\s*\)\s*,\s*\(\s*(\d+(?:\.\d+)?)\s*[,，]\s*(\d+(?:\.\d+)?)\s*\)"
+        )
+        matches = list(pair_pat.finditer(raw_text))
+        if not matches:
+            return []
+        out: list[OcrLine] = []
+        for i, m in enumerate(matches):
+            text_start = 0 if i == 0 else matches[i - 1].end()
+            text_end = m.start()
+            seg = raw_text[text_start:text_end].strip()
+            seg = seg.strip("，,;；|")
+            if not seg:
+                continue
+            box = [m.group(1), m.group(2), m.group(3), m.group(4)]
+            line = self._mk_line(seg, box, width, height, 0.9)
+            if line is not None:
+                out.append(line)
         return out
 
     def _parse_plain_lines(self, raw_text: str, width: int, height: int) -> list[OcrLine]:
