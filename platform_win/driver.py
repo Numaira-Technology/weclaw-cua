@@ -31,7 +31,7 @@ from shared.vision_prompts import (
 from platform_win.find_wechat_window import find_wechat_window as find_window
 from platform_win.vision import _force_foreground_window, capture_window
 from shared.message_dedup import dedupe_chat_messages
-from shared.ocr_paddle import get_ocr_engine
+from shared.ocr_hunyuan import get_ocr_engine
 from shared.vision_response_json import parse_json_object_from_model_text
 from utils.image_stitcher import save_stitched_debug, stitch_screenshots
 
@@ -71,7 +71,7 @@ class WinDriver(PlatformDriver):
 
         ocr_engine = get_ocr_engine()
         raw_lines = ocr_engine.recognize(sidebar_image)
-        merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
+        merged_lines = ocr_engine.merge_wechat_sidebar_list_rows(raw_lines)
 
         hit = ocr_engine.match_target(merged_lines, chat_name)
 
@@ -107,8 +107,7 @@ class WinDriver(PlatformDriver):
         # --- Step 1: PaddleOCR — precise Chinese text + pixel bboxes ---
         ocr_engine = get_ocr_engine()
         raw_lines = ocr_engine.recognize(sidebar_image)
-        # Merge into chat-name rows (top text per vertical group)
-        merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
+        merged_lines = ocr_engine.merge_wechat_sidebar_list_rows(raw_lines)
 
         if not merged_lines:
             print("[WARN] PaddleOCR returned no text; falling back to VLM-only mode.")
@@ -122,8 +121,11 @@ class WinDriver(PlatformDriver):
         if ocr_name_hints:
             names_csv = ", ".join(f'"{n}"' for n in ocr_name_hints)
             hint_clause = (
-                f"\nThe OCR engine has confirmed these chat names visible top-to-bottom: [{names_csv}]. "
-                "Use EXACTLY these names in your JSON; only determine is_group and unread for each."
+                f"\nOCR text fragments top-to-bottom (may mix titles, previews, or UI noise): [{names_csv}]. "
+                "Emit one JSON thread per visible session row. "
+                "Each \"name\" MUST be the real session title shown on that row (left column), "
+                "never the last-message preview line below it. "
+                "If OCR listed a preview instead of the title, use the title text you see in the image."
             )
 
         augmented_prompt = SIDEBAR_PROMPT + hint_clause
@@ -470,7 +472,7 @@ class WinDriver(PlatformDriver):
         # Step 1: OCR all text lines
         ocr_engine = get_ocr_engine()
         raw_lines = ocr_engine.recognize(sidebar_image)
-        merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
+        merged_lines = ocr_engine.merge_wechat_sidebar_list_rows(raw_lines)
 
         # Step 2: VLM — only ask for the y of the highlighted row
         response_str = self.vision_ai.query(CURRENT_CHAT_Y_PROMPT, sidebar_image)
