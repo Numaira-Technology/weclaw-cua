@@ -174,6 +174,8 @@ def filter_messages_to_recent_window(
     hours: int = RECENT_WINDOW_HOURS,
     now: datetime | None = None,
 ) -> list[ChatMessage]:
+    if hours <= 0:
+        return list(messages)
     if now is None:
         now = datetime.now().astimezone().replace(tzinfo=None)
     cutoff = now - timedelta(hours=hours)
@@ -192,6 +194,8 @@ def chunk_reaches_recent_cutoff(
     hours: int = RECENT_WINDOW_HOURS,
     now: datetime | None = None,
 ) -> bool:
+    if hours <= 0:
+        return False
     if now is None:
         now = datetime.now().astimezone().replace(tzinfo=None)
     cutoff = now - timedelta(hours=hours)
