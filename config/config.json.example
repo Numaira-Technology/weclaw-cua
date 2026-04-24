@@ -3,7 +3,9 @@
   "groups_to_monitor": ["*"],
   "sidebar_unread_only": true,
   "report_custom_prompt": "Summarize key decisions and action items from the chat messages.",
+  "llm_provider": "openrouter",
   "openrouter_api_key": "",
+  "openai_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }

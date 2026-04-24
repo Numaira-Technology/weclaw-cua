@@ -45,7 +45,7 @@ def init(config_dir, force):
         if os.path.exists(example_path):
             shutil.copy2(example_path, config_path)
             click.echo(f"[+] Created config: {config_path}")
-            click.echo("    Edit this file to set your openrouter_api_key and groups_to_monitor.")
+            click.echo("    Edit this file to set your LLM API key and groups_to_monitor.")
         else:
             os.makedirs(config_dir, exist_ok=True)
             template = {
@@ -53,7 +53,9 @@ def init(config_dir, force):
                 "groups_to_monitor": ["*"],
                 "sidebar_unread_only": True,
                 "report_custom_prompt": "Summarize key decisions and action items from the chat messages.",
+                "llm_provider": "openrouter",
                 "openrouter_api_key": "",
+                "openai_api_key": "",
                 "llm_model": "openai/gpt-4o",
                 "output_dir": "output",
             }
@@ -85,6 +87,8 @@ def init(config_dir, force):
     click.echo(f"\n[+] Setup complete!")
     click.echo("\nNext steps:")
     click.echo(f"  1. Edit {config_path}")
-    click.echo("     - Set openrouter_api_key (or export OPENROUTER_API_KEY)")
+    click.echo("     - Set llm_provider and its API key")
+    click.echo("     - OpenAI: export OPENAI_API_KEY or set openai_api_key")
+    click.echo("     - OpenRouter: export OPENROUTER_API_KEY or set openrouter_api_key")
     click.echo("     - Set groups_to_monitor")
     click.echo("  2. Run: weclaw run")
