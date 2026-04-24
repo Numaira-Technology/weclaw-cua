@@ -110,15 +110,11 @@ class WinDriver(PlatformDriver):
             rows: list[SidebarRow] = []
             for ocr_line in raw_lines:
                 ox1, oy1, ox2, oy2 = ocr_line.bbox
-                row_half = max((oy2 - oy1) // 2, 10)
-                cy = (oy1 + oy2) // 2
-                y1 = max(0, cy - row_half)
-                y2 = min(img_height, cy + row_half)
                 box = (
-                    window_left,
-                    window_top + y1,
-                    window_left + sidebar_width,
-                    window_top + y2,
+                    window_left + int(ox1),
+                    window_top + int(oy1),
+                    window_left + int(ox2),
+                    window_top + int(oy2),
                 )
                 rows.append(
                     SidebarRow(

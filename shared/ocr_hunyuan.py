@@ -213,7 +213,20 @@ class HunyuanOcrEngine(PaddleOcrEngine):
         arr = np.array(box_values, dtype=float).reshape(-1)
         if arr.size < 4:
             return None
-        x1, y1, x2, y2 = [int(v) for v in arr[:4].tolist()]
+        x1f, y1f, x2f, y2f = arr[:4].tolist()
+
+        # Hunyuan often returns bbox in normalized 0-1000 coordinates.
+        # Convert to current image pixels when values exceed image bounds.
+        if (
+            max(x1f, x2f) > float(width)
+            or max(y1f, y2f) > float(height)
+        ) and max(x1f, x2f, y1f, y2f) <= 1000.0:
+            x1f = x1f / 1000.0 * width
+            x2f = x2f / 1000.0 * width
+            y1f = y1f / 1000.0 * height
+            y2f = y2f / 1000.0 * height
+
+        x1, y1, x2, y2 = [int(v) for v in (x1f, y1f, x2f, y2f)]
         x1 = max(0, min(x1, width - 1))
         x2 = max(0, min(x2, width))
         y1 = max(0, min(y1, height - 1))

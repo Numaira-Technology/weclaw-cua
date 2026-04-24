@@ -14,6 +14,7 @@ Output spec:
 """
 
 import json
+import ssl
 import urllib.request
 
 
@@ -37,7 +38,26 @@ def call_llm(prompt: str, model: str, api_key: str) -> str:
         },
     )
 
-    resp = urllib.request.urlopen(req)
+    def _open_with_context(ctx: ssl.SSLContext | None):
+        if ctx is None:
+            return urllib.request.urlopen(req, timeout=60)
+        return urllib.request.urlopen(req, timeout=60, context=ctx)
+
+    try:
+        resp = _open_with_context(None)
+    except Exception as e:
+        # Some Windows environments have broken SSL cert-path config, which
+        # raises FileNotFoundError during TLS handshake. Retry with certifi CA.
+        reason = getattr(e, "reason", None)
+        inner = reason if reason is not None else e
+        if not isinstance(inner, FileNotFoundError):
+            raise
+        try:
+            import certifi  # type: ignore[import]
+        except Exception:
+            raise
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        resp = _open_with_context(ctx)
     data = json.loads(resp.read().decode("utf-8"))
 
     choices = data.get("choices")
