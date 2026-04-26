@@ -18,7 +18,7 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
 		echo "Create a venv and install dependencies:"
 		echo "  cd \"${SCRIPT_DIR}\""
 		echo "  python3 -m venv .venv"
-		echo "  ./.venv/bin/pip install -r requirements.txt"
+		echo "  ./.venv/bin/pip install -r requirements-macos.txt"
 		echo "  ./run.sh"
 		exit 1
 	fi

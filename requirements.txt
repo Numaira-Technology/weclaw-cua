@@ -7,15 +7,21 @@ pyautogui
 pywin32; sys_platform == "win32"
 
 # LLM dependencies (optional, only for built-in OpenRouter mode)
-# Install with: pip install weclaw[llm]
-# Not needed in stepwise mode (agent handles LLM calls)
+# Windows capture/run: pip install -e ".[llm]" also installs Hunyuan sidebar OCR.
+# Stepwise skips LLM calls, but Windows capture still needs the sidebar OCR deps below.
 litellm
 openai
 
+# Windows: Hunyuan OCR (platform_win driver). Omit on macOS/Linux.
+torch>=2.7.1; sys_platform == "win32"
+huggingface_hub; sys_platform == "win32"
+accelerate; sys_platform == "win32"
+transformers @ git+https://github.com/huggingface/transformers@82a06db03535c49aa987719ed0746a76093b1ec4 ; sys_platform == "win32"
+
 # macOS dependencies (only on macOS)
-# Install with: pip install weclaw[macos]
-pyobjc-core
-pyobjc-framework-ApplicationServices
-pyobjc-framework-Cocoa
-pyobjc-framework-Quartz
-pyobjc-framework-Vision
+# Install with: pip install weclaw-cua[macos]
+pyobjc-core; sys_platform == "darwin"
+pyobjc-framework-ApplicationServices; sys_platform == "darwin"
+pyobjc-framework-Cocoa; sys_platform == "darwin"
+pyobjc-framework-Quartz; sys_platform == "darwin"
+pyobjc-framework-Vision; sys_platform == "darwin"
