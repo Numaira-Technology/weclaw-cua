@@ -36,6 +36,16 @@ dependencies = [
 llm = [
     "litellm",
     "openai",
+    "torch>=2.7.1; sys_platform == 'win32'",
+    "huggingface_hub; sys_platform == 'win32'",
+    "accelerate; sys_platform == 'win32'",
+    "transformers @ git+https://github.com/huggingface/transformers@82a06db03535c49aa987719ed0746a76093b1ec4 ; sys_platform == 'win32'",
+]
+win-ocr = [
+    "torch>=2.7.1",
+    "huggingface_hub",
+    "accelerate",
+    "transformers @ git+https://github.com/huggingface/transformers@82a06db03535c49aa987719ed0746a76093b1ec4",
 ]
 ocr = [
     "rapidocr-onnxruntime>=1.3",

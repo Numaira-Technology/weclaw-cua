@@ -1,0 +1,6 @@
+# Same dependency set as:
+#   pip install "weclaw-cua[macos,llm]"
+# From this repository (macOS, editable install):
+#   pip install -e ".[macos,llm]"
+#
+-e .[macos,llm]

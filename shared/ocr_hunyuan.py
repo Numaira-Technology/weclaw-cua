@@ -35,7 +35,7 @@ class HunyuanOcrEngine(PaddleOcrEngine):
         except ImportError as e:
             raise ImportError(
                 "HunyuanOCR dependencies missing. Install: "
-                "pip install torch huggingface_hub "
+                "pip install torch>=2.7.1 huggingface_hub accelerate "
                 "git+https://github.com/huggingface/transformers@82a06db03535c49aa987719ed0746a76093b1ec4"
             ) from e
 
@@ -58,8 +58,10 @@ class HunyuanOcrEngine(PaddleOcrEngine):
                 **model_kwargs,
             )
         except ValueError as e:
-            if "requires `accelerate`" not in str(e):
+            msg = str(e)
+            if "requires `accelerate`" not in msg and "offload the whole model to the disk" not in msg:
                 raise
+            print("[!] HunyuanOCR auto device placement failed; loading on CPU.")
             model = HunYuanVLForConditionalGeneration.from_pretrained(
                 local_model_dir,
                 **model_kwargs,

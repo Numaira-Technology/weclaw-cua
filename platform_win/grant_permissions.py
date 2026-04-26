@@ -26,6 +26,11 @@ def check_platform() -> None:
     assert sys.platform == "win32", f"platform_win requires Windows, got {sys.platform}"
 
 
+def check_prerequisites() -> None:
+    """Entry point for weclaw init: verify platform only (UIA needs no extra grant)."""
+    check_platform()
+
+
 def check_admin_if_needed() -> bool:
     """Return True if the process has admin elevation (or elevation is unnecessary)."""
     raise NotImplementedError(
