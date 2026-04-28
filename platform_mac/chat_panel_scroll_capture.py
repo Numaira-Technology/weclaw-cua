@@ -1,4 +1,4 @@
-"""聊天区截图：未读条数 < 5 时不向上滚动，只截一帧；否则多次上滚并截图。"""
+"""聊天区截图：未读 ≤5 时少量上滚（2 次），超过 5 则完整滚动（10 次）。"""
 
 from __future__ import annotations
 
@@ -9,25 +9,25 @@ from PIL import Image
 from platform_mac import macos_window as _macos_w
 
 SCROLL_UP_WHEN_UNREAD_AT_LEAST = 5
+LIGHT_SCROLL_COUNT = 2
+FULL_SCROLL_COUNT = 10
 
 
 def scroll_capture_frames_for_extraction(driver: Any, max_messages: int | None) -> List[Image.Image]:
-    skip_scroll_up = (
+    light_scroll = (
         max_messages is not None
         and max_messages > 0
-        and max_messages < SCROLL_UP_WHEN_UNREAD_AT_LEAST
+        and max_messages <= SCROLL_UP_WHEN_UNREAD_AT_LEAST
     )
+    if light_scroll:
+        scroll_count = LIGHT_SCROLL_COUNT
+        print(f"[*] 未读数 {max_messages} <= {SCROLL_UP_WHEN_UNREAD_AT_LEAST}，轻量上滚 {scroll_count} 次。")
+    else:
+        scroll_count = FULL_SCROLL_COUNT
+        print(f"[*] 未读数较多，完整上滚 {scroll_count} 次。")
+
     out: List[Image.Image] = []
-    if skip_scroll_up:
-        print(
-            f"[*] 未读数 {max_messages} < {SCROLL_UP_WHEN_UNREAD_AT_LEAST}，不向上滚动，"
-            "只截当前视窗。"
-        )
-        shot = _macos_w.capture_window_pid(driver.pid)
-        if shot:
-            out.append(shot)
-        return out
-    for _ in range(10):
+    for _ in range(scroll_count):
         driver.scroll_chat_panel(direction="up")
         screenshot = _macos_w.capture_window_pid(driver.pid)
         if screenshot:

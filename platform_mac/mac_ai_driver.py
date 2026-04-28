@@ -4,15 +4,15 @@ import json
 import time
 from typing import Any
 
-import pyautogui  # type: ignore[import-untyped]
+import pyautogui
 
 from shared.datatypes import ChatMessage, SidebarRow
 from shared.platform_api import PlatformDriver
 from shared.sidebar_classification import parse_threads_json, threads_to_sidebar_rows
-from shared.ocr_hunyuan import get_ocr_engine
 from shared.vision_backend import VisionBackend, create_vision_backend
 from shared.vision_response_json import parse_json_object_from_model_text
 from shared.vision_prompts import COORDS_PROMPT_TEMPLATE, SIDEBAR_PROMPT
+from shared.ocr_hunyuan import get_ocr_engine
 from platform_mac.find_wechat_window import find_wechat_window as locate_wechat
 from platform_mac.grant_permissions import ensure_permissions as grant_ax
 from platform_mac.mac_driver_messages import MacDriverMessages
@@ -48,8 +48,10 @@ class MacDriver(MacDriverMessages, PlatformDriver):
         print(f"[*] Getting precise coordinates for '{chat_name}' using OCR...")
         full_screenshot, wb = capture_window_pid_and_bounds(self.pid)
         fw, fh = full_screenshot.size
+
         sidebar_width = int(full_screenshot.width * 0.3)
         sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
+
         try:
             ocr_engine = get_ocr_engine()
             raw_lines = ocr_engine.recognize(sidebar_image)
@@ -83,15 +85,18 @@ class MacDriver(MacDriverMessages, PlatformDriver):
         sidebar_width = int(full_screenshot.width * 0.3)
         sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
         img_width, img_height = sidebar_image.size
+
         try:
             ocr_engine = get_ocr_engine()
             ocr_rows = sidebar_rows_from_hunyuan(full_screenshot, wb, ocr_engine)
         except Exception as e:
             print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}); using VLM sidebar detection.")
             ocr_rows = []
+
         if ocr_rows:
             print(f"[+] OCR identified {len(ocr_rows)} plausible sidebar rows.")
             return ocr_rows
+
         response_str = self.vision_ai.query(SIDEBAR_PROMPT, sidebar_image)
         if not response_str:
             return []

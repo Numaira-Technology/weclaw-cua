@@ -1,7 +1,7 @@
 """Unit tests for HunyuanOCR text spotting parser.
 
 Usage:
-    python3 -m unittest discover -s tests -p "test_ocr_hunyuan_parser.py"
+    python3 -m unittest tests.test_ocr_hunyuan_parser
 
 Input spec:
     - Synthetic decoded HunyuanOCR strings with rectangle and quadrilateral

@@ -63,17 +63,22 @@ def report(ctx, input_files, prompt_only, fmt):
         output(prompt_text, "text")
         return
 
-    if not config.openrouter_api_key:
+    if not config.llm_api_key:
         click.echo(
             "No API key configured. Use --prompt-only to get the prompt, "
-            "or set OPENROUTER_API_KEY / openrouter_api_key in config.json.",
+            "or set OPENAI_API_KEY/openai_api_key or OPENROUTER_API_KEY/openrouter_api_key.",
             err=True,
         )
         ctx.exit(1)
 
     from algo_b.generate_report import generate_report
 
-    report_text = generate_report(prompt_text, config.llm_model, config.openrouter_api_key)
+    report_text = generate_report(
+        prompt_text,
+        config.llm_model,
+        config.llm_api_key,
+        config.llm_provider,
+    )
 
     if fmt == "json":
         output({

@@ -23,7 +23,6 @@ if project_root not in sys.path:
 from shared.platform_api import PlatformDriver
 
 MAX_SCROLL_ITERATIONS = 10
-MIN_TRUNCATED_PREFIX_LEN = 4
 
 
 @dataclass
@@ -75,41 +74,19 @@ def _sidebar_compact_compare(s: str) -> str:
     return t
 
 
-def _strip_trailing_ellipsis(text: str) -> str:
-    t = text.rstrip()
-    while t.endswith("..."):
-        t = t[:-3].rstrip()
-    return t
-
-
-def _safe_truncated_prefix_match(ui_name: str, filter_name: str) -> bool:
-    prefix = _strip_trailing_ellipsis(ui_name)
-    if not prefix or len(prefix) < MIN_TRUNCATED_PREFIX_LEN:
-        return False
-    if len(prefix) >= len(filter_name):
-        return False
-    if filter_name.startswith(prefix):
-        return True
-
-    compact_prefix = _sidebar_compact_compare(prefix)
-    compact_filter = _sidebar_compact_compare(filter_name)
-    if len(compact_prefix) < MIN_TRUNCATED_PREFIX_LEN:
-        return False
-    if len(compact_prefix) >= len(compact_filter):
-        return False
-    return compact_filter.startswith(compact_prefix)
-
-
 def _sidebar_names_match(ui_name: str, filter_name: str) -> bool:
     if not ui_name or not filter_name:
         return False
     clean_ui = _normalize_chat_label(ui_name)
     want = _normalize_chat_label(filter_name)
+    if clean_ui.endswith("..."):
+        prefix = clean_ui[:-3]
+        return want.startswith(prefix) or _sidebar_compact_compare(want).startswith(
+            _sidebar_compact_compare(prefix)
+        )
     if clean_ui == want:
         return True
-    if _sidebar_compact_compare(clean_ui) == _sidebar_compact_compare(want):
-        return True
-    return _safe_truncated_prefix_match(clean_ui, want)
+    return _sidebar_compact_compare(clean_ui) == _sidebar_compact_compare(want)
 
 
 def _row_key(name: str) -> str:
