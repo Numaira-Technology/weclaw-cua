@@ -32,6 +32,23 @@ from shared.ocr_hunyuan_parser import (  # type: ignore[import-untyped]
 
 _MODEL_NAME = "tencent/HunyuanOCR"
 _PROMPT = "检测并识别图片中的文字，将文本坐标格式化输出。"
+MIN_TRUNCATED_PREFIX_LEN = 4
+
+
+def _strip_trailing_ellipsis(text: str) -> str:
+    t = text.rstrip()
+    while t.endswith("..."):
+        t = t[:-3].rstrip()
+    return t
+
+
+def _safe_truncated_prefix_match(text: str, target: str) -> bool:
+    prefix = _strip_trailing_ellipsis(text)
+    if not prefix or len(prefix) < MIN_TRUNCATED_PREFIX_LEN:
+        return False
+    if len(prefix) >= len(target):
+        return False
+    return target.startswith(prefix) or target.casefold().startswith(prefix.casefold())
 
 
 def _clean_repeated_substrings(text: str) -> str:
@@ -151,9 +168,9 @@ class HunyuanOcrEngine:
             norm_text = normalize_text(line.text)
             if norm_text == norm_target:
                 return line
-            if norm_text.endswith("...") and norm_target.startswith(norm_text[:-3]):
-                return line
-            if norm_target.endswith("...") and norm_text.startswith(norm_target[:-3]):
+            if _safe_truncated_prefix_match(
+                norm_text, norm_target,
+            ) or _safe_truncated_prefix_match(norm_target, norm_text):
                 return line
             score = difflib.SequenceMatcher(None, norm_text, norm_target).ratio()
             if score > best_score:

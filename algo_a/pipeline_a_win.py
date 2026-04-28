@@ -15,7 +15,7 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from algo_a.list_target_chats_win import _normalize_chat_label, list_target_chats
+from algo_a.list_target_chats_win import _sidebar_names_match, list_target_chats
 from algo_a.sidebar_scroll_to_top import scroll_sidebar_to_top
 from config.weclaw_config import WeclawConfig
 
@@ -44,16 +44,7 @@ def _is_chat_name_match(ui_name: str, config_name: str) -> bool:
     Compares a chat name from the UI with a name from the config,
     handling cases where the UI name is truncated with '...' and ignoring emojis.
     """
-    if not ui_name or not config_name:
-        return False
-
-    clean_ui_name = _normalize_chat_label(ui_name)
-    clean_config_name = _normalize_chat_label(config_name)
-    
-    if clean_ui_name.endswith('...'):
-        return clean_config_name.startswith(clean_ui_name[:-3])
-    else:
-        return clean_ui_name == clean_config_name
+    return _sidebar_names_match(ui_name, config_name)
 
 
 def _dedupe_config_names(names: list[str]) -> list[str]:
@@ -74,6 +65,62 @@ def _row_has_unread(row: Any) -> bool:
         return False
     s = str(badge).strip().lower()
     return bool(s) and s not in ("none", "null")
+
+
+def _click_verify_extract_save(
+    driver: Any,
+    window: Any,
+    config: WeclawConfig,
+    matched_cfg: str,
+    row: Any,
+    written_paths: list[str],
+) -> bool:
+    chat = SimpleNamespace(name=row.name, ui_element=row)
+    click_successful = False
+    for attempt in range(3):
+        print(
+            f"[*] Attempting to click '{chat.name}' (lookup={matched_cfg!r}, "
+            f"Attempt {attempt + 1}/3)"
+        )
+        driver.click_row(chat.ui_element, attempt=attempt)
+        time.sleep(2)
+
+        current_chat_name = driver.get_current_chat_name()
+        if _is_chat_name_match(current_chat_name, matched_cfg):
+            print(
+                f"[+] Successfully clicked and verified chat: "
+                f"current={current_chat_name!r}, target={matched_cfg!r}"
+            )
+            click_successful = True
+            break
+        print(
+            f"[WARN] Click verification failed. Expected {matched_cfg!r}, "
+            f"but current chat is {current_chat_name!r}. Retrying..."
+        )
+
+    if not click_successful:
+        print(
+            f"[ERROR] Failed to click on chat '{chat.name}' after 3 attempts."
+        )
+        return False
+
+    messages = driver.get_chat_messages(chat.name)
+    if not messages:
+        print(f"[WARN] No messages were extracted from '{chat.name}'.")
+    else:
+        safe_filename = "".join(c for c in chat.name if c.isalnum() or c in (" ", "_")).rstrip()
+        output_path = os.path.join(config.output_dir, f"{safe_filename}.json")
+        with open(output_path, "w", encoding="utf-8") as f:
+            messages_as_dict = []
+            for msg in messages:
+                d = asdict(msg)
+                d["chat_name"] = chat.name
+                d["sender"] = d["sender"] or ""
+                messages_as_dict.append(d)
+            json.dump(messages_as_dict, f, ensure_ascii=False, indent=2)
+        print(f"[SUCCESS] Successfully saved {len(messages)} messages to {output_path}")
+        written_paths.append(output_path)
+    return True
 
 
 def _find_first_visible_config_match(
@@ -134,7 +181,6 @@ def run_pipeline_a(config: WeclawConfig, vision_backend=None) -> list[str]:
 
     uo = config.sidebar_unread_only
     if _groups_config_means_all_groups(config.groups_to_monitor):
-        processing_plan: list[tuple[str, str]] = []
         print(
             f"[*] Mode: ALL group chats (vision is_group). Unread filter: {uo}."
         )
@@ -142,11 +188,45 @@ def run_pipeline_a(config: WeclawConfig, vision_backend=None) -> list[str]:
         target_chats = list_target_chats(
             driver, window, all_groups=True, unread_only=uo
         )
-        processing_plan = [(c.name, c.name) for c in target_chats]
-        if not processing_plan:
+        if not target_chats:
             print("[+] No target chats found. Pipeline finished.")
             return written_paths
-        print(f"[+] Located {len(processing_plan)} target chat(s). Proceeding to click them.")
+        names_order = [c.name for c in target_chats]
+        print(f"[+] Located {len(names_order)} target chat(s). Proceeding to click them.")
+
+        max_locate_scrolls = 16
+        for processed_num, matched_cfg in enumerate(names_order, start=1):
+            print(f"\n--- Processing chat {processed_num}/{len(names_order)}: {matched_cfg!r} ---")
+            scroll_sidebar_to_top(driver, window)
+            scroll_attempts = 0
+            row = None
+            while scroll_attempts <= max_locate_scrolls:
+                hit = _find_first_visible_config_match(
+                    driver, window, [matched_cfg], unread_only=uo
+                )
+                if hit is not None:
+                    _, row = hit
+                    break
+                scroll_attempts += 1
+                print(
+                    f"[*] Target not in viewport. Scrolling down "
+                    f"({scroll_attempts}/{max_locate_scrolls})"
+                )
+                driver.scroll_sidebar(window, "down")
+                time.sleep(1)
+
+            if row is None:
+                print(f"[WARN] Could not locate sidebar row for {matched_cfg!r}. Skipping.")
+                continue
+
+            ok = _click_verify_extract_save(
+                driver, window, config, matched_cfg, row, written_paths
+            )
+            if not ok:
+                print(f"[WARN] Click failed for {matched_cfg!r}. Skipping.")
+
+        print("\n[SUCCESS] Pipeline finished processing all target chats.")
+        return written_paths
     else:
         print(f"[*] Mode: named chats from config. Unread filter: {uo}.")
         pending = _dedupe_config_names(config.groups_to_monitor)
@@ -173,51 +253,16 @@ def run_pipeline_a(config: WeclawConfig, vision_backend=None) -> list[str]:
             processed_count += 1
             print(f"\n--- Processing chat {processed_count}: lookup={matched_cfg!r}, seen={row.name!r} ---")
 
-            chat = SimpleNamespace(name=row.name, ui_element=row)
-            click_successful = False
-            for attempt in range(3):
+            ok = _click_verify_extract_save(
+                driver, window, config, matched_cfg, row, written_paths
+            )
+            if not ok:
                 print(
-                    f"[*] Attempting to click '{chat.name}' (lookup={matched_cfg!r}, "
-                    f"Attempt {attempt + 1}/3)"
+                    f"[ERROR] Failed to click on chat after 3 attempts. Keeping it pending."
                 )
-                driver.click_row(chat.ui_element, attempt=attempt)
-                time.sleep(2)
-
-                current_chat_name = driver.get_current_chat_name()
-                if _is_chat_name_match(current_chat_name, matched_cfg):
-                    print(
-                        f"[+] Successfully clicked and verified chat: "
-                        f"current={current_chat_name!r}, target={matched_cfg!r}"
-                    )
-                    click_successful = True
-                    break
-                print(
-                    f"[WARN] Click verification failed. Expected {matched_cfg!r}, "
-                    f"but current chat is {current_chat_name!r}. Retrying..."
-                )
-
-            if not click_successful:
-                print(f"[ERROR] Failed to click on chat '{chat.name}' after 3 attempts. Keeping it pending.")
                 driver.scroll_sidebar(window, "down")
                 time.sleep(1)
                 continue
-
-            messages = driver.get_chat_messages(chat.name)
-            if not messages:
-                print(f"[WARN] No messages were extracted from '{chat.name}'.")
-            else:
-                safe_filename = "".join(c for c in chat.name if c.isalnum() or c in (" ", "_")).rstrip()
-                output_path = os.path.join(config.output_dir, f"{safe_filename}.json")
-                with open(output_path, "w", encoding="utf-8") as f:
-                    messages_as_dict = []
-                    for msg in messages:
-                        d = asdict(msg)
-                        d["chat_name"] = chat.name
-                        d["sender"] = d["sender"] or ""
-                        messages_as_dict.append(d)
-                    json.dump(messages_as_dict, f, ensure_ascii=False, indent=2)
-                print(f"[SUCCESS] Successfully saved {len(messages)} messages to {output_path}")
-                written_paths.append(output_path)
 
             pending = [n for n in pending if n != matched_cfg]
             print(f"[*] Completed and removed from pending: {matched_cfg!r}; remaining={pending!r}")
@@ -229,9 +274,6 @@ def run_pipeline_a(config: WeclawConfig, vision_backend=None) -> list[str]:
 
         print("\n[SUCCESS] Pipeline finished processing named targets.")
         return written_paths
-
-    print("\n[SUCCESS] Pipeline finished processing all target chats.")
-    return written_paths
 
 
 if __name__ == "__main__":

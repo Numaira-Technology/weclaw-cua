@@ -29,3 +29,63 @@ def test_configured_name_match_ignores_unread_filter() -> None:
     )
 
     assert match == ("运营核心群", target)
+
+
+def test_configured_name_matches_truncated_visible_prefix_without_ellipsis() -> None:
+    target = SidebarRow(
+        name="运营核心群",
+        last_message=None,
+        badge_text=None,
+        bbox=(0, 0, 100, 40),
+        is_group=True,
+    )
+    driver = FakeSidebarDriver([target])
+
+    match = _find_first_visible_config_match(
+        driver,
+        window=object(),
+        pending_names=["运营核心群后半段被隐藏"],
+        unread_only=False,
+    )
+
+    assert match == ("运营核心群后半段被隐藏", target)
+
+
+def test_configured_name_matches_truncated_visible_prefix_with_ellipsis() -> None:
+    target = SidebarRow(
+        name="运营核心群…",
+        last_message=None,
+        badge_text=None,
+        bbox=(0, 0, 100, 40),
+        is_group=True,
+    )
+    driver = FakeSidebarDriver([target])
+
+    match = _find_first_visible_config_match(
+        driver,
+        window=object(),
+        pending_names=["运营核心群后半段被隐藏"],
+        unread_only=False,
+    )
+
+    assert match == ("运营核心群后半段被隐藏", target)
+
+
+def test_configured_name_rejects_short_truncated_prefix() -> None:
+    target = SidebarRow(
+        name="运营",
+        last_message=None,
+        badge_text=None,
+        bbox=(0, 0, 100, 40),
+        is_group=True,
+    )
+    driver = FakeSidebarDriver([target])
+
+    match = _find_first_visible_config_match(
+        driver,
+        window=object(),
+        pending_names=["运营核心群后半段被隐藏"],
+        unread_only=False,
+    )
+
+    assert match is None

@@ -10,6 +10,7 @@ import pyautogui  # type: ignore[import-untyped]
 import win32gui  # type: ignore[import-untyped]
 
 from shared.datatypes import ChatMessage, SidebarRow
+from shared.sidebar_ui_chrome import is_sidebar_ui_chrome_label
 from shared.platform_api import PlatformDriver
 from shared.sidebar_classification import (
     parse_threads_json,
@@ -174,6 +175,8 @@ class WinDriver(PlatformDriver):
 
         if merged_lines:
             for ocr_line in merged_lines:
+                if is_sidebar_ui_chrome_label(ocr_line.text):
+                    continue
                 ocr_cy = ocr_line.center_y
                 best_thread = _best_vlm_thread(ocr_line.text, ocr_cy)
 

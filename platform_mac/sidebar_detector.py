@@ -19,6 +19,7 @@ import numpy as np
 from PIL import Image
 
 from platform_mac.ocr import OCRResult, ocr_image, prepare_image_for_vision_ocr
+from shared.sidebar_ui_chrome import is_sidebar_ui_chrome_label
 
 
 # ── 数据结构 ──────────────────────────────────────────────
@@ -500,6 +501,8 @@ def scan_sidebar_once(window_img: Image.Image,
 
         # ── row-local name OCR ──
         name, ocr_raw = extract_chat_name_with_preview(row_img)
+        if is_sidebar_ui_chrome_label(name):
+            continue
 
         if require_name and not _is_valid_chat_name(name):
             continue
