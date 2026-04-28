@@ -88,7 +88,7 @@ def _run_mac_stepwise(config: WeclawConfig, backend: StepwiseBackend) -> list[st
             from platform_mac import macos_window as _mw
             _mw.activate_pid(self.pid)
             time.sleep(0.08)
-            clicks = 5000 if direction == "up" else -5000
+            clicks = 500 if direction == "up" else -500
             left, top, right, bottom = _mw.main_window_bounds(self.pid)
             mx = left + int((right - left) * 0.65)
             my = top + int((bottom - top) * 0.5)
