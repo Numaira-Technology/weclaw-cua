@@ -30,16 +30,21 @@ from PIL import Image
 
 _MODEL_NAME = "tencent/HunyuanOCR"
 _PROMPT = "检测并识别图片中的文字，将文本坐标格式化输出。"
+_NUM_RE = r"-?\d+(?:\.\d+)?"
+_POINT_RE = rf"\(\s*(?P<{{x}}>{_NUM_RE})\s*,\s*(?P<{{y}}>{_NUM_RE})\s*\)"
 _REF_QUAD_RE = re.compile(
     r"<ref>(?P<text>.*?)</ref>\s*<quad>\s*"
-    r"\((?P<x1>-?\d+(?:\.\d+)?),(?P<y1>-?\d+(?:\.\d+)?)\)\s*,\s*"
-    r"\((?P<x2>-?\d+(?:\.\d+)?),(?P<y2>-?\d+(?:\.\d+)?)\)\s*</quad>",
+    + _POINT_RE.format(x="x1", y="y1")
+    + r"\s*,\s*"
+    + _POINT_RE.format(x="x2", y="y2")
+    + r"\s*</quad>",
     re.DOTALL,
 )
 _TEXT_BOX_RE = re.compile(
     r"(?P<text>[^\n<>()]+?)\s*"
-    r"\((?P<x1>-?\d+(?:\.\d+)?),(?P<y1>-?\d+(?:\.\d+)?)\)\s*,\s*"
-    r"\((?P<x2>-?\d+(?:\.\d+)?),(?P<y2>-?\d+(?:\.\d+)?)\)"
+    + _POINT_RE.format(x="x1", y="y1")
+    + r"\s*,\s*"
+    + _POINT_RE.format(x="x2", y="y2")
 )
 
 
@@ -90,12 +95,15 @@ def _to_pixel_bbox(
     image_width: int,
     image_height: int,
 ) -> tuple[int, int, int, int]:
-    scale_x = image_width / 1000.0 if max(abs(x1), abs(x2)) <= 1000 else 1.0
-    scale_y = image_height / 1000.0 if max(abs(y1), abs(y2)) <= 1000 else 1.0
-    left = int(round(min(x1, x2) * scale_x))
-    top = int(round(min(y1, y2) * scale_y))
-    right = int(round(max(x1, x2) * scale_x))
-    bottom = int(round(max(y1, y2) * scale_y))
+    if max(abs(x1), abs(y1), abs(x2), abs(y2)) <= 1.0:
+        x1 *= image_width
+        x2 *= image_width
+        y1 *= image_height
+        y2 *= image_height
+    left = int(round(min(x1, x2)))
+    top = int(round(min(y1, y2)))
+    right = int(round(max(x1, x2)))
+    bottom = int(round(max(y1, y2)))
     return (
         max(0, min(left, image_width)),
         max(0, min(top, image_height)),
