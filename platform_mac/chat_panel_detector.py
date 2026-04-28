@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 
 from typing import List, Optional
 
@@ -25,6 +26,7 @@ HEADER_PANEL_WIDTH_RATIO = 0.82
 
 VIEWPORT_TOP_RATIO = 0.07
 VIEWPORT_BOTTOM_RATIO = 0.10
+MIN_TRUNCATED_PREFIX_LEN = 4
 
 
 def capture_right_panel(window_img: Image.Image) -> Image.Image:
@@ -271,6 +273,29 @@ def _strip_emoji_pictograph_chars(s: str) -> str:
     return "".join(out)
 
 
+def _normalize_sidebar_match_text(s: str) -> str:
+    t = unicodedata.normalize("NFKC", s)
+    t = t.replace("…", "...").replace("⋯", "...")
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _strip_trailing_ellipsis(text: str) -> str:
+    t = text.rstrip()
+    while t.endswith("..."):
+        t = t[:-3].rstrip()
+    return t
+
+
+def _safe_truncated_sidebar_prefix_match(detected: str, target: str) -> bool:
+    visible = _strip_trailing_ellipsis(_normalize_sidebar_match_text(detected))
+    wanted = _normalize_sidebar_match_text(target)
+    if not visible or len(visible) < MIN_TRUNCATED_PREFIX_LEN:
+        return False
+    if len(visible) >= len(wanted):
+        return False
+    return wanted.startswith(visible) or wanted.casefold().startswith(visible.casefold())
+
+
 def sidebar_name_matches_config_group(sidebar_ocr_name: str, config_group: str) -> bool:
     """侧栏 OCR 名是否与 config 中一项指同一会话：全文一致，或去掉 emoji 后文本核与 OCR 严格一致。
 
@@ -281,7 +306,11 @@ def sidebar_name_matches_config_group(sidebar_ocr_name: str, config_group: str) 
     if strict_chat_name_match(sidebar_ocr_name, config_group):
         return True
     core = _strip_emoji_pictograph_chars(config_group).strip()
-    return bool(core) and strict_chat_name_match(sidebar_ocr_name, core)
+    if core and strict_chat_name_match(sidebar_ocr_name, core):
+        return True
+    if _safe_truncated_sidebar_prefix_match(sidebar_ocr_name, config_group):
+        return True
+    return bool(core) and _safe_truncated_sidebar_prefix_match(sidebar_ocr_name, core)
 
 
 def titles_match(detected: str, target: str) -> bool:

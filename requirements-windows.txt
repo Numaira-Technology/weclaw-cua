@@ -1,6 +1,6 @@
 # Same dependency set as:
-#   pip install "weclaw-cua[llm]"
+#   pip install "weclaw-cua[llm,win-ocr]"
 # From this repository (Windows, editable install):
-#   pip install -e ".[llm]"
+#   pip install -e ".[llm,win-ocr]"
 #
--e .[llm]
+-e .[llm,win-ocr]

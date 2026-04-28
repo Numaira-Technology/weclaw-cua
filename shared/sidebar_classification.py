@@ -7,6 +7,7 @@ import json
 from typing import Any
 
 from shared.datatypes import SidebarRow
+from shared.sidebar_ui_chrome import is_sidebar_ui_chrome_label
 
 
 def strip_markdown_code_fence(text: str) -> str:
@@ -49,6 +50,8 @@ def threads_to_sidebar_rows(
     )
     for item in threads:
         name = str(item.get("name", ""))
+        if is_sidebar_ui_chrome_label(name):
+            continue
         y_norm = float(item.get("y", 0))
         unread = bool(item.get("unread", False))
         is_group = bool(item.get("is_group", False))
