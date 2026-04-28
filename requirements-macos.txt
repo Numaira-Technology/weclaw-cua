@@ -1,0 +1,7 @@
+# Same dependency set as:
+#   pip install "weclaw-cua[macos,llm,hunyuan-ocr]"
+# Includes HunyuanOCR's torch/torchvision/transformers stack.
+# From this repository (macOS, editable install):
+#   pip install -e ".[macos,llm,hunyuan-ocr]"
+#
+-e .[macos,llm,hunyuan-ocr]

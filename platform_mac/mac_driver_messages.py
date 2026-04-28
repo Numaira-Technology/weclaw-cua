@@ -14,8 +14,10 @@ from shared.message_time_window import (
 )
 from shared.vision_response_json import parse_json_object_from_model_text
 from shared.vision_prompts import (
-    CHAT_PANEL_PROMPT, CHAT_PANEL_SAFE_CLICK_PROMPT, CURRENT_CHAT_PROMPT, NEW_MESSAGES_BUTTON_PROMPT,
+    CHAT_PANEL_PROMPT, CHAT_PANEL_SAFE_CLICK_PROMPT, CURRENT_CHAT_PROMPT,
+    CURRENT_CHAT_Y_PROMPT, NEW_MESSAGES_BUTTON_PROMPT,
 )
+from shared.ocr_hunyuan import get_ocr_engine
 from platform_mac import macos_window as _macos_w
 from platform_mac.chat_panel_scroll_capture import scroll_capture_frames_for_extraction
 from shared.message_dedup import dedupe_chat_messages
@@ -86,14 +88,23 @@ class MacDriverMessages:
             debug_dir = os.environ.get("WECLAW_DEBUG_STITCH_DIR", "").strip()
             if debug_dir:
                 save_stitched_debug(stitched_image, debug_dir, chat_name, idx)
-            response_str = self.vision_ai.query(
-                CHAT_PANEL_PROMPT, stitched_image, max_tokens=16384
-            )
+            try:
+                response_str = self.vision_ai.query(
+                    CHAT_PANEL_PROMPT, stitched_image, max_tokens=16384
+                )
+            except Exception as e:
+                print(f"[ERROR] Vision AI query for chunk {idx + 1} failed: {e}")
+                continue
             if not response_str:
                 print(f"[ERROR] No response from AI for message extraction on chunk {idx + 1}.")
                 continue
-            data = parse_json_object_from_model_text(response_str)
-            messages_data = data.get("messages", [])
+            try:
+                data = parse_json_object_from_model_text(response_str)
+                messages_data = data.get("messages", [])
+            except Exception as e:
+                print(f"[ERROR] Failed to parse messages from AI response for chunk {idx + 1}: {e}")
+                print(f"Raw response was: {response_str}")
+                continue
             chunk_messages = []
             for j, msg_data in enumerate(messages_data):
                 if "content" not in msg_data:
@@ -175,6 +186,7 @@ class MacDriverMessages:
         time.sleep(0.5)
 
     def get_current_chat_name(self) -> str | None:
+        """VLM direct name → OCR + VLM y-mapping fallback."""
         print("[*] Identifying current chat name from sidebar highlight...")
         full_screenshot = _macos_w.capture_window_pid(self.pid)
         if not full_screenshot:
@@ -182,17 +194,44 @@ class MacDriverMessages:
             return None
         sidebar_width = int(full_screenshot.width * 0.3)
         sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
-        response_str = self.vision_ai.query(CURRENT_CHAT_PROMPT, sidebar_image)
-        if not response_str:
-            print("[ERROR] Received no response from Vision AI for chat name.")
+        img_height = sidebar_image.height
+
+        direct_resp = self.vision_ai.query(CURRENT_CHAT_PROMPT, sidebar_image)
+        if direct_resp:
+            data = parse_json_object_from_model_text(direct_resp)
+            direct_name = str(data.get("chat_name", "") or "").strip()
+            if direct_name and direct_name.lower() not in ("null", "none"):
+                print(f"[+] Current chat identified by VLM name: '{direct_name}'")
+                return direct_name
+
+        try:
+            ocr_engine = get_ocr_engine()
+            raw_lines = ocr_engine.recognize(sidebar_image)
+        except Exception as e:
+            print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}); skipping OCR fallback for chat name.")
             return None
+
+        response_str = self.vision_ai.query(CURRENT_CHAT_Y_PROMPT, sidebar_image)
+        if not response_str:
+            print("[ERROR] No response from Vision AI for current chat y-coord.")
+            return None
+
         data = parse_json_object_from_model_text(response_str)
-        chat_name = data.get("chat_name")
-        if chat_name:
-            print(f"[+] Current chat identified as: '{chat_name}'")
-            return chat_name
-        print("[WARN] AI did not return a chat_name.")
-        return None
+        y_norm = data.get("y")
+        if y_norm is None:
+            print("[WARN] VLM did not identify a highlighted row.")
+            return None
+
+        y_px = int(float(y_norm) / 1000.0 * img_height)
+
+        if not raw_lines:
+            print("[WARN] OCR returned no lines; cannot map highlighted row.")
+            return None
+
+        nearest = min(raw_lines, key=lambda ln: abs(ln.center_y - y_px))
+        chat_name = nearest.text
+        print(f"[+] Current chat identified via OCR+y mapping: '{chat_name}'")
+        return chat_name
 
     def click_new_messages_button(self) -> bool:
         print("[*] Checking for 'new messages' button...")

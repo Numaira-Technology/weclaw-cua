@@ -39,3 +39,4 @@ report.md
 *.tmp
 *.bak
 debug_*.png
+debug_outputs/
