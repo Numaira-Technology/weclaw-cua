@@ -131,9 +131,12 @@ class TestAlgoB(unittest.TestCase):
 
         self.assertEqual(report, "final report")
         mock_generate.assert_called_once()
-        prompt_arg = mock_generate.call_args.args[0]
+        prompt_arg, model_arg, api_key_arg, provider_arg = mock_generate.call_args.args
         self.assertIn("会话：Project Alpha", prompt_arg)
         self.assertIn("Let's ship on Monday.", prompt_arg)
+        self.assertEqual(model_arg, "test-model")
+        self.assertEqual(api_key_arg, "sk-or-test")
+        self.assertEqual(provider_arg, "openrouter")
 
     def test_load_config_defaults_to_openrouter(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
