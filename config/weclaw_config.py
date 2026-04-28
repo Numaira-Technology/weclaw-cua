@@ -16,15 +16,20 @@ config.json schema:
         "groups_to_monitor": ["*"],
         "sidebar_unread_only": false,
         "report_custom_prompt": "Summarize key decisions and action items.",
+        "llm_provider": "openrouter",
         "openrouter_api_key": "",
+        "openai_api_key": "",
         "llm_model": "openai/gpt-4o",
         "output_dir": "output"
     }
 
     groups_to_monitor: [] or ["*"] means all groups (vision is_group).
     sidebar_unread_only: true = only process rows with unread badges.
-    openrouter_api_key: optional. Only needed for built-in LLM mode.
+    llm_provider: "openrouter" or "openai"; defaults to "openrouter".
+    openrouter_api_key: optional. Only needed for built-in OpenRouter mode.
       Env OPENROUTER_API_KEY (or LITELLM_API_KEY) takes precedence.
+    openai_api_key: optional. Only needed for built-in OpenAI mode.
+      Env OPENAI_API_KEY takes precedence.
       In stepwise mode (agent handles LLM), this can be empty.
 """
 
@@ -42,6 +47,38 @@ class WeclawConfig:
     openrouter_api_key: str
     llm_model: str
     output_dir: str
+    llm_provider: str = "openrouter"
+    openai_api_key: str = ""
+    llm_api_key: str = ""
+
+    def __post_init__(self) -> None:
+        self.llm_provider = _normalize_llm_provider(self.llm_provider)
+        if not self.llm_api_key:
+            if self.llm_provider == "openai":
+                self.llm_api_key = self.openai_api_key
+            else:
+                self.llm_api_key = self.openrouter_api_key
+
+
+def _normalize_llm_provider(raw_provider: str | None) -> str:
+    provider = str(raw_provider or "openrouter").strip().lower()
+    assert provider in ("openrouter", "openai"), "llm_provider must be 'openrouter' or 'openai'"
+    return provider
+
+
+def _resolve_openrouter_api_key(raw: dict) -> str:
+    return (
+        os.environ.get("OPENROUTER_API_KEY", "").strip()
+        or os.environ.get("LITELLM_API_KEY", "").strip()
+        or str(raw.get("openrouter_api_key", "") or "").strip()
+    )
+
+
+def _resolve_openai_api_key(raw: dict) -> str:
+    return (
+        os.environ.get("OPENAI_API_KEY", "").strip()
+        or str(raw.get("openai_api_key", "") or "").strip()
+    )
 
 
 def load_config(config_path: str) -> WeclawConfig:
@@ -57,18 +94,19 @@ def load_config(config_path: str) -> WeclawConfig:
     assert all(isinstance(x, str) for x in gtm), "groups_to_monitor items must be strings"
     ur = raw.get("sidebar_unread_only", False)
     assert isinstance(ur, bool), "sidebar_unread_only must be boolean"
-    api_key = str(raw.get("openrouter_api_key", "") or "").strip()
-    if not api_key:
-        api_key = (
-            os.environ.get("OPENROUTER_API_KEY", "").strip()
-            or os.environ.get("LITELLM_API_KEY", "").strip()
-        )
+    llm_provider = _normalize_llm_provider(raw.get("llm_provider"))
+    openrouter_api_key = _resolve_openrouter_api_key(raw)
+    openai_api_key = _resolve_openai_api_key(raw)
+    llm_api_key = openai_api_key if llm_provider == "openai" else openrouter_api_key
     return WeclawConfig(
         wechat_app_name=raw["wechat_app_name"],
         groups_to_monitor=list(gtm),
         sidebar_unread_only=ur,
         report_custom_prompt=raw.get("report_custom_prompt", ""),
-        openrouter_api_key=api_key,
+        openrouter_api_key=openrouter_api_key,
         llm_model=raw.get("llm_model", "openai/gpt-4o"),
         output_dir=raw.get("output_dir", "output"),
+        llm_provider=llm_provider,
+        openai_api_key=openai_api_key,
+        llm_api_key=llm_api_key,
     )
