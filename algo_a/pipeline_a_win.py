@@ -83,15 +83,32 @@ def _find_first_visible_config_match(
     unread_only: bool,
 ) -> tuple[str, Any] | None:
     rows = driver.get_sidebar_rows(window)
-    for row in rows:
-        if unread_only and not _row_has_unread(row):
-            continue
+    print(
+        f"[DEBUG] Named-chat filter scanning {len(rows)} visible row(s). "
+        f"unread_only_config={unread_only}; name matches do not require unread"
+    )
+    for idx, row in enumerate(rows):
+        badge = getattr(row, "badge_text", None)
+        is_group = getattr(row, "is_group", None)
+        bbox = getattr(row, "bbox", None)
         ui_name = str(getattr(row, "name", "") or "").strip()
+        print(
+            f"[DEBUG] Filter row #{idx:02d}: name={ui_name!r} badge={badge!r} "
+            f"is_group={is_group!r} bbox={bbox!r}"
+        )
         if not ui_name:
+            print(f"[DEBUG] Filter row #{idx:02d}: reject empty_name")
             continue
         for cfg_name in pending_names:
-            if _is_chat_name_match(ui_name, cfg_name):
+            match = _is_chat_name_match(ui_name, cfg_name)
+            print(
+                f"[DEBUG] Filter row #{idx:02d}: compare ui={ui_name!r} "
+                f"target={cfg_name!r} name_match={match}"
+            )
+            if match:
+                print(f"[DEBUG] Filter row #{idx:02d}: selected target={cfg_name!r}")
                 return cfg_name, row
+        print(f"[DEBUG] Filter row #{idx:02d}: reject no_name_match")
     return None
 
 

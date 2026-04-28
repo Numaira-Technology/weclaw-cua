@@ -71,13 +71,17 @@ class KeepAliveService:
     def warmup_ocr(self) -> dict[str, Any]:
         started = time.perf_counter()
         try:
-            from shared.ocr_hunyuan import get_ocr_engine
+            from shared.ocr_paddle import get_ocr_engine
 
             engine = get_ocr_engine()
-            if hasattr(engine, "_ensure_model"):
-                engine._ensure_model()  # type: ignore[attr-defined]
+            if hasattr(engine, "_get_reader"):
+                engine._get_reader()  # type: ignore[attr-defined]
             elapsed = time.perf_counter() - started
-            return {"ok": True, "elapsed_sec": round(elapsed, 3)}
+            return {
+                "ok": True,
+                "engine": "rapidocr-onnxruntime",
+                "elapsed_sec": round(elapsed, 3),
+            }
         except Exception as e:
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
@@ -176,7 +180,7 @@ class _ServiceHandler(BaseHTTPRequestHandler):
 def run_keep_alive_server(app_context: dict[str, Any], host: str, port: int) -> None:
     service = KeepAliveService(app_context)
     handler_cls = type("KeepAliveHandler", (_ServiceHandler,), {})
-    handler_cls.service = service
+    setattr(handler_cls, "service", service)
     server = ThreadingHTTPServer((host, port), handler_cls)
     print(f"[*] WeClaw keep-alive service listening on http://{host}:{port}")
     print("[*] Endpoints: GET /health, POST /warmup, POST /tasks, GET /tasks, GET /tasks/{id}")

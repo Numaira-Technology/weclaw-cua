@@ -4,11 +4,12 @@ import json
 import time
 from typing import Any
 
-import pyautogui
+import pyautogui  # type: ignore[import-untyped]
 
 from shared.datatypes import ChatMessage, SidebarRow
 from shared.platform_api import PlatformDriver
 from shared.sidebar_classification import parse_threads_json, threads_to_sidebar_rows
+from shared.ocr_hunyuan import get_ocr_engine
 from shared.vision_backend import VisionBackend, create_vision_backend
 from shared.vision_response_json import parse_json_object_from_model_text
 from shared.vision_prompts import COORDS_PROMPT_TEMPLATE, SIDEBAR_PROMPT
@@ -21,7 +22,9 @@ from platform_mac.macos_window import (
     capture_window_pid_and_bounds,
     main_window_bounds,
     vision_bbox_center_to_screen_pt,
+    window_image_px_to_screen_pt,
 )
+from platform_mac.sidebar_ocr import sidebar_rows_from_hunyuan
 
 
 class MacDriver(MacDriverMessages, PlatformDriver):
@@ -40,10 +43,24 @@ class MacDriver(MacDriverMessages, PlatformDriver):
         return 1
 
     def _get_precise_row_coords(self, row: SidebarRow) -> tuple[int, int] | None:
+        """OCR-first precise coordinate lookup; falls back to VLM if OCR misses."""
         chat_name = row.name
-        print(f"[*] Vision fallback: bbox for '{chat_name}' (full window)...")
+        print(f"[*] Getting precise coordinates for '{chat_name}' using OCR...")
         full_screenshot, wb = capture_window_pid_and_bounds(self.pid)
-        img_width, img_height = full_screenshot.size
+        fw, fh = full_screenshot.size
+        sidebar_width = int(full_screenshot.width * 0.3)
+        sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
+        try:
+            ocr_engine = get_ocr_engine()
+            raw_lines = ocr_engine.recognize(sidebar_image)
+            hit = ocr_engine.match_target(raw_lines, chat_name)
+            if hit is not None:
+                sx, sy = window_image_px_to_screen_pt(hit.center_x, hit.center_y, fw, fh, wb)
+                print(f"[+] Precise coordinates for '{chat_name}' found via OCR: ({sx}, {sy})")
+                return (sx, sy)
+            print(f"[WARN] OCR could not locate '{chat_name}'; falling back to VLM...")
+        except Exception as e:
+            print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}); falling back to VLM for '{chat_name}'.")
         prompt = COORDS_PROMPT_TEMPLATE.format(chat_name=chat_name)
         response_str = self.vision_ai.query(prompt, full_screenshot)
         if not response_str:
@@ -53,16 +70,28 @@ class MacDriver(MacDriverMessages, PlatformDriver):
         if not win_rel_bbox or len(win_rel_bbox) != 4:
             return None
         center_x, center_y = vision_bbox_center_to_screen_pt(
-            win_rel_bbox, img_width, img_height, wb
+            win_rel_bbox, fw, fh, wb
         )
-        print(f"[+] Precise coordinates for '{chat_name}': ({center_x}, {center_y})")
+        print(f"[+] Precise coordinates for '{chat_name}' via VLM: ({center_x}, {center_y})")
         return (center_x, center_y)
 
     def get_sidebar_rows(self, window: Any) -> list[SidebarRow]:
+        """OCR-first sidebar row detection with VLM fallback for weak OCR output."""
         del window
         full_screenshot, wb = capture_window_pid_and_bounds(self.pid)
+        fw, fh = full_screenshot.size
         sidebar_width = int(full_screenshot.width * 0.3)
         sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
+        img_width, img_height = sidebar_image.size
+        try:
+            ocr_engine = get_ocr_engine()
+            ocr_rows = sidebar_rows_from_hunyuan(full_screenshot, wb, ocr_engine)
+        except Exception as e:
+            print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}); using VLM sidebar detection.")
+            ocr_rows = []
+        if ocr_rows:
+            print(f"[+] OCR identified {len(ocr_rows)} plausible sidebar rows.")
+            return ocr_rows
         response_str = self.vision_ai.query(SIDEBAR_PROMPT, sidebar_image)
         if not response_str:
             return []
@@ -72,8 +101,6 @@ class MacDriver(MacDriverMessages, PlatformDriver):
             print(f"[ERROR] Failed to parse sidebar classification JSON: {e}")
             print(f"Raw response was: {response_str}")
             return []
-        img_width, img_height = sidebar_image.size
-        fw, fh = full_screenshot.size
         sidebar_rows = threads_to_sidebar_rows(
             threads,
             img_width,
@@ -85,7 +112,7 @@ class MacDriver(MacDriverMessages, PlatformDriver):
             window_width_pt=wb.width,
             window_height_pt=wb.height,
         )
-        print(f"[+] AI identified {len(sidebar_rows)} sidebar rows.")
+        print(f"[+] VLM identified {len(sidebar_rows)} sidebar rows.")
         return sidebar_rows
 
     def scroll_sidebar(self, window: Any, direction: str) -> None:
