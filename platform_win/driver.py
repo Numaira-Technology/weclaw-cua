@@ -6,10 +6,11 @@ import os
 import time
 from typing import Any
 
-import pyautogui
-import win32gui
+import pyautogui  # type: ignore[import-untyped]
+import win32gui  # type: ignore[import-untyped]
 
 from shared.datatypes import ChatMessage, SidebarRow
+from shared.sidebar_ui_chrome import is_sidebar_ui_chrome_label
 from shared.platform_api import PlatformDriver
 from shared.sidebar_classification import (
     parse_threads_json,
@@ -29,6 +30,13 @@ from shared.vision_prompts import (
     SIDEBAR_PROMPT,
 )
 from platform_win.find_wechat_window import find_wechat_window as find_window
+from platform_win.sidebar_ocr_debug import (
+    make_row_debug_entry,
+    new_sidebar_debug_prefix,
+    print_ocr_lines,
+    save_sidebar_crop,
+    write_sidebar_debug,
+)
 from platform_win.vision import _force_foreground_window, capture_window
 from shared.message_dedup import dedupe_chat_messages
 from shared.ocr_paddle import get_ocr_engine
@@ -53,7 +61,7 @@ class WinDriver(PlatformDriver):
 
     def _get_precise_row_coords(self, row: SidebarRow) -> tuple[int, int] | None:
         """
-        Uses PaddleOCR on the sidebar crop to find the pixel-exact center of the
+        Uses RapidOCR on the sidebar crop to find the pixel-exact center of the
         target chat row. No VLM call needed — OCR gives pixel bboxes directly.
         """
         chat_name = row.name
@@ -89,7 +97,7 @@ class WinDriver(PlatformDriver):
         return (abs_x, abs_y)
 
     def get_sidebar_rows(self, window: Any) -> list[SidebarRow]:
-        """Gets all visible rows in the sidebar using PaddleOCR (names) + VLM (semantics)."""
+        """Gets all visible rows in the sidebar using RapidOCR (names) + VLM (semantics)."""
         hwnd = window
         full_screenshot = capture_window(hwnd)
         if not full_screenshot:
@@ -104,14 +112,16 @@ class WinDriver(PlatformDriver):
 
         img_width, img_height = sidebar_image.size
 
-        # --- Step 1: PaddleOCR — precise Chinese text + pixel bboxes ---
         ocr_engine = get_ocr_engine()
         raw_lines = ocr_engine.recognize(sidebar_image)
-        # Merge into chat-name rows (top text per vertical group)
         merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
+        debug_prefix = new_sidebar_debug_prefix()
+        save_sidebar_crop(debug_prefix, sidebar_image)
+        print_ocr_lines("OCR raw lines", raw_lines)
+        print_ocr_lines("OCR merged rows", merged_lines)
 
         if not merged_lines:
-            print("[WARN] PaddleOCR returned no text; falling back to VLM-only mode.")
+            print("[WARN] RapidOCR returned no text; falling back to VLM-only mode.")
             merged_lines = []
 
         # Build OCR hint list for VLM to reduce hallucination
@@ -161,9 +171,12 @@ class WinDriver(PlatformDriver):
             return {}
 
         rows: list[SidebarRow] = []
+        row_debug_entries: list[dict[str, Any]] = []
 
         if merged_lines:
             for ocr_line in merged_lines:
+                if is_sidebar_ui_chrome_label(ocr_line.text):
+                    continue
                 ocr_cy = ocr_line.center_y
                 best_thread = _best_vlm_thread(ocr_line.text, ocr_cy)
 
@@ -189,21 +202,23 @@ class WinDriver(PlatformDriver):
                     window_left + sidebar_width,
                     window_top + y2,
                 )
-                rows.append(
-                    SidebarRow(
-                        name=ocr_line.text,
-                        last_message=None,
-                        badge_text=badge,
-                        bbox=box,
-                        is_group=is_group,
-                    )
+                row = SidebarRow(
+                    name=ocr_line.text,
+                    last_message=None,
+                    badge_text=badge,
+                    bbox=box,
+                    is_group=is_group,
                 )
+                rows.append(row)
+                row_debug_entries.append(make_row_debug_entry(ocr_line, row, best_thread))
         else:
-            # Full fallback: VLM only (original behaviour)
             rows = threads_to_sidebar_rows(
                 vlm_threads, img_width, img_height, window_left, window_top
             )
+            for row in rows:
+                row_debug_entries.append(make_row_debug_entry(None, row, None))
 
+        write_sidebar_debug(debug_prefix, raw_lines, merged_lines, vlm_threads, row_debug_entries)
         print(f"[+] AI identified {len(rows)} sidebar rows.")
         return rows
 
@@ -453,9 +468,9 @@ class WinDriver(PlatformDriver):
         """Captures the sidebar and identifies the currently selected (highlighted) chat.
 
         Strategy:
-        1. PaddleOCR → precise text + pixel bboxes for all visible rows.
-        2. VLM → returns the normalized y (0-1000) of the highlighted row only.
-        3. Map VLM y back to the nearest OCR line to get the accurate name.
+        1. RapidOCR returns precise text and pixel bboxes for all visible rows.
+        2. VLM returns the normalized y of the highlighted row.
+        3. Map VLM y back to the nearest OCR row to get the accurate name.
         """
         print("[*] Identifying current chat name from sidebar highlight...")
         full_screenshot = capture_window(self.hwnd)
@@ -467,12 +482,10 @@ class WinDriver(PlatformDriver):
         sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
         img_height = sidebar_image.height
 
-        # Step 1: OCR all text lines
         ocr_engine = get_ocr_engine()
         raw_lines = ocr_engine.recognize(sidebar_image)
         merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
 
-        # Step 2: VLM — only ask for the y of the highlighted row
         response_str = self.vision_ai.query(CURRENT_CHAT_Y_PROMPT, sidebar_image)
 
         if not response_str:
@@ -587,12 +600,20 @@ class WinDriver(PlatformDriver):
             print(f"[WARN] click_row called with invalid type: {type(row)}")
             return
 
-        coords = self._get_precise_row_coords(row)
-        if not coords:
-            print(f"[ERROR] Could not get precise coordinates for '{row.name}'. Aborting click.")
-            return
+        center_x: int | None = None
+        center_y: int | None = None
 
-        center_x, center_y = coords
+        # Fast path: click directly from SidebarRow bbox (already absolute screen coords).
+        if row.bbox and len(row.bbox) == 4:
+            x1, y1, x2, y2 = row.bbox
+            center_x = (int(x1) + int(x2)) // 2
+            center_y = (int(y1) + int(y2)) // 2
+        else:
+            coords = self._get_precise_row_coords(row)
+            if not coords:
+                print(f"[ERROR] Could not get click coordinates for '{row.name}'. Aborting click.")
+                return
+            center_x, center_y = coords
 
         y_offset = 0
         if attempt > 0:
