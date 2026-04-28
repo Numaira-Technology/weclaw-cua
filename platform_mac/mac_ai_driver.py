@@ -113,6 +113,7 @@ class MacDriver(MacDriverMessages, PlatformDriver):
                 )
             print(f"[+] OCR identified {len(rows)} raw sidebar rows.")
             return rows
+
         response_str = self.vision_ai.query(SIDEBAR_PROMPT, sidebar_image)
         if not response_str:
             return []

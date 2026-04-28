@@ -7,7 +7,7 @@ pyautogui
 pywin32; sys_platform == "win32"
 
 # LLM dependencies (optional, only for built-in OpenRouter mode)
-# Windows capture/run: pip install -e ".[llm]" also pulls Hunyuan extras from pyproject.
+# Windows/macOS capture/run also needs Hunyuan extras for sidebar OCR.
 # Stepwise skips LLM calls, but capture still may need vision + (on Win/mac) sidebar OCR.
 litellm
 openai
