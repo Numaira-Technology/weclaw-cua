@@ -13,6 +13,7 @@ because the agent handles LLM calls externally.
 import click
 
 from ..output.formatter import output
+from ..pipeline_runner import execute_run_pipeline
 
 
 @click.command()
@@ -48,150 +49,51 @@ def run(ctx, no_llm, openclaw_gateway, work_dir, fmt):
       2. Route vision prompts through the local OpenClaw gateway
       3. Generate the report via the same OpenClaw gateway
     """
-    import os
-    import sys
-
     from ..context import load_app_context
 
     app = load_app_context(ctx)
-    config = app["config"]
-    root = app["root"]
-    out_dir = app["output_dir"]
-
-    if root not in sys.path:
-        sys.path.insert(0, root)
 
     if no_llm and openclaw_gateway:
         raise click.UsageError("Use either --no-llm or --openclaw-gateway, not both.")
 
-    if no_llm:
-        ctx.invoke(
-            capture_cmd,
-            no_llm=True,
-            work_dir=work_dir,
-            fmt=fmt,
-        )
-        return
-
-    if openclaw_gateway:
-        from algo_a import run_pipeline_a
-        from shared.openclaw_gateway import (
-            OpenClawGatewayConfig,
-            OpenClawVisionBackend,
-            gateway_chat_text,
-        )
-        from shared.run_manifest import build_last_run_payload, write_last_run
-
-        from .build_report_prompt import build_prompt_from_json_paths
-
-        err = None
-        report_text = None
-        json_paths = []
-        try:
-            gateway = OpenClawGatewayConfig.from_env_or_local()
-            vision_backend = OpenClawVisionBackend(gateway)
-            json_paths = run_pipeline_a(config, vision_backend=vision_backend)
-            abs_json = [os.path.abspath(p) for p in json_paths]
-            if abs_json:
-                custom_prompt = config.report_custom_prompt or "Summarize key decisions and action items."
-                prompt_text = build_prompt_from_json_paths(abs_json, custom_prompt)
-                report_text = gateway_chat_text(gateway, prompt_text, max_tokens=8192)
-        except Exception as e:
-            err = f"{type(e).__name__}: {e}"
-            payload = build_last_run_payload(
-                ok=False,
-                config_path=app["config_path"],
-                weclaw_root=root,
-                output_dir=out_dir,
-                message_json_paths=[],
-                report_generated=False,
-                error=err,
-            )
-            write_last_run(out_dir, payload)
-            raise
-
-        payload = build_last_run_payload(
-            ok=True,
-            config_path=app["config_path"],
-            weclaw_root=root,
-            output_dir=out_dir,
-            message_json_paths=json_paths,
-            report_generated=report_text is not None,
-            error=None,
-        )
-        write_last_run(out_dir, payload)
-
-        if fmt == "json":
-            result = {
-                "ok": True,
-                "backend": "openclaw-gateway",
-                "chats_captured": len(json_paths),
-                "report_generated": report_text is not None,
-            }
-            if json_paths:
-                result["files"] = json_paths
-            if report_text:
-                result["report"] = report_text
-            output(result, "json")
-        else:
-            if report_text:
-                output(report_text, "text")
-            else:
-                output("No unread messages found.", "text")
-        return
-
-    from algo_a import run_pipeline_a
-    from algo_b import run_pipeline_b
     from shared.run_manifest import build_last_run_payload, write_last_run
 
-    err = None
-    json_paths = []
-    report_text = None
     try:
-        json_paths = run_pipeline_a(config)
-        abs_json = [os.path.abspath(p) for p in json_paths]
-        if abs_json:
-            report_text = run_pipeline_b(config, abs_json)
+        result = execute_run_pipeline(
+            app,
+            no_llm=no_llm,
+            openclaw_gateway=openclaw_gateway,
+            work_dir=work_dir,
+        )
     except Exception as e:
         err = f"{type(e).__name__}: {e}"
         payload = build_last_run_payload(
             ok=False,
             config_path=app["config_path"],
-            weclaw_root=root,
-            output_dir=out_dir,
+            weclaw_root=app["root"],
+            output_dir=app["output_dir"],
             message_json_paths=[],
             report_generated=False,
             error=err,
         )
-        write_last_run(out_dir, payload)
+        write_last_run(app["output_dir"], payload)
         raise
 
-    payload = build_last_run_payload(
-        ok=True,
-        config_path=app["config_path"],
-        weclaw_root=root,
-        output_dir=out_dir,
-        message_json_paths=json_paths,
-        report_generated=report_text is not None,
-        error=None,
-    )
-    write_last_run(out_dir, payload)
+    if no_llm:
+        if fmt == "json":
+            output(result, "json")
+        else:
+            output(
+                f"Stepwise capture complete. Pending tasks: {result.get('pending_tasks', 0)}",
+                "text",
+            )
+        return
 
     if fmt == "json":
-        result = {
-            "ok": True,
-            "chats_captured": len(json_paths),
-            "files": json_paths,
-            "report_generated": report_text is not None,
-        }
-        if report_text:
-            result["report"] = report_text
         output(result, "json")
     else:
+        report_text = result.get("report")
         if report_text:
-            output(report_text, "text")
+            output(str(report_text), "text")
         else:
             output("No unread messages found.", "text")
-
-
-from .capture import capture as capture_cmd

@@ -15,6 +15,50 @@ import click
 from ..output.formatter import output
 
 
+def run_capture_pipeline(app: dict, *, no_llm: bool, work_dir: str | None = None) -> dict:
+    import os
+    import sys
+
+    config = app["config"]
+    if app["root"] not in sys.path:
+        sys.path.insert(0, app["root"])
+
+    if no_llm:
+        from shared.stepwise_backend import StepwiseBackend
+        from algo_a.pipeline_a_stepwise import run_pipeline_a_stepwise
+
+        if not work_dir:
+            work_dir = os.path.join(app["output_dir"], "work")
+        os.makedirs(work_dir, exist_ok=True)
+        backend = StepwiseBackend(work_dir)
+        run_pipeline_a_stepwise(config, backend)
+        manifest_path = os.path.join(work_dir, "manifest.json")
+        pending = backend.get_pending_tasks()
+        return {
+            "mode": "stepwise",
+            "work_dir": os.path.abspath(work_dir),
+            "manifest": manifest_path,
+            "pending_tasks": len(pending),
+            "instructions": (
+                "Process each task in manifest.json: send the .png image with "
+                "the .prompt.txt content to your vision LLM, then write the "
+                "model response to the corresponding .response.txt file. "
+                "After all tasks are complete, run: weclaw finalize --work-dir "
+                + os.path.abspath(work_dir)
+            ),
+        }
+
+    from algo_a import run_pipeline_a
+
+    json_paths = run_pipeline_a(config)
+    return {
+        "mode": "direct",
+        "ok": True,
+        "chats_captured": len(json_paths),
+        "files": json_paths,
+    }
+
+
 @click.command()
 @click.option("--no-llm", is_flag=True, default=False,
               help="Stepwise mode: output images+prompts, no LLM calls")
@@ -46,64 +90,28 @@ def capture(ctx, no_llm, work_dir, fmt):
     from ..context import load_app_context
 
     app = load_app_context(ctx)
-    config = app["config"]
-
-    if app["root"] not in sys.path:
-        sys.path.insert(0, app["root"])
-
+    result = run_capture_pipeline(app, no_llm=no_llm, work_dir=work_dir)
     if no_llm:
-        from shared.stepwise_backend import StepwiseBackend
-        from algo_a.pipeline_a_stepwise import run_pipeline_a_stepwise
-
-        if not work_dir:
-            work_dir = os.path.join(app["output_dir"], "work")
-        os.makedirs(work_dir, exist_ok=True)
-        backend = StepwiseBackend(work_dir)
-
-        run_pipeline_a_stepwise(config, backend)
-
-        manifest_path = os.path.join(work_dir, "manifest.json")
-        pending = backend.get_pending_tasks()
-        result = {
-            "mode": "stepwise",
-            "work_dir": os.path.abspath(work_dir),
-            "manifest": manifest_path,
-            "pending_tasks": len(pending),
-            "instructions": (
-                "Process each task in manifest.json: send the .png image with "
-                "the .prompt.txt content to your vision LLM, then write the "
-                "model response to the corresponding .response.txt file. "
-                "After all tasks are complete, run: weclaw finalize --work-dir "
-                + os.path.abspath(work_dir)
-            ),
-        }
+        manifest_path = result["manifest"]
+        pending = int(result["pending_tasks"])
+        work_dir_abs = result["work_dir"]
         if fmt == "json":
             output(result, "json")
         else:
             lines = [
-                f"Stepwise capture complete. Work directory: {work_dir}",
+                f"Stepwise capture complete. Work directory: {work_dir_abs}",
                 f"Manifest: {manifest_path}",
-                f"Pending vision tasks: {len(pending)}",
+                f"Pending vision tasks: {pending}",
                 "",
                 "Next steps for the agent:",
                 "  1. Read manifest.json for pending vision tasks",
                 "  2. For each task: send .png + .prompt.txt to your vision LLM",
                 "  3. Write model response to .response.txt",
-                f"  4. Run: weclaw finalize --work-dir {os.path.abspath(work_dir)}",
+                f"  4. Run: weclaw finalize --work-dir {work_dir_abs}",
             ]
             output("\n".join(lines), "text")
         return
-
-    from algo_a import run_pipeline_a
-
-    json_paths = run_pipeline_a(config)
-
-    result = {
-        "mode": "direct",
-        "ok": True,
-        "chats_captured": len(json_paths),
-        "files": json_paths,
-    }
+    json_paths = result["files"]
 
     if fmt == "json":
         output(result, "json")

@@ -57,6 +57,7 @@ from .commands.export import export
 from .commands.stats import stats
 from .commands.unread import unread
 from .commands.new_messages import new_messages
+from .commands.serve import serve
 
 cli.add_command(init)
 cli.add_command(run)
@@ -71,6 +72,7 @@ cli.add_command(export)
 cli.add_command(stats)
 cli.add_command(unread)
 cli.add_command(new_messages)
+cli.add_command(serve)
 
 
 if __name__ == "__main__":
