@@ -139,29 +139,33 @@ Edit `config/config.json`:
   "groups_to_monitor": ["*"],
   "sidebar_unread_only": true,
   "report_custom_prompt": "Summarize key decisions and action items.",
+  "llm_provider": "openrouter",
   "openrouter_api_key": "",
+  "openai_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }
 ```
 
-Fill `openrouter_api_key` only when using built-in OpenRouter mode. Leave it empty for OpenClaw gateway mode or stepwise mode.
+Set `llm_provider` to `openrouter` or `openai`. Fill the matching API key only when using built-in LLM mode. Leave keys empty for OpenClaw gateway mode or stepwise mode.
 
-You can also set the OpenRouter API key via environment variable:
+You can also set API keys via environment variables:
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-v1-your-key"          # macOS
+export OPENAI_API_KEY="sk-your-openai-key"             # macOS
 ```
 
 ```powershell
 $env:OPENROUTER_API_KEY = "sk-or-v1-your-key"          # Windows PowerShell
+$env:OPENAI_API_KEY = "sk-your-openai-key"             # Windows PowerShell
 ```
 
 ### Step 3 &mdash; Run
 
 ```bash
 weclaw-cua run --openclaw-gateway   # recommended: via local OpenClaw gateway
-weclaw-cua run                      # built-in OpenRouter mode
+weclaw-cua run                      # built-in LLM mode
 weclaw-cua capture                  # capture only
 weclaw-cua report                   # report from existing captures
 weclaw-cua sessions                 # list captured chats
@@ -354,7 +358,7 @@ weclaw-cua init --config-dir /path     # custom config directory
 
 ```bash
 weclaw-cua run --openclaw-gateway      # recommended: via local OpenClaw gateway
-weclaw-cua run                         # built-in OpenRouter mode
+weclaw-cua run                         # built-in LLM mode
 weclaw-cua run --no-llm                # stepwise: capture only, agent handles LLM
 weclaw-cua run --format text           # human-readable output
 ```
@@ -485,7 +489,7 @@ The `--type` option (on `history` and `search`):
 
 - **Python** >= 3.10
 - **WeChat Desktop** — any version (vision-based, no version lock-in)
-- **OpenRouter API key** — required for built-in LLM mode; not needed for stepwise or OpenClaw gateway mode
+- **LLM API key** — OpenRouter or OpenAI for built-in LLM mode; not needed for stepwise or OpenClaw gateway mode
 
 ---
 
@@ -499,7 +503,9 @@ The `--type` option (on `history` and `search`):
   "groups_to_monitor": ["*"],
   "sidebar_unread_only": true,
   "report_custom_prompt": "Summarize key decisions and action items.",
+  "llm_provider": "openrouter",
   "openrouter_api_key": "",
+  "openai_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }
@@ -511,8 +517,10 @@ The `--type` option (on `history` and `search`):
 | `groups_to_monitor` | `["*"]` = all chats (both group chats and direct messages), or list specific chat names |
 | `sidebar_unread_only` | `true` = only process chats with unread badges |
 | `report_custom_prompt` | Custom instructions appended to the LLM report prompt |
-| `openrouter_api_key` | API key (or use `OPENROUTER_API_KEY` env var) |
-| `llm_model` | LLM model identifier for report generation |
+| `llm_provider` | Built-in LLM provider: `openrouter` or `openai` |
+| `openrouter_api_key` | OpenRouter API key (or use `OPENROUTER_API_KEY` env var) |
+| `openai_api_key` | OpenAI API key (or use `OPENAI_API_KEY` env var) |
+| `llm_model` | LLM model identifier for report generation; use provider-native names such as `gpt-4o` for OpenAI |
 | `output_dir` | Directory for output JSON files |
 
 ---
