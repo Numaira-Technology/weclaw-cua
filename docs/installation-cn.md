@@ -50,7 +50,7 @@ source .venv/bin/activate        # macOS / Linux
 pip install "weclaw-cua[macos,llm]"
 
 # Windows
-pip install "weclaw-cua[llm]"
+pip install "weclaw-cua[llm,win-ocr]"
 
 # 仅核心（stepwise 模式，无内置 LLM 调用）
 pip install weclaw-cua
@@ -72,7 +72,7 @@ weclaw-cua --version
 > cd weclaw-cua
 > python3 -m venv .venv
 > ./.venv/bin/pip install -e ".[macos,llm]"   # macOS
-> .venv\Scripts\pip install -e ".[llm]"        # Windows
+> .venv\Scripts\pip install -e ".[llm,win-ocr]"        # Windows
 > ```
 
 ### 第二步 — 授权平台权限

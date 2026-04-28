@@ -50,7 +50,7 @@ Then install:
 pip install "weclaw-cua[macos,llm]"
 
 # Windows
-pip install "weclaw-cua[llm]"
+pip install "weclaw-cua[llm,win-ocr]"
 
 # Core only (stepwise mode, no built-in LLM calls)
 pip install weclaw-cua
@@ -72,7 +72,7 @@ After installation, `weclaw-cua` is available as a console command. The shorter 
 > cd weclaw-cua
 > python3 -m venv .venv
 > ./.venv/bin/pip install -e ".[macos,llm]"   # macOS
-> .venv\Scripts\pip install -e ".[llm]"        # Windows
+> .venv\Scripts\pip install -e ".[llm,win-ocr]"        # Windows
 > ```
 
 ### Step 2 — Grant platform permissions

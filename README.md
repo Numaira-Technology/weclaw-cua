@@ -77,7 +77,7 @@ source .venv/bin/activate        # macOS / Linux
 
 # 2. Install
 pip install "weclaw-cua[macos,llm]"   # macOS
-pip install "weclaw-cua[llm]"         # Windows
+pip install "weclaw-cua[llm,win-ocr]" # Windows
 pip install weclaw-cua                # core only (stepwise, no LLM deps)
 
 # 3. Verify
@@ -98,7 +98,7 @@ python3 -m venv .venv
 ./.venv/bin/pip install -e ".[macos,llm]"
 
 # Windows
-.venv\Scripts\pip install -e ".[llm]"
+.venv\Scripts\pip install -e ".[llm,win-ocr]"
 ```
 
 </details>
