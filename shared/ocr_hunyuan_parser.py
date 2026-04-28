@@ -66,6 +66,15 @@ def _to_pixel_bbox(
     max_abs = max(abs(coord) for point in points for coord in point)
     if max_abs <= 1.0:
         points = [(x * image_width, y * image_height) for x, y in points]
+    elif (
+        max_abs <= 1000.0
+        and all(x >= 0.0 and y >= 0.0 for x, y in points)
+        and any(x > image_width or y > image_height for x, y in points)
+    ):
+        points = [
+            (x * image_width / 1000.0, y * image_height / 1000.0)
+            for x, y in points
+        ]
     xs = [x for x, _ in points]
     ys = [y for _, y in points]
     left = int(round(min(xs)))

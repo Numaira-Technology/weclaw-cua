@@ -24,6 +24,7 @@ from platform_mac.macos_window import (
     vision_bbox_center_to_screen_pt,
     window_image_px_to_screen_pt,
 )
+from platform_mac.sidebar_ocr import sidebar_rows_from_hunyuan
 
 
 class MacDriver(MacDriverMessages, PlatformDriver):
@@ -77,7 +78,7 @@ class MacDriver(MacDriverMessages, PlatformDriver):
         return (center_x, center_y)
 
     def get_sidebar_rows(self, window: Any) -> list[SidebarRow]:
-        """OCR-first sidebar row detection; falls back to VLM when OCR returns nothing."""
+        """OCR-first sidebar row detection with VLM fallback for weak OCR output."""
         del window
         full_screenshot, wb = capture_window_pid_and_bounds(self.pid)
         fw, fh = full_screenshot.size
@@ -87,32 +88,14 @@ class MacDriver(MacDriverMessages, PlatformDriver):
 
         try:
             ocr_engine = get_ocr_engine()
-            raw_lines = ocr_engine.recognize(sidebar_image)
+            ocr_rows = sidebar_rows_from_hunyuan(full_screenshot, wb, ocr_engine)
         except Exception as e:
             print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}); using VLM sidebar detection.")
-            raw_lines = []
+            ocr_rows = []
 
-        if raw_lines:
-            rows: list[SidebarRow] = []
-            for ocr_line in raw_lines:
-                _, oy1, _, oy2 = ocr_line.bbox
-                row_half = max((oy2 - oy1) // 2, 10)
-                cy = (oy1 + oy2) // 2
-                y1 = max(0, cy - row_half)
-                y2 = min(img_height, cy + row_half)
-                sx1, sy1 = window_image_px_to_screen_pt(0, y1, fw, fh, wb)
-                sx2, sy2 = window_image_px_to_screen_pt(sidebar_width, y2, fw, fh, wb)
-                rows.append(
-                    SidebarRow(
-                        name=ocr_line.text,
-                        last_message=None,
-                        badge_text=None,
-                        bbox=(sx1, sy1, sx2, sy2),
-                        is_group=True,
-                    )
-                )
-            print(f"[+] OCR identified {len(rows)} raw sidebar rows.")
-            return rows
+        if ocr_rows:
+            print(f"[+] OCR identified {len(ocr_rows)} plausible sidebar rows.")
+            return ocr_rows
 
         response_str = self.vision_ai.query(SIDEBAR_PROMPT, sidebar_image)
         if not response_str:

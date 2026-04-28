@@ -13,6 +13,7 @@ Input spec:
     - HunyuanOCR is prompted for line-level text spotting with coordinates.
 
 Output spec:
+    - `decode` returns the raw HunyuanOCR generated text.
     - `recognize` returns `OcrLine` items sorted by vertical position.
     - `bbox` is `(x1, y1, x2, y2)` in pixel coordinates relative to the input image.
 """
@@ -66,16 +67,17 @@ class HunyuanOcrEngine:
 
         print("[*] Initializing HunyuanOCR engine (first use)...")
         self._processor = AutoProcessor.from_pretrained(_MODEL_NAME, use_fast=False)
+        device_map = "auto" if torch.cuda.is_available() else {"": "cpu"}
         self._model = HunYuanVLForConditionalGeneration.from_pretrained(
             _MODEL_NAME,
             attn_implementation="eager",
             dtype=torch.bfloat16,
-            device_map="auto",
+            device_map=device_map,
         )
         print("[+] HunyuanOCR engine initialized.")
         return self._processor, self._model
 
-    def recognize(self, image: Image.Image) -> list[OcrLine]:
+    def decode(self, image: Image.Image) -> str:
         processor, model = self._load()
         import torch
 
@@ -123,10 +125,14 @@ class HunyuanOcrEngine:
                 skip_special_tokens=True,
                 clean_up_tokenization_spaces=False,
             )[0]
-            output_text = _clean_repeated_substrings(output_text)
-            return parse_hunyuan_lines(output_text, rgb_image.width, rgb_image.height)
+            return _clean_repeated_substrings(output_text)
         finally:
             image_path.unlink(missing_ok=True)
+
+    def recognize(self, image: Image.Image) -> list[OcrLine]:
+        output_text = self.decode(image)
+        rgb_image = image.convert("RGB")
+        return parse_hunyuan_lines(output_text, rgb_image.width, rgb_image.height)
 
     def match_target(
         self,

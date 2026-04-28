@@ -48,6 +48,13 @@ class TestHunyuanOcrParser(unittest.TestCase):
 
         self.assertEqual(lines[0].bbox, (20, 20, 80, 50))
 
+    def test_parse_thousand_scale_coordinates(self) -> None:
+        raw = "<ref>Alice</ref><quad>(100,200),(400,500)</quad>"
+
+        lines = parse_hunyuan_lines(raw, 200, 100)
+
+        self.assertEqual(lines[0].bbox, (20, 20, 80, 50))
+
     def test_clips_and_strips_wrapper_backslashes(self) -> None:
         raw = r"\ Chat \ (-10,-5),(110,60)"
 
