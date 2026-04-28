@@ -6,8 +6,13 @@ from typing import Any
 from shared.platform_api import PlatformDriver
 
 
-def scroll_sidebar_to_top(driver: PlatformDriver, window: Any) -> None:
+def scroll_sidebar_to_top(
+    driver: PlatformDriver,
+    window: Any,
+    max_down_scrolls: int = 16,
+) -> None:
     print("[*] Scrolling sidebar to the top...")
-    for _ in range(10):
+    assert max_down_scrolls >= 0
+    for _ in range(max_down_scrolls + 2):
         driver.scroll_sidebar(window, "up")
         time.sleep(0.1)

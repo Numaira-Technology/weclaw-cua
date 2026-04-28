@@ -1,6 +1,6 @@
 ---
 name: weclaw
-description: Sync unread WeChat desktop chats to JSON on the host, generate an optional LLM report, and answer questions from the captured messages.
+description: Sync selected WeChat desktop chats to JSON on the host, generate an optional LLM report, and answer questions from the captured messages.
 metadata:
   {
     "openclaw":
@@ -65,7 +65,7 @@ With a non-default config path:
 ./run.sh /path/to/other-config.json
 ```
 
-Stdout is the generated **report text** (or `No unread messages found.`). Structured chat exports are JSON files under `output_dir` from config (default `output/`).
+Stdout is the generated **report text** (or `No matching messages found.`). Structured chat exports are JSON files under `output_dir` from config (default `output/`).
 
 ## Machine-readable status
 

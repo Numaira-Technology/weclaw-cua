@@ -281,7 +281,11 @@ class WinDriver(PlatformDriver):
         pyautogui.scroll(clicks)
         time.sleep(1.0)
 
-    def get_chat_messages(self, chat_name: str) -> list[ChatMessage]:
+    def get_chat_messages(
+        self,
+        chat_name: str,
+        max_scrolls: int | None = None,
+    ) -> list[ChatMessage]:
         """
         Orchestrates the process of scrolling, capturing, stitching, and extracting
         chat messages from the current chat.
@@ -293,8 +297,10 @@ class WinDriver(PlatformDriver):
 
         self.click_new_messages_button()
 
+        scroll_count = 10 if max_scrolls is None else max_scrolls
+        assert scroll_count >= 0
         screenshots = []
-        for i in range(10):
+        for i in range(scroll_count):
             self.scroll_chat_panel(direction="up")
             screenshot = capture_window(self.hwnd)
             if screenshot:

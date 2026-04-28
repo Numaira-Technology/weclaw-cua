@@ -23,9 +23,28 @@ from ..output.formatter import output
 @click.option("--format", "fmt", default="json",
               type=click.Choice(["json", "text"]),
               help="Output format")
+@click.option("--chat-type", default=None,
+              type=click.Choice(["group", "private", "all"]),
+              help="Override chat type selection: group, private, or all")
+@click.option("--unread-mode", default=None,
+              type=click.Choice(["unread", "all"]),
+              help="Override unread selection: unread badges only, or all selected chats")
+@click.option("--sidebar-max-scrolls", default=None, type=int,
+              help="Override max downward sidebar scrolls per scan")
+@click.option("--chat-max-scrolls", default=None, type=int,
+              help="Override max upward chat-panel scrolls per chat")
 @click.pass_context
-def capture(ctx, no_llm, work_dir, fmt):
-    """Capture unread WeChat messages via vision.
+def capture(
+    ctx,
+    no_llm,
+    work_dir,
+    fmt,
+    chat_type,
+    unread_mode,
+    sidebar_max_scrolls,
+    chat_max_scrolls,
+):
+    """Capture selected WeChat messages via vision.
 
     \b
     Default mode (--no-llm NOT set):
@@ -43,10 +62,17 @@ def capture(ctx, no_llm, work_dir, fmt):
     import os
     import sys
 
-    from ..context import load_app_context
+    from ..context import apply_capture_overrides, load_app_context
 
     app = load_app_context(ctx)
     config = app["config"]
+    config = apply_capture_overrides(
+        config,
+        chat_type=chat_type,
+        unread_mode=unread_mode,
+        sidebar_max_scrolls=sidebar_max_scrolls,
+        chat_max_scrolls=chat_max_scrolls,
+    )
 
     if app["root"] not in sys.path:
         sys.path.insert(0, app["root"])
@@ -114,4 +140,4 @@ def capture(ctx, no_llm, work_dir, fmt):
                 lines.append(f"  {p}")
             output("\n".join(lines), "text")
         else:
-            output("No unread chats found.", "text")
+            output("No matching chats found.", "text")

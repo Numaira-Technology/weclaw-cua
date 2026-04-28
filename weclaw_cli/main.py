@@ -1,7 +1,7 @@
 """WeClaw-CUA CLI entry point.
 
 Usage:
-    weclaw-cua capture               # capture unread chats via vision
+    weclaw-cua capture               # capture selected chats via vision
     weclaw-cua report                # generate report from captured messages
     weclaw-cua run                   # capture + report (full pipeline)
     weclaw-cua sessions              # list captured message files
@@ -33,7 +33,7 @@ def cli(ctx, config_path):
     Quick start:
       weclaw-cua init                              # first-time setup
       weclaw-cua run                               # capture + report
-      weclaw-cua capture                           # capture unread chats
+      weclaw-cua capture                           # capture selected chats
       weclaw-cua report                            # generate report from captures
       weclaw-cua sessions                          # list captured chats
       weclaw-cua history "Group A" --limit 20      # view chat messages

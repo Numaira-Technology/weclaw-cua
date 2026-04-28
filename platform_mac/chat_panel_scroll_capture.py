@@ -13,7 +13,11 @@ LIGHT_SCROLL_COUNT = 2
 FULL_SCROLL_COUNT = 10
 
 
-def scroll_capture_frames_for_extraction(driver: Any, max_messages: int | None) -> List[Image.Image]:
+def scroll_capture_frames_for_extraction(
+    driver: Any,
+    max_messages: int | None,
+    max_scrolls: int | None = None,
+) -> List[Image.Image]:
     light_scroll = (
         max_messages is not None
         and max_messages > 0
@@ -25,6 +29,10 @@ def scroll_capture_frames_for_extraction(driver: Any, max_messages: int | None) 
     else:
         scroll_count = FULL_SCROLL_COUNT
         print(f"[*] 未读数较多，完整上滚 {scroll_count} 次。")
+    if max_scrolls is not None:
+        assert max_scrolls >= 0
+        scroll_count = min(scroll_count, max_scrolls)
+        print(f"[*] 聊天框上滑次数上限: {max_scrolls}；本次执行 {scroll_count} 次。")
 
     out: List[Image.Image] = []
     for _ in range(scroll_count):

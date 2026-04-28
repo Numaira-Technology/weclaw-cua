@@ -18,8 +18,13 @@ from ..output.formatter import output
 @click.option("--format", "fmt", default="json",
               type=click.Choice(["json", "text"]),
               help="Output format")
+@click.option("--chat-type", default=None,
+              type=click.Choice(["group", "private", "all"]),
+              help="Override chat type selection: group, private, or all")
+@click.option("--sidebar-max-scrolls", default=None, type=int,
+              help="Override max downward sidebar scrolls for the scan")
 @click.pass_context
-def unread(ctx, limit, fmt):
+def unread(ctx, limit, fmt, chat_type, sidebar_max_scrolls):
     """Scan WeChat sidebar for unread chats via vision AI.
 
     \b
@@ -31,10 +36,15 @@ def unread(ctx, limit, fmt):
     import platform as _pf
     import sys
 
-    from ..context import load_app_context
+    from ..context import apply_capture_overrides, load_app_context
 
     app = load_app_context(ctx)
     config = app["config"]
+    apply_capture_overrides(
+        config,
+        chat_type=chat_type,
+        sidebar_max_scrolls=sidebar_max_scrolls,
+    )
 
     if app["root"] not in sys.path:
         sys.path.insert(0, app["root"])
@@ -52,13 +62,27 @@ def unread(ctx, limit, fmt):
     driver.ensure_permissions()
     window = driver.find_wechat_window(config.wechat_app_name)
 
-    from algo_a.list_unread_chats import list_unread_chats
-    rows = list_unread_chats(driver, window)
+    from algo_a.list_target_chats_win import list_target_chats
+    from algo_a.sidebar_scroll_to_top import scroll_sidebar_to_top
+
+    scroll_sidebar_to_top(
+        driver,
+        window,
+        sidebar_max_scrolls=config.sidebar_max_scrolls,
+    )
+    rows = list_target_chats(
+        driver,
+        window,
+        all_groups=True,
+        unread_only=True,
+        chat_type=config.chat_type,
+        max_scrolls=config.sidebar_max_scrolls,
+    )
 
     results = [
         {
-            "chat": driver.get_row_name(row),
-            "unread": driver.get_row_badge_text(row) or "dot",
+            "chat": row.name,
+            "unread": "dot" if not row.is_unread else "unread",
         }
         for row in rows[:limit]
     ]

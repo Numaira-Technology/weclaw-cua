@@ -12,6 +12,27 @@ import sys
 import click
 
 
+def apply_capture_overrides(
+    config,
+    *,
+    chat_type: str | None = None,
+    unread_mode: str | None = None,
+    sidebar_max_scrolls: int | None = None,
+    chat_max_scrolls: int | None = None,
+):
+    """Apply capture-related CLI overrides to a loaded WeclawConfig."""
+    if chat_type is not None:
+        config.chat_type = chat_type
+    if unread_mode is not None:
+        config.sidebar_unread_only = unread_mode == "unread"
+    if sidebar_max_scrolls is not None:
+        config.sidebar_max_scrolls = sidebar_max_scrolls
+    if chat_max_scrolls is not None:
+        config.chat_max_scrolls = chat_max_scrolls
+    config.__post_init__()
+    return config
+
+
 def _find_repo_root() -> str:
     """Find the project root directory.
 
