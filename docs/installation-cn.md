@@ -123,7 +123,9 @@ weclaw-cua init
   "groups_to_monitor": ["*"],
   "sidebar_unread_only": true,
   "report_custom_prompt": "请基于全部未读聊天记录，生成一份中文晨间消息处理报告。",
+  "llm_provider": "openrouter",
   "openrouter_api_key": "",
+  "openai_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }
@@ -131,7 +133,7 @@ weclaw-cua init
 
 > **`wechat_app_name` 取决于你的微信界面语言：** 中文界面填 `"微信"`，英文界面填 `"WeChat"`。填错会导致找不到微信窗口。
 
-只有在使用 OpenRouter 模式时才需要填写 `openrouter_api_key`。如果通过 OpenClaw gateway 或 stepwise 模式运行，请保持为空。
+`llm_provider` 可设为 `openrouter` 或 `openai`。只有在使用内置 LLM 模式时才需要填写对应 API key；如果通过 OpenClaw gateway 或 stepwise 模式运行，请保持为空。
 
 | 字段 | 说明 |
 |---|---|
@@ -139,8 +141,10 @@ weclaw-cua init
 | `groups_to_monitor` | `["*"]` 监控所有会话（包括群聊和私聊）；也可列出具体会话名称进行过滤 |
 | `sidebar_unread_only` | `true` = 只处理侧栏有未读标记的会话 |
 | `report_custom_prompt` | 追加到 LLM 报告 prompt 的自定义指令 |
-| `openrouter_api_key` | 你的 OpenRouter key（使用 OpenClaw gateway 时留空） |
-| `llm_model` | 报告生成所用的 LLM 模型 ID |
+| `llm_provider` | 内置 LLM provider：`openrouter` 或 `openai` |
+| `openrouter_api_key` | 你的 OpenRouter key（或使用 `OPENROUTER_API_KEY`） |
+| `openai_api_key` | 你的 OpenAI key（或使用 `OPENAI_API_KEY`） |
+| `llm_model` | 报告生成所用的 LLM 模型 ID；OpenAI 请使用 `gpt-4o` 这类原生模型名 |
 | `output_dir` | 捕获结果 JSON 文件的输出目录 |
 
 ### 第三步 — 运行
@@ -149,8 +153,8 @@ weclaw-cua init
 # 推荐 — 通过本地 OpenClaw gateway
 weclaw-cua run --openclaw-gateway
 
-# 兜底 — 直接使用 OpenRouter key
-# 需要在 config/config.json 中填写 openrouter_api_key，或设置 OPENROUTER_API_KEY 环境变量
+# 兜底 — 内置 LLM 模式
+# 需要配置 llm_provider 对应的 API key
 weclaw-cua run
 ```
 
@@ -217,13 +221,14 @@ $env:OPENCLAW_BACKEND_MODEL = "openrouter/google/gemini-2.5-flash"
 
 ---
 
-### OpenRouter 模式（兜底 / 测试）
+### 内置 LLM 模式（兜底 / 测试）
 
 没有本地 OpenClaw gateway 时，或排查问题时，可使用此模式。
 
 ```bash
 # macOS
 export OPENROUTER_API_KEY="sk-or-v1-你的key"
+export OPENAI_API_KEY="sk-你的-openai-key"
 weclaw-cua run          # 捕获 + 生成报告
 weclaw-cua capture      # 仅捕获
 weclaw-cua report       # 从已有捕获生成报告
@@ -232,12 +237,13 @@ weclaw-cua report       # 从已有捕获生成报告
 ```powershell
 # Windows PowerShell
 $env:OPENROUTER_API_KEY = "sk-or-v1-你的key"
+$env:OPENAI_API_KEY = "sk-你的-openai-key"
 weclaw-cua run          # 捕获 + 生成报告
 weclaw-cua capture      # 仅捕获
 weclaw-cua report       # 从已有捕获生成报告
 ```
 
-也可以直接在 `config/config.json` 的 `openrouter_api_key` 字段中填入 key。
+也可以直接在 `config/config.json` 的 `openrouter_api_key` 或 `openai_api_key` 字段中填入 key。
 
 ---
 

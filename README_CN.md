@@ -139,7 +139,9 @@ weclaw-cua init
   "groups_to_monitor": ["*"],
   "sidebar_unread_only": true,
   "report_custom_prompt": "请基于全部未读聊天记录，生成一份中文晨间消息处理报告。",
+  "llm_provider": "openrouter",
   "openrouter_api_key": "",
+  "openai_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }
@@ -147,23 +149,25 @@ weclaw-cua init
 
 > **`wechat_app_name` 取决于你的微信界面语言：** 中文界面填 `"微信"`，英文界面填 `"WeChat"`。填错会导致找不到微信窗口。
 
-只有在使用内置 OpenRouter 模式时才需要填写 `openrouter_api_key`。如果使用 OpenClaw gateway 模式或 stepwise 模式，请保持为空。
+`llm_provider` 可设为 `openrouter` 或 `openai`。只有在使用内置 LLM 模式时才需要填写对应 API key；如果使用 OpenClaw gateway 模式或 stepwise 模式，请保持为空。
 
-也可通过环境变量设置 OpenRouter API key：
+也可通过环境变量设置 API key：
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-v1-你的key"          # macOS
+export OPENAI_API_KEY="sk-你的-openai-key"            # macOS
 ```
 
 ```powershell
 $env:OPENROUTER_API_KEY = "sk-or-v1-你的key"          # Windows PowerShell
+$env:OPENAI_API_KEY = "sk-你的-openai-key"            # Windows PowerShell
 ```
 
 ### 第三步 &mdash; 使用
 
 ```bash
 weclaw-cua run --openclaw-gateway   # 推荐：通过本地 OpenClaw gateway
-weclaw-cua run                      # 内置 OpenRouter 模式
+weclaw-cua run                      # 内置 LLM 模式
 weclaw-cua capture                  # 仅捕获
 weclaw-cua report                   # 从已有捕获生成报告
 weclaw-cua sessions                 # 列出已捕获的会话
@@ -356,7 +360,7 @@ weclaw-cua init --config-dir /path     # 自定义配置目录
 
 ```bash
 weclaw-cua run --openclaw-gateway      # 推荐：通过本地 OpenClaw gateway
-weclaw-cua run                         # 内置 OpenRouter 模式
+weclaw-cua run                         # 内置 LLM 模式
 weclaw-cua run --no-llm                # stepwise：捕获，agent 处理 LLM
 weclaw-cua run --format text           # 人类可读输出
 ```
@@ -487,7 +491,7 @@ weclaw-cua new-messages    # 后续：仅返回上次之后的新消息
 
 - **Python** >= 3.10
 - **微信桌面版** — 任意版本（纯视觉，无版本依赖）
-- **OpenRouter API key** — 内置 LLM 模式需要；stepwise 模式和 OpenClaw gateway 模式不需要
+- **LLM API key** — 内置 LLM 模式可用 OpenRouter 或 OpenAI；stepwise 模式和 OpenClaw gateway 模式不需要
 
 ---
 
@@ -501,7 +505,9 @@ weclaw-cua new-messages    # 后续：仅返回上次之后的新消息
   "groups_to_monitor": ["*"],
   "sidebar_unread_only": true,
   "report_custom_prompt": "请基于全部未读聊天记录，生成一份中文晨间消息处理报告。",
+  "llm_provider": "openrouter",
   "openrouter_api_key": "",
+  "openai_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }
@@ -513,8 +519,10 @@ weclaw-cua new-messages    # 后续：仅返回上次之后的新消息
 | `groups_to_monitor` | `["*"]` = 全部会话（包括群聊和私聊），或列出指定会话名 |
 | `sidebar_unread_only` | `true` = 仅处理有未读标记的会话 |
 | `report_custom_prompt` | 附加到 LLM 报告 prompt 的自定义指令 |
-| `openrouter_api_key` | API key（或使用 `OPENROUTER_API_KEY` 环境变量） |
-| `llm_model` | 用于报告生成的 LLM 模型标识符 |
+| `llm_provider` | 内置 LLM provider：`openrouter` 或 `openai` |
+| `openrouter_api_key` | OpenRouter API key（或使用 `OPENROUTER_API_KEY` 环境变量） |
+| `openai_api_key` | OpenAI API key（或使用 `OPENAI_API_KEY` 环境变量） |
+| `llm_model` | 用于报告生成的 LLM 模型标识符；OpenAI 请使用 `gpt-4o` 这类原生模型名 |
 | `output_dir` | 输出 JSON 文件的目录 |
 
 ---

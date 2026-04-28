@@ -18,6 +18,7 @@ from unittest.mock import patch
 from algo_b.build_report_prompt import build_report_prompt
 from algo_b.load_messages import load_messages
 from algo_b.pipeline_b import run_pipeline_b
+from config.weclaw_config import load_config
 from config.weclaw_config import WeclawConfig
 from shared.message_schema import Message, messages_to_json
 
@@ -130,9 +131,56 @@ class TestAlgoB(unittest.TestCase):
 
         self.assertEqual(report, "final report")
         mock_generate.assert_called_once()
-        prompt_arg = mock_generate.call_args.args[0]
+        prompt_arg, model_arg, api_key_arg, provider_arg = mock_generate.call_args.args
         self.assertIn("会话：Project Alpha", prompt_arg)
         self.assertIn("Let's ship on Monday.", prompt_arg)
+        self.assertEqual(model_arg, "test-model")
+        self.assertEqual(api_key_arg, "sk-or-test")
+        self.assertEqual(provider_arg, "openrouter")
+
+    def test_load_config_defaults_to_openrouter(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.json")
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write(
+                    """
+{
+  "wechat_app_name": "WeChat",
+  "groups_to_monitor": ["*"],
+  "openrouter_api_key": "sk-or-config",
+  "llm_model": "openai/gpt-4o"
+}
+""".strip()
+                )
+
+            with patch.dict(os.environ, {}, clear=True):
+                config = load_config(config_path)
+
+        self.assertEqual(config.llm_provider, "openrouter")
+        self.assertEqual(config.llm_api_key, "sk-or-config")
+
+    def test_load_config_supports_openai_provider_env_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = os.path.join(temp_dir, "config.json")
+            with open(config_path, "w", encoding="utf-8") as f:
+                f.write(
+                    """
+{
+  "wechat_app_name": "WeChat",
+  "groups_to_monitor": ["*"],
+  "llm_provider": "openai",
+  "openai_api_key": "sk-config",
+  "llm_model": "gpt-4o"
+}
+""".strip()
+                )
+
+            with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-env"}, clear=True):
+                config = load_config(config_path)
+
+        self.assertEqual(config.llm_provider, "openai")
+        self.assertEqual(config.openai_api_key, "sk-env")
+        self.assertEqual(config.llm_api_key, "sk-env")
 
 
 if __name__ == "__main__":

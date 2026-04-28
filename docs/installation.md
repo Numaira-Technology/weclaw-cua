@@ -123,13 +123,15 @@ Open `config/config.json` and fill in your settings:
   "groups_to_monitor": ["*"],
   "sidebar_unread_only": true,
   "report_custom_prompt": "Summarize key decisions and action items.",
+  "llm_provider": "openrouter",
   "openrouter_api_key": "",
+  "openai_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }
 ```
 
-Fill `openrouter_api_key` only when using OpenRouter mode. Leave it empty if you run through OpenClaw gateway or stepwise mode.
+Set `llm_provider` to `openrouter` or `openai`. Fill the matching key only when using built-in LLM mode. Leave keys empty if you run through OpenClaw gateway or stepwise mode.
 
 | Field | Description |
 |---|---|
@@ -137,8 +139,10 @@ Fill `openrouter_api_key` only when using OpenRouter mode. Leave it empty if you
 | `groups_to_monitor` | `["*"]` monitors all chats (both group chats and direct messages); list specific names to filter |
 | `sidebar_unread_only` | `true` = only process chats with unread badges |
 | `report_custom_prompt` | Custom instruction appended to the LLM report prompt |
-| `openrouter_api_key` | Your OpenRouter key (leave empty if using OpenClaw gateway) |
-| `llm_model` | LLM model ID for report generation |
+| `llm_provider` | Built-in LLM provider: `openrouter` or `openai` |
+| `openrouter_api_key` | Your OpenRouter key (or use `OPENROUTER_API_KEY`) |
+| `openai_api_key` | Your OpenAI key (or use `OPENAI_API_KEY`) |
+| `llm_model` | LLM model ID for report generation; use provider-native names such as `gpt-4o` for OpenAI |
 | `output_dir` | Directory where captured JSON files are written |
 
 ### 3. Run
@@ -147,8 +151,8 @@ Fill `openrouter_api_key` only when using OpenRouter mode. Leave it empty if you
 # Recommended — via local OpenClaw gateway
 weclaw-cua run --openclaw-gateway
 
-# Fallback — direct OpenRouter key
-# Requires openrouter_api_key in config/config.json or OPENROUTER_API_KEY env var
+# Fallback — built-in LLM mode
+# Requires the matching API key for llm_provider
 weclaw-cua run
 ```
 
@@ -215,13 +219,14 @@ $env:OPENCLAW_BACKEND_MODEL = "openrouter/google/gemini-2.5-flash"
 
 ---
 
-### OpenRouter Mode (Fallback / Testing)
+### Built-In LLM Mode (Fallback / Testing)
 
 Use this mode when you do not have a local OpenClaw gateway, or for debugging.
 
 ```bash
 # macOS
 export OPENROUTER_API_KEY="sk-or-v1-your-key"
+export OPENAI_API_KEY="sk-your-openai-key"
 weclaw-cua run          # capture + report in one step
 weclaw-cua capture      # capture only
 weclaw-cua report       # generate report from existing captures
@@ -230,12 +235,13 @@ weclaw-cua report       # generate report from existing captures
 ```powershell
 # Windows PowerShell
 $env:OPENROUTER_API_KEY = "sk-or-v1-your-key"
+$env:OPENAI_API_KEY = "sk-your-openai-key"
 weclaw-cua run          # capture + report in one step
 weclaw-cua capture      # capture only
 weclaw-cua report       # generate report from existing captures
 ```
 
-You can also put the key directly in `config/config.json` under `openrouter_api_key`.
+You can also put the key directly in `config/config.json` under `openrouter_api_key` or `openai_api_key`.
 
 ---
 
