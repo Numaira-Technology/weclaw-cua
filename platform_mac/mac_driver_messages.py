@@ -33,7 +33,7 @@ class MacDriverMessages:
         assert direction in ("up", "down")
         _macos_w.activate_pid(self.pid)
         time.sleep(0.08)
-        scroll_amount = 5000
+        scroll_amount = 500
         clicks = scroll_amount if direction == "up" else -scroll_amount
         left, top, right, bottom = _macos_w.main_window_bounds(self.pid)
         message_panel_x = left + int((right - left) * 0.65)
