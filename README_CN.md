@@ -549,3 +549,56 @@ Apache License 2.0 — 详见 [LICENSE](LICENSE)。
 - **不访问数据库** — 纯视觉方案，无解密或内存扫描
 - **不上传数据** — 所有自动化在本机运行；仅 LLM API 调用会离开本机（发送到你配置的提供商）
 - **风险自负** — 仅供个人学习和研究使用
+
+---
+
+## 面向桌面 App 的 Keep-Alive 服务
+
+为了便于桌面端 App 集成，WeClaw-CUA 现在支持作为本地 keep-alive HTTP 服务运行。这样 App 不需要每次点击“开始”都重新拉起一个新进程，而是可以复用同一个 Python 进程中已经加载好的 OCR 和视觉资源。
+
+### 启动服务
+
+```bash
+weclaw-cua serve
+weclaw-cua serve --host 127.0.0.1 --port 8765
+```
+
+服务启动后会暴露以下本地接口：
+
+- `GET /health`
+- `POST /warmup`
+- `POST /tasks`
+- `GET /tasks`
+- `GET /tasks/{id}`
+
+### 推荐的桌面 App 调用流程
+
+1. App 启动时拉起 `weclaw-cua serve`
+2. 先调用一次 `POST /warmup` 预热 OCR
+3. 用户点击开始后，调用 `POST /tasks`
+4. 轮询 `GET /tasks/{id}`，直到任务状态变为 `done` 或 `failed`
+5. 从任务返回结果中读取结构化 JSON
+
+### 请求示例
+
+```bash
+curl http://127.0.0.1:8765/health
+```
+
+```bash
+curl -X POST http://127.0.0.1:8765/warmup ^
+  -H "Content-Type: application/json" ^
+  -d "{\"ocr\": true}"
+```
+
+```bash
+curl -X POST http://127.0.0.1:8765/tasks ^
+  -H "Content-Type: application/json" ^
+  -d "{\"no_llm\": false, \"openclaw_gateway\": false}"
+```
+
+```bash
+curl http://127.0.0.1:8765/tasks/TASK_ID
+```
+
+如果你在 macOS/Linux 上执行 `curl`，请把 Windows 示例中的 `^` 换成 `\`。

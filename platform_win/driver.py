@@ -269,9 +269,9 @@ class WinDriver(PlatformDriver):
         if not self.hwnd:
             raise RuntimeError("WeChat window not found. Call find_wechat_window() first.")
         if direction == "up":
-            clicks = 500
+            clicks = 5000
         elif direction == "down":
-            clicks = -500
+            clicks = -5000
         else:
             raise ValueError(f"Invalid scroll direction: '{direction}'. Must be 'up' or 'down'.")
         _force_foreground_window(self.hwnd)

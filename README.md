@@ -547,3 +547,56 @@ This project is a local UI automation tool for personal use only:
 - **No database access** — uses pure vision, no decryption or memory scanning
 - **No cloud transmission** — all automation runs locally; only LLM API calls leave your machine (to your configured provider)
 - **Use at your own risk** — for personal learning and research purposes only
+
+---
+
+## Keep-Alive Service for Desktop Apps
+
+For desktop app integration, WeClaw-CUA can run as a local keep-alive HTTP service so the app does not need to start a fresh process for every task. This lets the same Python process reuse already-loaded OCR and vision resources across runs.
+
+### Start the service
+
+```bash
+weclaw-cua serve
+weclaw-cua serve --host 127.0.0.1 --port 8765
+```
+
+When the service is running, it exposes these local endpoints:
+
+- `GET /health`
+- `POST /warmup`
+- `POST /tasks`
+- `GET /tasks`
+- `GET /tasks/{id}`
+
+### Recommended desktop app flow
+
+1. Launch `weclaw-cua serve` when the app starts.
+2. Call `POST /warmup` once to preload OCR.
+3. When the user clicks Start, call `POST /tasks`.
+4. Poll `GET /tasks/{id}` until the task reaches `done` or `failed`.
+5. Read the structured JSON result from the task response.
+
+### Example requests
+
+```bash
+curl http://127.0.0.1:8765/health
+```
+
+```bash
+curl -X POST http://127.0.0.1:8765/warmup ^
+  -H "Content-Type: application/json" ^
+  -d "{\"ocr\": true}"
+```
+
+```bash
+curl -X POST http://127.0.0.1:8765/tasks ^
+  -H "Content-Type: application/json" ^
+  -d "{\"no_llm\": false, \"openclaw_gateway\": false}"
+```
+
+```bash
+curl http://127.0.0.1:8765/tasks/TASK_ID
+```
+
+On macOS/Linux, replace the Windows `^` line continuations with `\`.
