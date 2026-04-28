@@ -17,58 +17,16 @@ Output spec:
     - `bbox` is `(x1, y1, x2, y2)` in pixel coordinates relative to the input image.
 """
 
-from __future__ import annotations
-
 import difflib
-import re
 import tempfile
-import unicodedata
-from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image
 
+from shared.ocr_hunyuan_parser import OcrLine, normalize_text, parse_hunyuan_lines
+
 _MODEL_NAME = "tencent/HunyuanOCR"
 _PROMPT = "检测并识别图片中的文字，将文本坐标格式化输出。"
-_NUM_RE = r"-?\d+(?:\.\d+)?"
-_POINT_RE = rf"\(\s*(?P<{{x}}>{_NUM_RE})\s*,\s*(?P<{{y}}>{_NUM_RE})\s*\)"
-_REF_QUAD_RE = re.compile(
-    r"<ref>(?P<text>.*?)</ref>\s*<quad>\s*"
-    + _POINT_RE.format(x="x1", y="y1")
-    + r"\s*,\s*"
-    + _POINT_RE.format(x="x2", y="y2")
-    + r"\s*</quad>",
-    re.DOTALL,
-)
-_TEXT_BOX_RE = re.compile(
-    r"(?P<text>[^\n<>()]+?)\s*"
-    + _POINT_RE.format(x="x1", y="y1")
-    + r"\s*,\s*"
-    + _POINT_RE.format(x="x2", y="y2")
-)
-
-
-@dataclass
-class OcrLine:
-    """A single HunyuanOCR text line."""
-
-    text: str
-    bbox: tuple[int, int, int, int]
-    conf: float = 1.0
-
-    @property
-    def center_y(self) -> int:
-        return (self.bbox[1] + self.bbox[3]) // 2
-
-    @property
-    def center_x(self) -> int:
-        return (self.bbox[0] + self.bbox[2]) // 2
-
-
-def _normalize(text: str) -> str:
-    text = unicodedata.normalize("NFKC", text)
-    text = text.replace("\u2026", "...").replace("\u22ef", "...")
-    return " ".join(text.split()).strip()
 
 
 def _clean_repeated_substrings(text: str) -> str:
@@ -85,55 +43,6 @@ def _clean_repeated_substrings(text: str) -> str:
         if count >= 10:
             return text[: n - length * (count - 1)]
     return text
-
-
-def _to_pixel_bbox(
-    x1: float,
-    y1: float,
-    x2: float,
-    y2: float,
-    image_width: int,
-    image_height: int,
-) -> tuple[int, int, int, int]:
-    if max(abs(x1), abs(y1), abs(x2), abs(y2)) <= 1.0:
-        x1 *= image_width
-        x2 *= image_width
-        y1 *= image_height
-        y2 *= image_height
-    left = int(round(min(x1, x2)))
-    top = int(round(min(y1, y2)))
-    right = int(round(max(x1, x2)))
-    bottom = int(round(max(y1, y2)))
-    return (
-        max(0, min(left, image_width)),
-        max(0, min(top, image_height)),
-        max(0, min(right, image_width)),
-        max(0, min(bottom, image_height)),
-    )
-
-
-def _parse_lines(text: str, image_width: int, image_height: int) -> list[OcrLine]:
-    lines: list[OcrLine] = []
-    for pattern in (_REF_QUAD_RE, _TEXT_BOX_RE):
-        for match in pattern.finditer(text):
-            line_text = _normalize(match.group("text"))
-            if not line_text:
-                continue
-            bbox = _to_pixel_bbox(
-                float(match.group("x1")),
-                float(match.group("y1")),
-                float(match.group("x2")),
-                float(match.group("y2")),
-                image_width,
-                image_height,
-            )
-            if bbox[2] <= bbox[0] or bbox[3] <= bbox[1]:
-                continue
-            lines.append(OcrLine(text=line_text, bbox=bbox))
-        if lines:
-            break
-    lines.sort(key=lambda line: (line.center_y, line.bbox[0]))
-    return lines
 
 
 class HunyuanOcrEngine:
@@ -215,7 +124,7 @@ class HunyuanOcrEngine:
                 clean_up_tokenization_spaces=False,
             )[0]
             output_text = _clean_repeated_substrings(output_text)
-            return _parse_lines(output_text, rgb_image.width, rgb_image.height)
+            return parse_hunyuan_lines(output_text, rgb_image.width, rgb_image.height)
         finally:
             image_path.unlink(missing_ok=True)
 
@@ -225,11 +134,11 @@ class HunyuanOcrEngine:
         target: str,
         min_sim: float = 0.55,
     ) -> OcrLine | None:
-        norm_target = _normalize(target)
+        norm_target = normalize_text(target)
         best: OcrLine | None = None
         best_score = -1.0
         for line in lines:
-            norm_text = _normalize(line.text)
+            norm_text = normalize_text(line.text)
             if norm_text == norm_target:
                 return line
             if norm_text.endswith("...") and norm_target.startswith(norm_text[:-3]):
