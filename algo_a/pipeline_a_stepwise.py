@@ -99,7 +99,11 @@ def _run_mac_stepwise(config: WeclawConfig, backend: StepwiseBackend) -> list[st
 
     driver_stub = _MinimalDriver(pid)
     print("[stepwise] Scroll-capturing chat frames...")
-    frames = scroll_capture_frames_for_extraction(driver_stub, max_messages=None)
+    frames = scroll_capture_frames_for_extraction(
+        driver_stub,
+        max_messages=None,
+        max_scrolls=config.chat_max_scrolls,
+    )
 
     if frames:
         frames.reverse()

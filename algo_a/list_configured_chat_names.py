@@ -13,6 +13,7 @@ def list_chats_by_configured_names(
     names: list[str],
     *,
     unread_only: bool = False,
+    max_scrolls: int = 10,
 ) -> list[ChatInfo]:
     assert window is not None
     assert isinstance(names, list)
@@ -23,8 +24,14 @@ def list_chats_by_configured_names(
         if not cfg or cfg in seen_cfg:
             continue
         seen_cfg.add(cfg)
-        scroll_sidebar_to_top(driver, window)
-        matches = list_target_chats(driver, window, name_filter=cfg, unread_only=unread_only)
+        scroll_sidebar_to_top(driver, window, max_down_scrolls=max_scrolls)
+        matches = list_target_chats(
+            driver,
+            window,
+            name_filter=cfg,
+            unread_only=unread_only,
+            max_scrolls=max_scrolls,
+        )
         for chat in matches:
             k = _row_key(chat.name)
             if k not in found:

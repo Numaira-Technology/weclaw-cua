@@ -61,12 +61,21 @@ class MacDriverMessages:
         print("[WARN] 侧栏 Vision 结果中没有任何未读角标行。")
         return None
 
-    def get_chat_messages(self, chat_name: str, max_messages: int | None = None) -> list[ChatMessage]:
+    def get_chat_messages(
+        self,
+        chat_name: str,
+        max_messages: int | None = None,
+        max_scrolls: int | None = None,
+    ) -> list[ChatMessage]:
         cap_s = f", cap={max_messages}" if max_messages else ""
         print(f"[*] Starting message extraction for '{chat_name}'{cap_s}...")
         self._activate_chat_panel_safely()
         self.click_new_messages_button()
-        screenshots = scroll_capture_frames_for_extraction(self, max_messages)
+        screenshots = scroll_capture_frames_for_extraction(
+            self,
+            max_messages,
+            max_scrolls=max_scrolls,
+        )
         if not screenshots:
             print("[WARN] No screenshots were captured.")
             return []
