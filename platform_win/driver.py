@@ -25,6 +25,7 @@ from shared.vision_backend import VisionBackend, create_vision_backend
 from shared.vision_prompts import (
     CHAT_PANEL_PROMPT,
     CHAT_PANEL_SAFE_CLICK_PROMPT,
+    HIGHLIGHTED_CHAT_MATCH_PROMPT_TEMPLATE,
     CURRENT_CHAT_Y_PROMPT,
     NEW_MESSAGES_BUTTON_PROMPT,
     SIDEBAR_PROMPT,
@@ -79,16 +80,10 @@ class WinDriver(PlatformDriver):
 
         ocr_engine = get_ocr_engine()
         raw_lines = ocr_engine.recognize(sidebar_image)
-        merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
-
-        hit = ocr_engine.match_target(merged_lines, chat_name)
+        hit = ocr_engine.match_target(raw_lines, chat_name)
 
         if hit is None:
-            print(f"[WARN] OCR could not find '{chat_name}' in sidebar. Trying unmerged lines...")
-            hit = ocr_engine.match_target(raw_lines, chat_name)
-
-        if hit is None:
-            print(f"[ERROR] OCR could not locate '{chat_name}' in sidebar after two passes.")
+            print(f"[ERROR] OCR could not locate '{chat_name}' in sidebar.")
             return None
 
         abs_x = window_left + hit.center_x
@@ -114,11 +109,11 @@ class WinDriver(PlatformDriver):
 
         ocr_engine = get_ocr_engine()
         raw_lines = ocr_engine.recognize(sidebar_image)
-        merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
+        merged_lines = raw_lines
         debug_prefix = new_sidebar_debug_prefix()
         save_sidebar_crop(debug_prefix, sidebar_image)
         print_ocr_lines("OCR raw lines", raw_lines)
-        print_ocr_lines("OCR merged rows", merged_lines)
+        print_ocr_lines("OCR rows (no merge)", merged_lines)
 
         if not merged_lines:
             print("[WARN] RapidOCR returned no text; falling back to VLM-only mode.")
@@ -266,20 +261,37 @@ class WinDriver(PlatformDriver):
         """Scrolls the chat panel via mouse wheel at the message area (same as scroll_messages)."""
         if not self.hwnd:
             raise RuntimeError("WeChat window not found. Call find_wechat_window() first.")
+        raw_clicks = os.environ.get("WECLAW_WIN_CHAT_SCROLL_CLICKS", "").strip()
+        scroll_amount = int(raw_clicks) if raw_clicks else 500
+        if scroll_amount <= 0:
+            scroll_amount = 500
+        raw_bursts = os.environ.get("WECLAW_WIN_CHAT_SCROLL_BURSTS", "").strip()
+        bursts = int(raw_bursts) if raw_bursts else 4
+        if bursts <= 0:
+            bursts = 1
         if direction == "up":
-            clicks = 500
+            clicks = scroll_amount
         elif direction == "down":
-            clicks = -500
+            clicks = -scroll_amount
         else:
             raise ValueError(f"Invalid scroll direction: '{direction}'. Must be 'up' or 'down'.")
         _force_foreground_window(self.hwnd)
         left, top, right, bottom = win32gui.GetWindowRect(self.hwnd)
         message_panel_x = left + int((right - left) * 0.65)
         message_panel_y = top + int((bottom - top) * 0.5)
-        print(f"[*] Scrolling chat panel {direction} with mouse wheel.")
+        print(
+            f"[*] Scrolling chat panel {direction} with mouse wheel "
+            f"(clicks={abs(clicks)}, bursts={bursts})."
+        )
         pyautogui.moveTo(message_panel_x, message_panel_y, duration=0.1)
-        pyautogui.scroll(clicks)
-        time.sleep(1.0)
+        for _ in range(bursts):
+            pyautogui.scroll(clicks)
+            time.sleep(0.04)
+        raw_settle = os.environ.get("WECLAW_WIN_CHAT_SCROLL_SETTLE_SEC", "").strip()
+        settle_sec = float(raw_settle) if raw_settle else 1.0
+        if settle_sec < 0.2:
+            settle_sec = 0.2
+        time.sleep(settle_sec)
 
     def get_chat_messages(self, chat_name: str) -> list[ChatMessage]:
         """
@@ -502,7 +514,7 @@ class WinDriver(PlatformDriver):
             y_px = int(float(y_norm) / 1000.0 * img_height)
 
             # Step 3: Find nearest OCR line
-            lines_to_search = merged_lines or raw_lines
+            lines_to_search = raw_lines
             if not lines_to_search:
                 print("[WARN] OCR returned no lines; cannot map highlighted row.")
                 return None
@@ -516,6 +528,25 @@ class WinDriver(PlatformDriver):
             print(f"[ERROR] Failed to parse current chat response. Exception: {e}")
             print(f"Raw response was: {response_str}")
             return None
+
+    def is_expected_chat_highlighted(self, expected_name: str) -> bool:
+        expected = str(expected_name or "").strip()
+        if not expected:
+            return False
+        full_screenshot = capture_window(self.hwnd)
+        if not full_screenshot:
+            return False
+        sidebar_width = int(full_screenshot.width * 0.3)
+        sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
+        prompt = HIGHLIGHTED_CHAT_MATCH_PROMPT_TEMPLATE.format(expected_name=expected)
+        response_str = self.vision_ai.query(prompt, sidebar_image)
+        if not response_str:
+            return False
+        try:
+            data = parse_json_object_from_model_text(response_str)
+        except Exception:
+            return False
+        return bool(data.get("is_match", False))
 
     def _get_chat_panel_region(self) -> tuple[int, int, int, int]:
         """Calculates the bounding box of the chat panel region."""

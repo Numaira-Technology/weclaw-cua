@@ -74,6 +74,24 @@ Example:
 }
 """
 
+HIGHLIGHTED_CHAT_MATCH_PROMPT_TEMPLATE = """
+You are a UI analysis assistant. Analyze the provided screenshot of a chat application's sidebar.
+One chat row is highlighted (selected). Determine whether the highlighted chat is the expected target chat.
+
+Expected target chat name:
+{expected_name}
+
+Return exactly one JSON object with a single boolean field:
+{{
+  "is_match": true
+}}
+
+If the highlighted chat is not the expected target, return:
+{{
+  "is_match": false
+}}
+"""
+
 CHAT_PANEL_PROMPT = """
 You are an expert UI automation assistant. Analyze the provided screenshot of a chat application's main chat panel.
 Your task is to identify every individual message visible and extract its details.

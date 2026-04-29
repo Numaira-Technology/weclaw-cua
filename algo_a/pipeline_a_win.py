@@ -85,6 +85,23 @@ def _click_verify_extract_save(
         driver.click_row(chat.ui_element, attempt=attempt)
         time.sleep(2)
 
+        if hasattr(driver, "is_expected_chat_highlighted"):
+            try:
+                vlm_match = bool(driver.is_expected_chat_highlighted(matched_cfg))
+            except Exception:
+                vlm_match = False
+            if vlm_match:
+                print(
+                    f"[+] Successfully clicked and verified chat by VLM highlight match: "
+                    f"target={matched_cfg!r}"
+                )
+                click_successful = True
+                break
+            print(
+                f"[WARN] Click verification failed by VLM highlight match. "
+                f"Expected {matched_cfg!r}. Retrying..."
+            )
+            continue
         current_chat_name = driver.get_current_chat_name()
         if _is_chat_name_match(current_chat_name, matched_cfg):
             print(
