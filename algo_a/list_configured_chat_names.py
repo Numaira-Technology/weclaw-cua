@@ -24,7 +24,7 @@ def list_chats_by_configured_names(
         if not cfg or cfg in seen_cfg:
             continue
         seen_cfg.add(cfg)
-        scroll_sidebar_to_top(driver, window, sidebar_max_scrolls=max_scrolls)
+        scroll_sidebar_to_top(driver, window, max_down_scrolls=max_scrolls)
         matches = list_target_chats(
             driver,
             window,

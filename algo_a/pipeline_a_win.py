@@ -206,7 +206,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
         print(
             f"[*] Mode: wildcard chats. chat_type={chat_type!r}. Unread filter: {uo}."
         )
-        scroll_sidebar_to_top(driver, window, sidebar_max_scrolls=sidebar_scrolls)
+        scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
         target_chats = list_target_chats(
             driver,
             window,
@@ -224,7 +224,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
         max_locate_scrolls = sidebar_scrolls
         for processed_num, matched_cfg in enumerate(names_order, start=1):
             print(f"\n--- Processing chat {processed_num}/{len(names_order)}: {matched_cfg!r} ---")
-            scroll_sidebar_to_top(driver, window, sidebar_max_scrolls=sidebar_scrolls)
+            scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
             scroll_attempts = 0
             row = None
             while scroll_attempts <= max_locate_scrolls:
@@ -275,7 +275,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
                 "chat allowed by chat_type."
             )
 
-        scroll_sidebar_to_top(driver, window, sidebar_max_scrolls=sidebar_scrolls)
+        scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
         scroll_attempts = 0
         max_scroll_attempts = sidebar_scrolls
         processed_count = 0
@@ -315,7 +315,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
 
             pending = [n for n in pending if n != matched_cfg]
             print(f"[*] Completed and removed from pending: {matched_cfg!r}; remaining={pending!r}")
-            scroll_sidebar_to_top(driver, window, sidebar_max_scrolls=sidebar_scrolls)
+            scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
             scroll_attempts = 0
 
         if pending:

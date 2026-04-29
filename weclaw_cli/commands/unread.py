@@ -68,7 +68,7 @@ def unread(ctx, limit, fmt, chat_type, sidebar_max_scrolls):
     scroll_sidebar_to_top(
         driver,
         window,
-        sidebar_max_scrolls=config.sidebar_max_scrolls,
+        max_down_scrolls=config.sidebar_max_scrolls,
     )
     rows = list_target_chats(
         driver,
