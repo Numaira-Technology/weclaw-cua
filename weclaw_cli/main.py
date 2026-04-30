@@ -17,7 +17,7 @@ import sys
 
 import click
 
-_VERSION = "0.1.5"
+_VERSION = "0.2.0"
 
 
 @click.group()

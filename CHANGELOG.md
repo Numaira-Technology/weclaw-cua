@@ -16,6 +16,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). This pr
 
 ---
 
+## [0.2.0] — 2026-04-30
+
+### Added
+
+- OpenAI-compatible API settings in `config.json` (alongside OpenRouter)
+- Optional `[hunyuan-ocr]` extra — local Hunyuan vision OCR on macOS and Windows (see `pyproject.toml` pins)
+- `capture` and `run` flags `--sidebar-max-scrolls` and `--chat-max-scrolls` to override scroll depth per run
+
+### Changed
+
+- `screenshot` subcommands default `--output-dir` to `<configured output_dir>/work` when omitted
+
+### Fixed
+
+- Windows capture pipeline and UI automation robustness
+
+---
+
 ## [0.1.5] — 2026-04-11
 
 ### Added
@@ -76,6 +94,7 @@ Initial public release.
 
 ---
 
-[Unreleased]: https://github.com/Numaira-Technology/weclaw-cua/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/Numaira-Technology/weclaw-cua/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Numaira-Technology/weclaw-cua/compare/v0.1.5...v0.2.0
 [0.1.5]: https://github.com/Numaira-Technology/weclaw-cua/compare/v0.1.0...v0.1.5
 [0.1.0]: https://github.com/Numaira-Technology/weclaw-cua/releases/tag/v0.1.0
