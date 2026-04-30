@@ -122,7 +122,10 @@ weclaw-cua init
   "wechat_app_name": "微信",
   "groups_to_monitor": ["*"],
   "sidebar_unread_only": true,
-  "report_custom_prompt": "请基于全部未读聊天记录，生成一份中文晨间消息处理报告。",
+  "chat_type": "group",
+  "sidebar_max_scrolls": 16,
+  "chat_max_scrolls": 10,
+  "report_custom_prompt": "请基于捕获到的聊天记录，生成一份中文晨间消息处理报告。",
   "llm_provider": "openrouter",
   "openrouter_api_key": "",
   "openai_api_key": "",
@@ -138,8 +141,11 @@ weclaw-cua init
 | 字段 | 说明 |
 |---|---|
 | `wechat_app_name` | 微信窗口标题栏显示的名称；中文界面通常为 `"微信"`，英文界面为 `"WeChat"` |
-| `groups_to_monitor` | `["*"]` 监控所有会话（包括群聊和私聊）；也可列出具体会话名称进行过滤 |
-| `sidebar_unread_only` | `true` = 只处理侧栏有未读标记的会话 |
+| `groups_to_monitor` | `["*"]` 或 `[]` = 监控所有符合 `chat_type` 的会话；也可列出具体会话名称进行过滤 |
+| `sidebar_unread_only` | `true` = 只处理侧栏有未读标记的会话；`false` = 已读未读一起处理 |
+| `chat_type` | `group` = 仅群聊，`private` = 仅私聊，`all` = 全部会话 |
+| `sidebar_max_scrolls` | 每次侧栏扫描最多向下滚动的次数；回到顶部会向上滚动 `sidebar_max_scrolls + 2` 次 |
+| `chat_max_scrolls` | 每个聊天窗口内最多向上滚动读取历史的次数 |
 | `report_custom_prompt` | 追加到 LLM 报告 prompt 的自定义指令 |
 | `llm_provider` | 内置 LLM provider：`openrouter` 或 `openai` |
 | `openrouter_api_key` | 你的 OpenRouter key（或使用 `OPENROUTER_API_KEY`） |
@@ -318,7 +324,7 @@ Stepwise 工作流（你来处理 LLM 调用）：
 | 命令 | 说明 |
 |---|---|
 | `init` | 首次设置：创建配置文件并验证平台权限 |
-| `run` | 完整流程：捕获未读消息 + 生成报告 |
+| `run` | 完整流程：捕获选中的会话 + 生成报告 |
 | `capture` | 仅执行视觉捕获（不生成报告） |
 | `report` | 从已有捕获的 JSON 文件生成 LLM 报告 |
 | `build-report-prompt` | 输出报告 prompt，供你自己的 LLM 处理 |

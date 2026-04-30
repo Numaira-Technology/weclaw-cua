@@ -20,18 +20,23 @@ _SCROLL_DELTA = -5
 _SETTLE_SEC = 0.3
 
 
-def find_unread_chat_by_name(driver, target_name: str) -> Optional[ChatInfo]:
+def find_unread_chat_by_name(
+    driver,
+    target_name: str,
+    max_scrolls: int = _MAX_SCROLL_STEPS,
+) -> Optional[ChatInfo]:
     """在未读会话中按名称查找；找不到则向下滚动 sidebar 继续找。
 
     先按 sidebar_name_matches_config_group（含 config emoji 与 OCR 文本核一致），再 titles_match 兜底 OCR 轻微偏差。
     """
     assert target_name
+    assert max_scrolls >= 0
     driver.activate_wechat()
     time.sleep(0.2)
-    driver.scroll_sidebar_to_top()
+    driver.scroll_sidebar_to_top(max_scrolls + 2)
     time.sleep(0.35)
 
-    for _ in range(_MAX_SCROLL_STEPS):
+    for i in range(max_scrolls + 1):
         fresh = rescan_unread(driver)
         for c in fresh:
             if c.name and sidebar_name_matches_config_group(c.name, target_name):
@@ -39,6 +44,8 @@ def find_unread_chat_by_name(driver, target_name: str) -> Optional[ChatInfo]:
         for c in fresh:
             if c.name and titles_match(c.name, target_name):
                 return c
+        if i >= max_scrolls:
+            break
         driver.scroll_sidebar(_SCROLL_DELTA)
         time.sleep(_SETTLE_SEC)
     return None

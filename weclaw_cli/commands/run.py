@@ -25,13 +25,33 @@ from ..output.formatter import output
 @click.option("--format", "fmt", default="json",
               type=click.Choice(["json", "text"]),
               help="Output format")
+@click.option("--chat-type", default=None,
+              type=click.Choice(["group", "private", "all"]),
+              help="Override chat type selection: group, private, or all")
+@click.option("--unread-mode", default=None,
+              type=click.Choice(["unread", "all"]),
+              help="Override unread selection: unread badges only, or all selected chats")
+@click.option("--sidebar-max-scrolls", default=None, type=int,
+              help="Override max downward sidebar scrolls per scan")
+@click.option("--chat-max-scrolls", default=None, type=int,
+              help="Override max upward chat-panel scrolls per chat")
 @click.pass_context
-def run(ctx, no_llm, openclaw_gateway, work_dir, fmt):
-    """Run full pipeline: capture unread chats + generate report.
+def run(
+    ctx,
+    no_llm,
+    openclaw_gateway,
+    work_dir,
+    fmt,
+    chat_type,
+    unread_mode,
+    sidebar_max_scrolls,
+    chat_max_scrolls,
+):
+    """Run full pipeline: capture selected chats + generate report.
 
     \b
     Default mode:
-      1. Vision-capture all unread WeChat messages (algo_a)
+      1. Vision-capture selected WeChat messages (algo_a)
       2. Generate LLM triage report (algo_b)
       3. Write last_run.json for automation
 
@@ -44,17 +64,24 @@ def run(ctx, no_llm, openclaw_gateway, work_dir, fmt):
 
     \b
     OpenClaw gateway mode (--openclaw-gateway):
-      1. Vision-capture all unread chats with the standard pipeline
+      1. Vision-capture selected chats with the standard pipeline
       2. Route vision prompts through the local OpenClaw gateway
       3. Generate the report via the same OpenClaw gateway
     """
     import os
     import sys
 
-    from ..context import load_app_context
+    from ..context import apply_capture_overrides, load_app_context
 
     app = load_app_context(ctx)
     config = app["config"]
+    apply_capture_overrides(
+        config,
+        chat_type=chat_type,
+        unread_mode=unread_mode,
+        sidebar_max_scrolls=sidebar_max_scrolls,
+        chat_max_scrolls=chat_max_scrolls,
+    )
     root = app["root"]
     out_dir = app["output_dir"]
 
@@ -70,6 +97,10 @@ def run(ctx, no_llm, openclaw_gateway, work_dir, fmt):
             no_llm=True,
             work_dir=work_dir,
             fmt=fmt,
+            chat_type=chat_type,
+            unread_mode=unread_mode,
+            sidebar_max_scrolls=sidebar_max_scrolls,
+            chat_max_scrolls=chat_max_scrolls,
         )
         return
 
@@ -137,7 +168,7 @@ def run(ctx, no_llm, openclaw_gateway, work_dir, fmt):
             if report_text:
                 output(report_text, "text")
             else:
-                output("No unread messages found.", "text")
+                output("No matching messages found.", "text")
         return
 
     from algo_a import run_pipeline_a
@@ -191,7 +222,7 @@ def run(ctx, no_llm, openclaw_gateway, work_dir, fmt):
         if report_text:
             output(report_text, "text")
         else:
-            output("No unread messages found.", "text")
+            output("No matching messages found.", "text")
 
 
 from .capture import capture as capture_cmd

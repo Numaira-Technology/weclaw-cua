@@ -122,7 +122,10 @@ Open `config/config.json` and fill in your settings:
   "wechat_app_name": "WeChat",
   "groups_to_monitor": ["*"],
   "sidebar_unread_only": true,
-  "report_custom_prompt": "Summarize key decisions and action items.",
+  "chat_type": "group",
+  "sidebar_max_scrolls": 16,
+  "chat_max_scrolls": 10,
+  "report_custom_prompt": "Summarize key decisions and action items from the selected chat messages.",
   "llm_provider": "openrouter",
   "openrouter_api_key": "",
   "openai_api_key": "",
@@ -136,8 +139,11 @@ Set `llm_provider` to `openrouter` or `openai`. Fill the matching key only when 
 | Field | Description |
 |---|---|
 | `wechat_app_name` | Window title of your WeChat app — usually `"WeChat"` for English locale or `"微信"` for Chinese locale |
-| `groups_to_monitor` | `["*"]` monitors all chats (both group chats and direct messages); list specific names to filter |
-| `sidebar_unread_only` | `true` = only process chats with unread badges |
+| `groups_to_monitor` | `["*"]` or `[]` scans every chat allowed by `chat_type`; list specific names to filter |
+| `sidebar_unread_only` | `true` = only process chats with unread badges; `false` = include read and unread selected chats |
+| `chat_type` | `group`, `private`, or `all` |
+| `sidebar_max_scrolls` | Maximum downward sidebar scrolls per scan; return-to-top uses this value plus two scrolls |
+| `chat_max_scrolls` | Maximum upward chat-panel scrolls per chat |
 | `report_custom_prompt` | Custom instruction appended to the LLM report prompt |
 | `llm_provider` | Built-in LLM provider: `openrouter` or `openai` |
 | `openrouter_api_key` | Your OpenRouter key (or use `OPENROUTER_API_KEY`) |
@@ -315,8 +321,8 @@ Query commands (no LLM needed):
 | Command | Description |
 |---|---|
 | `init` | First-time setup: create config file and verify platform permissions |
-| `run` | Full pipeline: capture unread messages and generate a report |
-| `capture` | Vision-capture unread messages only (no report) |
+| `run` | Full pipeline: capture selected messages and generate a report |
+| `capture` | Vision-capture selected messages only (no report) |
 | `report` | Generate an LLM report from existing captured JSON files |
 | `build-report-prompt` | Output the report prompt for your own LLM to process |
 | `finalize` | Process agent `.response.txt` files into final `messages.json` (`--work-dir` required) |

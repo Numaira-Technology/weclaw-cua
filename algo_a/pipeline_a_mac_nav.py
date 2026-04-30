@@ -35,12 +35,7 @@ def _groups_config_means_all_groups(names: list[str]) -> bool:
     return len(names) == 1 and str(names[0]).strip() == "*"
 
 
-def _allowed_chat_title(
-    title: str,
-    groups: list[str],
-    driver: MacDriver,
-    window: Any,
-) -> bool:
+def _allowed_chat_title(title: str, groups: list[str]) -> bool:
     if not title or not str(title).strip():
         return False
     if _groups_config_means_all_groups(groups):
@@ -54,6 +49,14 @@ def _allowed_chat_title(
 
 def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[str]:
     assert config.sidebar_unread_only
+    if config.chat_type != "group":
+        print(
+            "[*] macOS unread navigation only supports group filtering reliably; "
+            "falling back to sidebar scan for chat_type/private/all."
+        )
+        from algo_a.pipeline_a_win import _run_sidebar_scan_pipeline
+
+        return _run_sidebar_scan_pipeline(config, vision_backend=vision_backend)
     os.makedirs(config.output_dir, exist_ok=True)
     written_paths: list[str] = []
 
@@ -109,7 +112,11 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
             print(f"[*] 本会话已保存过，跳过重复写出: {title!r}")
             continue
 
-        messages = driver.get_chat_messages(title, max_messages=read_cap)
+        messages = driver.get_chat_messages(
+            title,
+            max_messages=read_cap,
+            max_scrolls=config.chat_max_scrolls,
+        )
         if not messages:
             print(f"[WARN] 未提取到消息，跳过保存: {title!r}")
             continue
