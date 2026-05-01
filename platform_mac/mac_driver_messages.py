@@ -46,7 +46,8 @@ class MacDriverMessages:
         time.sleep(1.15)
 
     def click_first_unread_sidebar_row(self) -> int | None:
-        rows = self.get_sidebar_rows(1)
+        getter = getattr(self, "get_fast_sidebar_rows", None)
+        rows = getter(1) if getter is not None else self.get_sidebar_rows(1)
         for row in rows:
             if row.badge_text is None:
                 continue
@@ -66,11 +67,15 @@ class MacDriverMessages:
         chat_name: str,
         max_messages: int | None = None,
         max_scrolls: int | None = None,
+        skip_navigation_vlm: bool = False,
     ) -> list[ChatMessage]:
         cap_s = f", cap={max_messages}" if max_messages else ""
         print(f"[*] Starting message extraction for '{chat_name}'{cap_s}...")
-        self._activate_chat_panel_safely()
-        self.click_new_messages_button()
+        if skip_navigation_vlm:
+            self._activate_chat_panel_by_center()
+        else:
+            self._activate_chat_panel_safely()
+            self.click_new_messages_button()
         screenshots = scroll_capture_frames_for_extraction(
             self,
             max_messages,
@@ -147,6 +152,29 @@ class MacDriverMessages:
             out = out[-max_messages:]
         print(f"[*] Finished processing all chunks. Total messages: {len(out)} ({len(all_messages)} raw).")
         return out
+
+    def _activate_chat_panel_by_center(self) -> None:
+        print("[*] Activating chat panel at deterministic center.")
+        _macos_w.activate_pid(self.pid)
+        time.sleep(0.2)
+        full_screenshot, wb = _macos_w.capture_window_pid_and_bounds(self.pid)
+        fw, fh = full_screenshot.size
+        chat_panel_x1 = int(full_screenshot.width * 0.31)
+        chat_panel_y1 = 50
+        chat_panel_x2 = int(full_screenshot.width * 0.95)
+        chat_panel_y2 = full_screenshot.height - 50
+        fc_x = (chat_panel_x1 + chat_panel_x2) // 2
+        fc_y = (chat_panel_y1 + chat_panel_y2) // 2
+        click_x, click_y = _macos_w.window_image_px_to_screen_pt(
+            fc_x,
+            fc_y,
+            fw,
+            fh,
+            wb,
+        )
+        pyautogui.moveTo(click_x, click_y, duration=0.1)
+        pyautogui.click()
+        time.sleep(0.3)
 
     def _activate_chat_panel_safely(self) -> None:
         print("[*] Activating chat panel with a safe click...")

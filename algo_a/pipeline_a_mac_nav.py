@@ -86,7 +86,7 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         if read_cap is None:
             print("[WARN] 未能点击未读侧栏行，跳过本轮。")
             continue
-        title = driver.get_current_chat_name()
+        title = driver.resolve_current_chat_title()
         if not title:
             same_title_run += 1
             if same_title_run >= _SAME_TITLE_BREAK:
@@ -103,7 +103,7 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         same_title_run = 0
         last_title = title
 
-        if not _allowed_chat_title(title, config.groups_to_monitor, driver, window):
+        if not _allowed_chat_title(title, config.groups_to_monitor):
             print(f"[*] 跳过（不在监控范围）: {title!r}")
             continue
 

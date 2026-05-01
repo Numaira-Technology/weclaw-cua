@@ -12,6 +12,7 @@ import time
 
 from openai import APITimeoutError
 from openai import OpenAI
+from openai import RateLimitError
 from PIL import Image
 
 from config.weclaw_config import load_config
@@ -51,6 +52,40 @@ def _temperature_for_provider(provider: str) -> int:
     return 0
 
 
+def _small_ui_max_side() -> int:
+    raw = os.environ.get("WECLAW_VISION_UI_MAX_SIDE_PX", "").strip()
+    if not raw:
+        return 1280
+    value = int(raw)
+    assert value >= 320
+    return value
+
+
+def _resize_for_small_ui_task(image: Image.Image, max_tokens: int) -> Image.Image:
+    if max_tokens > 2048:
+        return image
+    max_side = _small_ui_max_side()
+    width, height = image.size
+    current_max = max(width, height)
+    if current_max <= max_side:
+        return image
+    scale = max_side / float(current_max)
+    new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+    return image.resize(new_size, Image.Resampling.LANCZOS)
+
+
+def _rate_limit_retry_delay(exc: RateLimitError) -> float:
+    response = getattr(exc, "response", None)
+    if response is not None:
+        retry_after = response.headers.get("retry-after")
+        if retry_after:
+            try:
+                return max(1.0, float(retry_after))
+            except ValueError:
+                pass
+    return 2.0
+
+
 class VisionAI:
     """Singleton OpenAI-compatible multimodal client."""
 
@@ -78,8 +113,9 @@ class VisionAI:
     def query(self, prompt: str, image: Image.Image, max_tokens: int = 2048) -> str | None:
         assert self.client
         assert max_tokens > 0
+        image_to_send = _resize_for_small_ui_task(image, max_tokens)
         buffered = io.BytesIO()
-        image.save(buffered, format="PNG")
+        image_to_send.save(buffered, format="PNG")
         base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
         approx_mb = len(base64_image) * 0.75 / (1024 * 1024)
         max_retries = 3
@@ -88,7 +124,8 @@ class VisionAI:
                 f"[*] Sending query to Vision AI via {self.provider}... (Attempt {attempt + 1}/{max_retries})"
             )
             print(
-                f"[*] Image payload ~{approx_mb:.1f} MiB; first byte may take 1–6 min (timeout {self.http_timeout_sec:.0f}s)."
+                f"[*] Image payload ~{approx_mb:.1f} MiB ({image_to_send.width}x{image_to_send.height}); "
+                f"first byte may take 1–6 min (timeout {self.http_timeout_sec:.0f}s)."
             )
             try:
                 uses_openai_reasoning_model = _is_openai_reasoning_model(self.model_name)
@@ -123,6 +160,13 @@ class VisionAI:
                 )
                 if attempt + 1 < max_retries:
                     time.sleep(2)
+                continue
+            except RateLimitError as e:
+                if attempt + 1 >= max_retries:
+                    raise
+                delay = _rate_limit_retry_delay(e)
+                print(f"[!] Vision AI rate limited; retrying after {delay:.1f}s: {e}")
+                time.sleep(delay)
                 continue
             print("[+] Received response from Vision AI.")
             if not response.choices:
