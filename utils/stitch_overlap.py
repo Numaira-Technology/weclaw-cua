@@ -24,6 +24,11 @@ def body_lo(panel_h: int, top_trim: int) -> int:
     return min(top_trim, max(1, panel_h // 4))
 
 
+def body_hi(panel_h: int, top_trim: int, bottom_trim: int) -> int:
+    lo = body_lo(panel_h, top_trim)
+    return min(panel_h, max(lo + 80, panel_h - bottom_trim))
+
+
 def estimate_vertical_overlap_match(
     prev_panel: np.ndarray,
     next_panel: np.ndarray,

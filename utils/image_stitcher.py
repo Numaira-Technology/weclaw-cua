@@ -19,7 +19,7 @@ from typing import List
 import numpy as np
 from PIL import Image
 
-from utils.stitch_overlap import body_lo, estimate_vertical_overlap_match, strip_body_for_match
+from utils.stitch_overlap import body_hi, body_lo, estimate_vertical_overlap_match, strip_body_for_match
 
 
 @dataclass(frozen=True)
@@ -142,7 +142,8 @@ def stitch_screenshots(
         )
         Hn = next_p.shape[0]
         body_start = body_lo(Hn, match_top_trim)
-        body_h = strip_body_for_match(next_p, match_top_trim, match_bottom_trim).shape[0]
+        body_end = body_hi(Hn, match_top_trim, match_bottom_trim)
+        body_h = body_end - body_start
         if match.overlap <= 0:
             overlap = 0
             reliable = False
@@ -156,7 +157,7 @@ def stitch_screenshots(
             overlap = min(match.overlap, max(0, int(body_h * 0.45)))
             reliable = False
 
-        cut = body_start + overlap
+        cut = body_start + overlap + (Hn - body_end)
         cut = max(body_start, min(Hn - 1, cut))
         append_part = next_p[cut:]
         prev_overlap = overlap if overlap > 0 else prev_overlap

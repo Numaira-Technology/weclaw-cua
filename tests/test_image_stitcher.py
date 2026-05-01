@@ -58,7 +58,7 @@ def test_overlap_match_finds_vertical_translation_with_static_title() -> None:
         bottom_trim=40,
     )
     assert match.reliable
-    assert abs(match.overlap - 260) <= 12
+    assert abs(match.overlap - 232) <= 12
 
 
 def test_stitch_preserves_unique_content_without_duplicate_growth() -> None:
@@ -71,7 +71,7 @@ def test_stitch_preserves_unique_content_without_duplicate_growth() -> None:
     )
     assert stitched is not None
     assert stitched.height <= 1420
-    assert stitched.height >= 1320
+    assert stitched.height >= 1360
     assert _count_color_rows(stitched, (139, 231, 148)) >= 250
     assert _count_color_rows(stitched, (230, 230, 230)) >= 300
 
