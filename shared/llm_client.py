@@ -19,7 +19,10 @@ Output spec:
 """
 
 import json
+import ssl
 import urllib.request
+
+import certifi
 
 
 def _chat_completions_url(provider: str) -> str:
@@ -49,7 +52,8 @@ def call_llm(prompt: str, model: str, api_key: str, provider: str = "openrouter"
         },
     )
 
-    resp = urllib.request.urlopen(req)
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    resp = urllib.request.urlopen(req, context=ssl_context)
     data = json.loads(resp.read().decode("utf-8"))
 
     choices = data.get("choices")

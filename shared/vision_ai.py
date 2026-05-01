@@ -66,6 +66,11 @@ def _http_timeout_sec() -> float:
     return 360.0
 
 
+def _is_openai_reasoning_model(model_name: str) -> bool:
+    normalized = model_name.split("/", 1)[1] if model_name.startswith("openai/") else model_name
+    return normalized.startswith(("gpt-5", "o3", "o4"))
+
+
 class VisionAI:
     """Singleton OpenAI-compatible multimodal client."""
 
@@ -106,10 +111,11 @@ class VisionAI:
                 f"[*] Image payload ~{approx_mb:.1f} MiB; first byte may take 1–6 min (timeout {self.http_timeout_sec:.0f}s)."
             )
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model_name,
-                    temperature=0,
-                    messages=[
+                uses_openai_reasoning_model = _is_openai_reasoning_model(self.model_name)
+                uses_openai_completion_tokens = self.provider == "openai" and uses_openai_reasoning_model
+                request_args = {
+                    "model": self.model_name,
+                    "messages": [
                         {
                             "role": "user",
                             "content": [
@@ -123,8 +129,14 @@ class VisionAI:
                             ],
                         }
                     ],
-                    max_tokens=max_tokens,
-                )
+                }
+                if uses_openai_completion_tokens:
+                    request_args["max_completion_tokens"] = max_tokens
+                else:
+                    request_args["max_tokens"] = max_tokens
+                if not uses_openai_reasoning_model:
+                    request_args["temperature"] = 0
+                response = self.client.chat.completions.create(**request_args)
             except APITimeoutError as e:
                 print(
                     f"[!] Vision AI request timed out after {self.http_timeout_sec:.0f}s: {e}"
