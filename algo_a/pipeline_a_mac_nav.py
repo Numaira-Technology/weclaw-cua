@@ -22,7 +22,6 @@ from typing import Any
 from algo_a.list_target_chats_win import _normalize_chat_label
 from config.weclaw_config import WeclawConfig
 from platform_mac.chat_panel_detector import sidebar_name_matches_config_group
-from platform_mac.mac_ai_driver import MacDriver
 
 _MAX_JUMPS = 200
 _SAME_TITLE_BREAK = 5
@@ -59,6 +58,8 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         return _run_sidebar_scan_pipeline(config, vision_backend=vision_backend)
     os.makedirs(config.output_dir, exist_ok=True)
     written_paths: list[str] = []
+
+    from platform_mac.mac_ai_driver import MacDriver
 
     driver = MacDriver(vision_backend=vision_backend)
     driver.ensure_permissions()
