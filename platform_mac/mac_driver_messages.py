@@ -1,6 +1,5 @@
 """macOS：聊天区消息提取、侧栏当前会话名、新消息按钮。"""
 
-import os
 import time
 from typing import TYPE_CHECKING
 
@@ -22,7 +21,8 @@ from platform_mac import macos_window as _macos_w
 from platform_mac.chat_panel_scroll_capture import scroll_capture_frames_for_extraction
 from shared.message_dedup import dedupe_chat_messages
 from shared.sidebar_classification import unread_cap_from_badge_text
-from utils.image_stitcher import save_stitched_debug, stitch_screenshots
+from utils.chat_stitch_debug import new_chat_stitch_session_basename, save_chat_stitch_for_vlm
+from utils.image_stitcher import stitch_screenshots
 
 if TYPE_CHECKING:
     from shared.vision_backend import VisionBackend
@@ -87,9 +87,10 @@ class MacDriverMessages:
         print("[*] Reversing screenshot order for processing...")
         screenshots.reverse()
         all_messages: list[ChatMessage] = []
-        chunk_size = 5
+        chunk_size = 25
         screenshot_chunks = [screenshots[i : i + chunk_size] for i in range(0, len(screenshots), chunk_size)]
         chunk_results: list[tuple[int, list[ChatMessage]]] = []
+        stitch_session = new_chat_stitch_session_basename()
         for idx in range(len(screenshot_chunks) - 1, -1, -1):
             chunk = screenshot_chunks[idx]
             print(f"--- Processing chunk {idx + 1}/{len(screenshot_chunks)} ---")
@@ -99,9 +100,7 @@ class MacDriverMessages:
             if not stitched_image:
                 print(f"[ERROR] Failed to stitch chunk {idx + 1}.")
                 continue
-            debug_dir = os.environ.get("WECLAW_DEBUG_STITCH_DIR", "").strip()
-            if debug_dir:
-                save_stitched_debug(stitched_image, debug_dir, chat_name, idx)
+            save_chat_stitch_for_vlm(stitch_session, chat_name, idx, stitched_image)
             try:
                 response_str = self.vision_ai.query(
                     CHAT_PANEL_PROMPT, stitched_image, max_tokens=16384

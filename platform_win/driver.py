@@ -42,7 +42,8 @@ from platform_win.vision import _force_foreground_window, capture_window
 from shared.message_dedup import dedupe_chat_messages
 from shared.ocr_paddle import get_ocr_engine
 from shared.vision_response_json import parse_json_object_from_model_text
-from utils.image_stitcher import save_stitched_debug, stitch_screenshots
+from utils.chat_stitch_debug import new_chat_stitch_session_basename, save_chat_stitch_for_vlm
+from utils.image_stitcher import stitch_screenshots
 
 
 def _clean_header_title(text: str) -> str:
@@ -373,12 +374,13 @@ class WinDriver(PlatformDriver):
         screenshots.reverse()
 
         all_messages = []
-        chunk_size = 5
+        chunk_size = 25
         screenshot_chunks = [screenshots[i:i + chunk_size] for i in range(0, len(screenshots), chunk_size)]
         chunk_results = []
 
         print(f"[*] Processing {len(screenshots)} screenshots in {len(screenshot_chunks)} chunks of size {chunk_size}.")
 
+        stitch_session = new_chat_stitch_session_basename()
         for idx in range(len(screenshot_chunks) - 1, -1, -1):
             chunk = screenshot_chunks[idx]
             print(f"--- Processing chunk {idx+1}/{len(screenshot_chunks)} ---")
@@ -391,9 +393,7 @@ class WinDriver(PlatformDriver):
                 print(f"[ERROR] Failed to stitch chunk {idx+1}.")
                 continue
 
-            debug_dir = os.environ.get("WECLAW_DEBUG_STITCH_DIR", "").strip()
-            if debug_dir:
-                save_stitched_debug(stitched_image, debug_dir, chat_name, idx)
+            save_chat_stitch_for_vlm(stitch_session, chat_name, idx, stitched_image)
 
             try:
                 response_str = self.vision_ai.query(

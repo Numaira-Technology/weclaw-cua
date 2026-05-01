@@ -107,12 +107,15 @@ def _run_mac_stepwise(config: WeclawConfig, backend: StepwiseBackend) -> list[st
 
     if frames:
         frames.reverse()
+        from utils.chat_stitch_debug import new_chat_stitch_session_basename, save_chat_stitch_for_vlm
         from utils.image_stitcher import stitch_screenshots
-        chunk_size = 5
+        chunk_size = 25
         chunks = [frames[i:i + chunk_size] for i in range(0, len(frames), chunk_size)]
+        stitch_session = new_chat_stitch_session_basename()
         for i, chunk in enumerate(chunks):
             stitched = stitch_screenshots(images=chunk, scroll_region=None)
             if stitched:
+                save_chat_stitch_for_vlm(stitch_session, "stepwise", i, stitched)
                 print(f"[stepwise] Capturing stitched chunk {i + 1}/{len(chunks)} for extraction...")
                 backend.query(CHAT_PANEL_PROMPT, stitched, max_tokens=16384)
 

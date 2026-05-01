@@ -6,12 +6,11 @@ composer/footer and duplicate PageUp frames do not tile infinitely.
 On Retina macOS, screenshot pixel size often differs from Quartz logical bounds;
 always derive CropRegion from the actual PIL image size.
 
-Set WECLAW_DEBUG_STITCH_DIR to save stitched PNGs for debugging.
+Stitched images sent to the VLM are saved under debug_outputs/chat_stitch/ (see utils.chat_stitch_debug). Set WECLAW_DEBUG_STITCH_DIR to use a different directory.
 """
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import List
 
@@ -135,21 +134,3 @@ def stitch_screenshots(
 
     print(f"[+] Stitched {len(cropped)} frames -> one strip ({skips} skipped); rows={panorama.shape[0]}.")
     return Image.fromarray(panorama)
-
-
-def save_stitched_debug(
-    image: Image.Image,
-    directory: str,
-    chat_name: str,
-    chunk_index: int,
-) -> None:
-    assert directory
-    assert image is not None
-    assert chat_name
-    assert chunk_index >= 0
-    os.makedirs(directory, exist_ok=True)
-    base = chat_name.replace("/", "_").replace("\\", "_")
-    base = base.strip()[:100] or "chat"
-    path = os.path.join(directory, f"{base}_chunk_{chunk_index + 1}.png")
-    image.save(path)
-    print(f"[DEBUG] Saved stitched image: {path}")
