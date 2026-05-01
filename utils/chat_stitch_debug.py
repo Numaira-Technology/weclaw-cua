@@ -56,3 +56,21 @@ def save_chat_stitch_for_vlm(
     path = d / f"{session_basename}_{safe}_chunk_{chunk_index + 1}.png"
     image.save(path)
     print(f"[DEBUG] Chat stitch (VLM input) saved: {path}")
+
+
+def save_chat_frame_before_stitch(
+    session_basename: str,
+    chat_name: str,
+    frame_index: int,
+    image: Image.Image,
+) -> None:
+    assert session_basename
+    assert chat_name
+    assert frame_index >= 0
+    assert image is not None
+    d = resolve_chat_stitch_debug_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    safe = _sanitize_chat_name(chat_name)
+    path = d / f"{session_basename}_{safe}_frame_{frame_index + 1:03d}.png"
+    image.save(path)
+    print(f"[DEBUG] Chat frame (before stitch) saved: {path}")
