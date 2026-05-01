@@ -7,54 +7,28 @@ Usage:
 
 import base64
 import io
-import json
 import os
 import time
-from typing import Tuple
 
 from openai import APITimeoutError
 from openai import OpenAI
 from PIL import Image
 
-
-def _normalize_provider(raw_provider: str | None) -> str:
-    provider = str(raw_provider or "openrouter").strip().lower()
-    assert provider in ("openrouter", "openai"), "llm_provider must be 'openrouter' or 'openai'"
-    return provider
+from config.weclaw_config import load_config
 
 
-def _provider_api_key(provider: str, config: dict) -> str:
-    if provider == "openai":
-        return (
-            os.environ.get("OPENAI_API_KEY", "").strip()
-            or str(config.get("openai_api_key", "") or "").strip()
-        )
+def _load_ai_config(config_path: str = "config/config.json") -> tuple[str, str, str, str]:
+    config = load_config(config_path)
+    assert config.llm_api_key, (
+        f"Set the API key for llm_provider={config.llm_provider}"
+    )
+    assert config.llm_wire_model, "'llm_model' not found in config.json"
     return (
-        os.environ.get("OPENROUTER_API_KEY", "").strip()
-        or os.environ.get("LITELLM_API_KEY", "").strip()
-        or str(config.get("openrouter_api_key", "") or "").strip()
+        config.llm_provider,
+        config.llm_api_key,
+        config.llm_wire_model,
+        config.llm_base_url,
     )
-
-
-def _provider_base_url(provider: str) -> str | None:
-    if provider == "openrouter":
-        return "https://openrouter.ai/api/v1"
-    return None
-
-
-def _load_ai_config(config_path: str = "config/config.json") -> Tuple[str, str, str, str | None]:
-    model_name = ""
-    with open(config_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
-        provider = _normalize_provider(config.get("llm_provider"))
-        api_key = _provider_api_key(provider, config)
-        model_name = config.get("llm_model", "").strip()
-    assert api_key, (
-        "Set OPENAI_API_KEY/openai_api_key for llm_provider=openai, "
-        "or OPENROUTER_API_KEY/openrouter_api_key for llm_provider=openrouter"
-    )
-    assert model_name, "'llm_model' not found in config.json"
-    return provider, api_key, model_name, _provider_base_url(provider)
 
 
 def _http_timeout_sec() -> float:
@@ -69,6 +43,12 @@ def _http_timeout_sec() -> float:
 def _is_openai_reasoning_model(model_name: str) -> bool:
     normalized = model_name.split("/", 1)[1] if model_name.startswith("openai/") else model_name
     return normalized.startswith(("gpt-5", "o3", "o4"))
+
+
+def _temperature_for_provider(provider: str) -> int:
+    if provider == "kimi":
+        return 1
+    return 0
 
 
 class VisionAI:
@@ -135,7 +115,7 @@ class VisionAI:
                 else:
                     request_args["max_tokens"] = max_tokens
                 if not uses_openai_reasoning_model:
-                    request_args["temperature"] = 0
+                    request_args["temperature"] = _temperature_for_provider(self.provider)
                 response = self.client.chat.completions.create(**request_args)
             except APITimeoutError as e:
                 print(

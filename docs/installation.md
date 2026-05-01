@@ -25,7 +25,7 @@ WeClaw-CUA uses screenshots and a vision LLM to read your WeChat messages. It do
 | Python | >= 3.10 |
 | Operating System | macOS (Apple Silicon or Intel) · Windows 10/11 |
 | WeChat Desktop | Any version |
-| LLM access | OpenClaw gateway (recommended) or OpenRouter API key |
+| LLM access | OpenClaw gateway (recommended) or an API key for the selected provider |
 
 > **Linux is not supported.** The capture pipeline relies on macOS Accessibility APIs (Quartz / CGEvent) and Windows UI Automation; there is no Linux equivalent.
 
@@ -129,12 +129,16 @@ Open `config/config.json` and fill in your settings:
   "llm_provider": "openrouter",
   "openrouter_api_key": "",
   "openai_api_key": "",
+  "deepseek_api_key": "",
+  "kimi_api_key": "",
+  "glm_api_key": "",
+  "qwen_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }
 ```
 
-Set `llm_provider` to `openrouter` or `openai`. Fill the matching key only when using built-in LLM mode. Leave keys empty if you run through OpenClaw gateway or stepwise mode.
+Set `llm_provider` to `openrouter`, `openai`, `deepseek`, `kimi`, `glm`, or `qwen`. Fill the matching key only when using built-in LLM mode. When `llm_provider` is `openrouter`, all models route through OpenRouter. Leave keys empty if you run through OpenClaw gateway or stepwise mode.
 
 | Field | Description |
 |---|---|
@@ -145,10 +149,11 @@ Set `llm_provider` to `openrouter` or `openai`. Fill the matching key only when 
 | `sidebar_max_scrolls` | Maximum downward sidebar scrolls per scan; return-to-top uses this value plus two scrolls |
 | `chat_max_scrolls` | Maximum upward chat-panel scrolls per chat |
 | `report_custom_prompt` | Custom instruction appended to the LLM report prompt |
-| `llm_provider` | Built-in LLM provider: `openrouter` or `openai` |
+| `llm_provider` | Built-in LLM provider: `openrouter`, `openai`, `deepseek`, `kimi`, `glm`, or `qwen`; `moonshot` aliases to `kimi`, and `zhipu`/`z-ai` alias to `glm` |
 | `openrouter_api_key` | Your OpenRouter key (or use `OPENROUTER_API_KEY`) |
 | `openai_api_key` | Your OpenAI key (or use `OPENAI_API_KEY`) |
-| `llm_model` | LLM model ID for report generation; use provider-native names such as `gpt-4o` for OpenAI |
+| `deepseek_api_key`, `kimi_api_key`, `glm_api_key`, `qwen_api_key` | Native provider keys; matching env vars take precedence |
+| `llm_model` | LLM model ID. OpenRouter sends the full slug unchanged; native providers strip a `provider/` prefix before calling the provider. |
 | `output_dir` | Directory where captured JSON files are written |
 
 ### 3. Run
@@ -233,6 +238,10 @@ Use this mode when you do not have a local OpenClaw gateway, or for debugging.
 # macOS
 export OPENROUTER_API_KEY="sk-or-v1-your-key"
 export OPENAI_API_KEY="sk-your-openai-key"
+export DEEPSEEK_API_KEY="sk-your-deepseek-key"
+export KIMI_API_KEY="sk-your-kimi-key"
+export GLM_API_KEY="sk-your-glm-key"
+export QWEN_API_KEY="sk-your-qwen-key"
 weclaw-cua run          # capture + report in one step
 weclaw-cua capture      # capture only
 weclaw-cua report       # generate report from existing captures
@@ -242,12 +251,16 @@ weclaw-cua report       # generate report from existing captures
 # Windows PowerShell
 $env:OPENROUTER_API_KEY = "sk-or-v1-your-key"
 $env:OPENAI_API_KEY = "sk-your-openai-key"
+$env:DEEPSEEK_API_KEY = "sk-your-deepseek-key"
+$env:KIMI_API_KEY = "sk-your-kimi-key"
+$env:GLM_API_KEY = "sk-your-glm-key"
+$env:QWEN_API_KEY = "sk-your-qwen-key"
 weclaw-cua run          # capture + report in one step
 weclaw-cua capture      # capture only
 weclaw-cua report       # generate report from existing captures
 ```
 
-You can also put the key directly in `config/config.json` under `openrouter_api_key` or `openai_api_key`.
+You can also put the key directly in `config/config.json` under the matching `*_api_key` field.
 
 ---
 

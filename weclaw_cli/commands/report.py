@@ -66,7 +66,7 @@ def report(ctx, input_files, prompt_only, fmt):
     if not config.llm_api_key:
         click.echo(
             "No API key configured. Use --prompt-only to get the prompt, "
-            "or set OPENAI_API_KEY/openai_api_key or OPENROUTER_API_KEY/openrouter_api_key.",
+            "or set the API key for the configured llm_provider.",
             err=True,
         )
         ctx.exit(1)
@@ -78,6 +78,8 @@ def report(ctx, input_files, prompt_only, fmt):
         config.llm_model,
         config.llm_api_key,
         config.llm_provider,
+        config.llm_base_url,
+        config.llm_wire_model,
     )
 
     if fmt == "json":

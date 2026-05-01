@@ -12,7 +12,9 @@ Input spec:
     - prompt: the full prompt string to send as user message.
     - model: provider model identifier.
     - api_key: provider API key.
-    - provider: "openrouter" or "openai".
+    - provider: configured LLM provider.
+    - base_url: resolved OpenAI-compatible API base URL.
+    - wire_model: model name sent to the selected provider.
 
 Output spec:
     - Returns the LLM response text as a string.
@@ -24,26 +26,53 @@ import urllib.request
 
 import certifi
 
-
-def _chat_completions_url(provider: str) -> str:
-    assert provider in ("openrouter", "openai"), "provider must be 'openrouter' or 'openai'"
-    if provider == "openai":
-        return "https://api.openai.com/v1/chat/completions"
-    return "https://openrouter.ai/api/v1/chat/completions"
+from shared.llm_routing import normalize_llm_provider
+from shared.llm_routing import resolve_llm_routing
 
 
-def call_llm(prompt: str, model: str, api_key: str, provider: str = "openrouter") -> str:
+def _chat_completions_url(base_url: str) -> str:
+    assert base_url
+    return f"{base_url.rstrip('/')}/chat/completions"
+
+
+def _resolve_call_args(
+    model: str,
+    api_key: str,
+    provider: str,
+    base_url: str,
+    wire_model: str,
+) -> tuple[str, str]:
+    if base_url and wire_model:
+        return base_url, wire_model
+    canonical = normalize_llm_provider(provider)
+    resolved_base_url, _, resolved_model = resolve_llm_routing(
+        canonical,
+        model,
+        {canonical: api_key},
+    )
+    return base_url or resolved_base_url, wire_model or resolved_model
+
+
+def call_llm(
+    prompt: str,
+    model: str,
+    api_key: str,
+    provider: str = "openrouter",
+    base_url: str = "",
+    wire_model: str = "",
+) -> str:
     assert prompt
     assert model
     assert api_key
+    base_url, wire_model = _resolve_call_args(model, api_key, provider, base_url, wire_model)
 
     body = json.dumps({
-        "model": model,
+        "model": wire_model,
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        _chat_completions_url(provider),
+        _chat_completions_url(base_url),
         data=body,
         method="POST",
         headers={

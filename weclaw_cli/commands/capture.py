@@ -1,7 +1,7 @@
 """capture command — vision-based WeChat message capture.
 
 Usage:
-    weclaw capture                     # capture with built-in LLM (OpenRouter)
+    weclaw capture                     # capture with configured built-in LLM
     weclaw capture --no-llm            # stepwise: output images+prompts, no LLM
     weclaw capture --work-dir /tmp/w   # custom work directory for stepwise output
 
@@ -48,7 +48,7 @@ def capture(
 
     \b
     Default mode (--no-llm NOT set):
-      Uses built-in OpenRouter LLM for vision tasks.
+      Uses the configured built-in LLM for vision tasks.
       Produces final message JSON files directly.
 
     \b
