@@ -22,7 +22,6 @@ from typing import Any
 from algo_a.list_target_chats_win import _normalize_chat_label
 from config.weclaw_config import WeclawConfig
 from platform_mac.chat_panel_detector import sidebar_name_matches_config_group
-from platform_mac.mac_ai_driver import MacDriver
 
 _MAX_JUMPS = 200
 _SAME_TITLE_BREAK = 5
@@ -60,6 +59,8 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
     os.makedirs(config.output_dir, exist_ok=True)
     written_paths: list[str] = []
 
+    from platform_mac.mac_ai_driver import MacDriver
+
     driver = MacDriver(vision_backend=vision_backend)
     driver.ensure_permissions()
     window = driver.find_wechat_window(config.wechat_app_name)
@@ -86,7 +87,7 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         if read_cap is None:
             print("[WARN] 未能点击未读侧栏行，跳过本轮。")
             continue
-        title = driver.get_current_chat_name()
+        title = driver.resolve_current_chat_title()
         if not title:
             same_title_run += 1
             if same_title_run >= _SAME_TITLE_BREAK:
@@ -103,7 +104,7 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         same_title_run = 0
         last_title = title
 
-        if not _allowed_chat_title(title, config.groups_to_monitor, driver, window):
+        if not _allowed_chat_title(title, config.groups_to_monitor):
             print(f"[*] 跳过（不在监控范围）: {title!r}")
             continue
 
