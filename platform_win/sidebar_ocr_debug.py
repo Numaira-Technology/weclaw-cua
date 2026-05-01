@@ -4,7 +4,7 @@ Usage:
     prefix = new_sidebar_debug_prefix()
     save_sidebar_crop(prefix, sidebar_image)
     print_ocr_lines("OCR raw lines", raw_lines)
-    write_sidebar_debug(prefix, raw_lines, merged_lines, vlm_threads, row_debug_entries)
+    write_sidebar_debug(prefix, raw_lines, vlm_threads, row_debug_entries)
 
 Input spec:
     - `sidebar_image` is a PIL image of the Windows WeChat sidebar crop.
@@ -14,7 +14,7 @@ Input spec:
 Output spec:
     - Writes `debug_outputs/sidebar_ocr/windows_sidebar_<timestamp>.png`.
     - Writes `debug_outputs/sidebar_ocr/windows_sidebar_<timestamp>.json`.
-    - Prints OCR rows and final row merge diagnostics to the terminal.
+    - Prints OCR rows and final row diagnostics to the terminal.
 """
 
 from __future__ import annotations
@@ -72,13 +72,11 @@ def _row_dict(row: Any) -> dict[str, Any]:
 def write_sidebar_debug(
     prefix: Path,
     raw_lines: list[Any],
-    merged_lines: list[Any],
     vlm_threads: list[dict],
     row_debug_entries: list[dict[str, Any]],
 ) -> None:
     payload = {
         "raw_lines": [_line_dict(line) for line in raw_lines],
-        "merged_lines": [_line_dict(line) for line in merged_lines],
         "vlm_threads": vlm_threads,
         "rows": row_debug_entries,
     }

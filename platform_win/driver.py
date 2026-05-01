@@ -42,7 +42,11 @@ from platform_win.vision import _force_foreground_window, capture_window
 from shared.message_dedup import dedupe_chat_messages
 from shared.ocr_paddle import get_ocr_engine
 from shared.vision_response_json import parse_json_object_from_model_text
-from utils.chat_stitch_debug import new_chat_stitch_session_basename, save_chat_stitch_for_vlm
+from utils.chat_stitch_debug import (
+    new_chat_stitch_session_basename,
+    save_chat_frame_before_stitch,
+    save_chat_stitch_for_vlm,
+)
 from utils.image_stitcher import stitch_screenshots
 
 
@@ -97,16 +101,10 @@ class WinDriver(PlatformDriver):
 
         ocr_engine = get_ocr_engine()
         raw_lines = ocr_engine.recognize(sidebar_image)
-        merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
-
-        hit = ocr_engine.match_target(merged_lines, chat_name)
+        hit = ocr_engine.match_target(raw_lines, chat_name)
 
         if hit is None:
-            print(f"[WARN] OCR could not find '{chat_name}' in sidebar. Trying unmerged lines...")
-            hit = ocr_engine.match_target(raw_lines, chat_name)
-
-        if hit is None:
-            print(f"[ERROR] OCR could not locate '{chat_name}' in sidebar after two passes.")
+            print(f"[ERROR] OCR could not locate '{chat_name}' in sidebar.")
             return None
 
         abs_x = window_left + hit.center_x
@@ -121,10 +119,9 @@ class WinDriver(PlatformDriver):
         window_top: int,
         sidebar_width: int,
         vlm_threads: list[dict] | None = None,
-    ) -> tuple[list[SidebarRow], list[Any], list[Any], list[dict[str, Any]]]:
+    ) -> tuple[list[SidebarRow], list[Any], list[dict[str, Any]]]:
         ocr_engine = get_ocr_engine()
         raw_lines = ocr_engine.recognize(sidebar_image)
-        merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
         img_height = sidebar_image.height
         threads = vlm_threads or []
 
@@ -143,7 +140,7 @@ class WinDriver(PlatformDriver):
 
         rows: list[SidebarRow] = []
         row_debug_entries: list[dict[str, Any]] = []
-        for ocr_line in merged_lines:
+        for ocr_line in raw_lines:
             if is_sidebar_ui_chrome_label(ocr_line.text):
                 continue
             best_thread = _best_vlm_thread(ocr_line.text, ocr_line.center_y)
@@ -172,7 +169,7 @@ class WinDriver(PlatformDriver):
             )
             rows.append(row)
             row_debug_entries.append(make_row_debug_entry(ocr_line, row, best_thread))
-        return rows, raw_lines, merged_lines, row_debug_entries
+        return rows, raw_lines, row_debug_entries
 
     def get_fast_sidebar_rows(self, window: Any) -> list[SidebarRow]:
         """Return visible sidebar rows using RapidOCR only."""
@@ -184,7 +181,7 @@ class WinDriver(PlatformDriver):
         window_left, window_top, _, _ = win32gui.GetWindowRect(hwnd)
         sidebar_width = int(full_screenshot.width * 0.3)
         sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
-        rows, raw_lines, merged_lines, row_debug_entries = self._ocr_sidebar_rows_from_image(
+        rows, raw_lines, row_debug_entries = self._ocr_sidebar_rows_from_image(
             sidebar_image,
             window_left,
             window_top,
@@ -193,8 +190,8 @@ class WinDriver(PlatformDriver):
         debug_prefix = new_sidebar_debug_prefix()
         save_sidebar_crop(debug_prefix, sidebar_image)
         print_ocr_lines("Fast OCR raw lines", raw_lines)
-        print_ocr_lines("Fast OCR merged rows", merged_lines)
-        write_sidebar_debug(debug_prefix, raw_lines, merged_lines, [], row_debug_entries)
+        print_ocr_lines("Fast OCR rows (no merge)", raw_lines)
+        write_sidebar_debug(debug_prefix, raw_lines, [], row_debug_entries)
         print(f"[+] Fast OCR identified {len(rows)} sidebar rows.")
         return rows
 
@@ -215,7 +212,7 @@ class WinDriver(PlatformDriver):
         img_width, img_height = sidebar_image.size
 
         debug_prefix = new_sidebar_debug_prefix()
-        rows, raw_lines, merged_lines, row_debug_entries = self._ocr_sidebar_rows_from_image(
+        rows, raw_lines, row_debug_entries = self._ocr_sidebar_rows_from_image(
             sidebar_image,
             window_left,
             window_top,
@@ -223,14 +220,13 @@ class WinDriver(PlatformDriver):
         )
         save_sidebar_crop(debug_prefix, sidebar_image)
         print_ocr_lines("OCR raw lines", raw_lines)
-        print_ocr_lines("OCR merged rows", merged_lines)
+        print_ocr_lines("OCR rows (no merge)", raw_lines)
 
-        if not merged_lines:
+        if not raw_lines:
             print("[WARN] RapidOCR returned no text; falling back to VLM-only mode.")
-            merged_lines = []
 
         # Build OCR hint list for VLM to reduce hallucination
-        ocr_name_hints = [ln.text for ln in merged_lines]
+        ocr_name_hints = [ln.text for ln in raw_lines]
 
         # --- Step 2: VLM — is_group / unread / y_norm per row ---
         hint_clause = ""
@@ -243,7 +239,7 @@ class WinDriver(PlatformDriver):
 
         augmented_prompt = SIDEBAR_PROMPT + hint_clause
 
-        print(f"[DEBUG] OCR merged lines: {len(merged_lines)} rows, sending as hints to VLM.")
+        print(f"[DEBUG] OCR lines: {len(raw_lines)} rows, sending as hints to VLM.")
 
         print("[*] Querying Vision AI to analyze sidebar...")
         response_str = self.vision_ai.query(augmented_prompt, sidebar_image, max_tokens=1024)
@@ -260,8 +256,8 @@ class WinDriver(PlatformDriver):
         # --- Step 3: Merge OCR rows with VLM semantics by name (primary) then y ---
         # VLM is instructed to use exact OCR names, so name-match is reliable.
         # Fall back to nearest-y only for rows the VLM named slightly differently.
-        if merged_lines:
-            rows, _, _, row_debug_entries = self._ocr_sidebar_rows_from_image(
+        if raw_lines:
+            rows, _, row_debug_entries = self._ocr_sidebar_rows_from_image(
                 sidebar_image,
                 window_left,
                 window_top,
@@ -275,7 +271,7 @@ class WinDriver(PlatformDriver):
             for row in rows:
                 row_debug_entries.append(make_row_debug_entry(None, row, None))
 
-        write_sidebar_debug(debug_prefix, raw_lines, merged_lines, vlm_threads, row_debug_entries)
+        write_sidebar_debug(debug_prefix, raw_lines, vlm_threads, row_debug_entries)
         print(f"[+] AI identified {len(rows)} sidebar rows.")
         return rows
 
@@ -370,6 +366,10 @@ class WinDriver(PlatformDriver):
             print("[WARN] No screenshots were captured.")
             return []
 
+        stitch_session = new_chat_stitch_session_basename()
+        for i, frame in enumerate(screenshots):
+            save_chat_frame_before_stitch(stitch_session, chat_name, i, frame)
+
         print("[*] Reversing screenshot order for processing...")
         screenshots.reverse()
 
@@ -380,7 +380,6 @@ class WinDriver(PlatformDriver):
 
         print(f"[*] Processing {len(screenshots)} screenshots in {len(screenshot_chunks)} chunks of size {chunk_size}.")
 
-        stitch_session = new_chat_stitch_session_basename()
         for idx in range(len(screenshot_chunks) - 1, -1, -1):
             chunk = screenshot_chunks[idx]
             print(f"--- Processing chunk {idx+1}/{len(screenshot_chunks)} ---")
@@ -568,7 +567,6 @@ class WinDriver(PlatformDriver):
 
         ocr_engine = get_ocr_engine()
         raw_lines = ocr_engine.recognize(sidebar_image)
-        merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
 
         response_str = self.vision_ai.query(CURRENT_CHAT_Y_PROMPT, sidebar_image, max_tokens=512)
 
@@ -586,7 +584,7 @@ class WinDriver(PlatformDriver):
             y_px = int(float(y_norm) / 1000.0 * img_height)
 
             # Step 3: Find nearest OCR line
-            lines_to_search = merged_lines or raw_lines
+            lines_to_search = raw_lines
             if not lines_to_search:
                 print("[WARN] OCR returned no lines; cannot map highlighted row.")
                 return None
