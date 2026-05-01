@@ -63,6 +63,50 @@ Unlike tools that decrypt WeChat's local SQLite databases, WeClaw-CUA uses a **p
 
 This means WeClaw-CUA works with **any WeChat version** and requires **no key extraction or database access**.
 
+### Capture-all fast path
+
+When `groups_to_monitor` is `["*"]` or `[]`, `chat_type` is `all`, and
+`sidebar_unread_only` is `false` (or `--chat-type all --unread-mode all` is
+passed), WeClaw uses a faster visual workflow. In this mode it does not need to
+classify sidebar rows as group/private or unread/read. It treats every visible
+chat row equally, clicks through the sidebar from top to bottom, and reserves
+vision-LLM calls for the actual message extraction step.
+
+```mermaid
+flowchart TD
+    startNode["weclaw capture/run"] --> configCheck["Check config: wildcard, chat_type=all, unread=false"]
+    configCheck --> fastPath["Capture-all fast path"]
+    fastPath --> topScroll["Scroll sidebar to top once"]
+    topScroll --> sidebarOcr["OCR sidebar rows and click boxes"]
+    sidebarOcr --> rowLoop["Click each visible row top-to-bottom"]
+    rowLoop --> headerOcr["OCR main chat header for full chat title"]
+    headerOcr --> captureFrames["Activate chat panel, scroll, capture frames"]
+    captureFrames --> stitchFrames["Stitch message screenshots"]
+    stitchFrames --> messageVlm["Vision LLM extracts messages"]
+    messageVlm --> saveJson["Save deduped JSON"]
+    saveJson --> nextRow{"More rows in viewport?"}
+    nextRow -->|Yes| rowLoop
+    nextRow -->|No| scrollDown["Scroll sidebar down"]
+    scrollDown --> repeated{"Repeated viewport or max scrolls?"}
+    repeated -->|No| sidebarOcr
+    repeated -->|Yes| finishNode["Finished"]
+```
+
+The fast path removes these navigation-time vision-LLM calls:
+
+- Sidebar classification VLM: row names and click boxes come from OCR
+  (RapidOCR on Windows, native Vision OCR on macOS).
+- Per-chat name re-location: capture-all sweeps visible rows instead of
+  repeatedly searching from the top for a configured name.
+- Post-click current-chat verification VLM: the clicked chat title is read from
+  the main chat header with OCR.
+- Safe-click VLM and new-message-button VLM: the fast path uses deterministic
+  chat-panel activation and skips the optional new-message-button probe.
+
+The normal sidebar classification path is still used for named chats,
+group-only/private-only wildcard scans, and unread-only scans, because those
+modes need row semantics such as chat type or unread badge state.
+
 ---
 
 ## Installation
@@ -185,7 +229,7 @@ $env:QWEN_API_KEY = "sk-your-qwen-key"                 # Windows PowerShell
 ```bash
 weclaw-cua run --openclaw-gateway   # recommended: via local OpenClaw gateway
 weclaw-cua run                      # built-in LLM mode
-weclaw-cua run --chat-type all --unread-mode all
+weclaw-cua run --chat-type all --unread-mode all  # triggers capture-all fast path
 weclaw-cua capture                  # capture only
 weclaw-cua report                   # report from existing captures
 weclaw-cua sessions                 # list captured chats
