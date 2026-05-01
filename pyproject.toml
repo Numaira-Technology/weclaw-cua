@@ -28,6 +28,7 @@ dependencies = [
     "numpy",
     "opencv-python",
     "Pillow",
+    "screenshot-stitcher",
     "pyautogui",
     "pywin32; sys_platform == 'win32'",
 ]

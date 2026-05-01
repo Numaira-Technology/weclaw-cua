@@ -319,19 +319,37 @@ class WinDriver(PlatformDriver):
         """Scrolls the chat panel via mouse wheel at the message area (same as scroll_messages)."""
         if not self.hwnd:
             raise RuntimeError("WeChat window not found. Call find_wechat_window() first.")
+        raw_clicks = os.environ.get("WECLAW_WIN_CHAT_SCROLL_CLICKS", "").strip()
+        scroll_amount = int(raw_clicks) if raw_clicks else 500
+        if scroll_amount <= 0:
+            scroll_amount = 500
+        raw_bursts = os.environ.get("WECLAW_WIN_CHAT_SCROLL_BURSTS", "").strip()
+        bursts = int(raw_bursts) if raw_bursts else 4
+        if bursts <= 0:
+            bursts = 4
+        raw_settle = os.environ.get("WECLAW_WIN_CHAT_SCROLL_SETTLE_SEC", "").strip()
+        settle_sec = float(raw_settle) if raw_settle else 0.04
+        if settle_sec < 0:
+            settle_sec = 0.04
         if direction == "up":
-            clicks = 500
+            clicks = scroll_amount
         elif direction == "down":
-            clicks = -500
+            clicks = -scroll_amount
         else:
             raise ValueError(f"Invalid scroll direction: '{direction}'. Must be 'up' or 'down'.")
         _force_foreground_window(self.hwnd)
         left, top, right, bottom = win32gui.GetWindowRect(self.hwnd)
         message_panel_x = left + int((right - left) * 0.65)
         message_panel_y = top + int((bottom - top) * 0.5)
-        print(f"[*] Scrolling chat panel {direction} with mouse wheel.")
+        print(
+            f"[*] Scrolling chat panel {direction} with mouse wheel "
+            f"(clicks={abs(clicks)}, bursts={bursts})."
+        )
         pyautogui.moveTo(message_panel_x, message_panel_y, duration=0.1)
-        pyautogui.scroll(clicks)
+        for _ in range(bursts):
+            pyautogui.scroll(clicks)
+            if settle_sec > 0:
+                time.sleep(settle_sec)
         time.sleep(1.0)
 
     def get_chat_messages(

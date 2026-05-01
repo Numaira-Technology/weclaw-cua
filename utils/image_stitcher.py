@@ -85,6 +85,41 @@ def _frames_nearly_identical(
     return changed < 0.003 and float(diff.mean()) < 0.8
 
 
+def _stitch_with_scroll_stitch(
+    cropped: list[np.ndarray],
+    match_top_trim: int,
+    match_bottom_trim: int,
+) -> Image.Image | None:
+    import importlib
+
+    stitcher = importlib.import_module("stitcher")
+    StitchParams = stitcher.StitchParams
+    stitch_images = stitcher.stitch_images
+
+    if len(cropped) == 1:
+        return Image.fromarray(cropped[0])
+
+    bgr_images = [frame[:, :, ::-1].copy() for frame in cropped]
+    panel_w = bgr_images[0].shape[1]
+    x_margin = max(8, min(80, panel_w // 28))
+    template_height = max(100, min(360, (bgr_images[0].shape[0] - match_top_trim - match_bottom_trim) // 4))
+    params = StitchParams(
+        top_crop=max(0, int(match_top_trim)),
+        bottom_crop=max(0, int(match_bottom_trim)),
+        x_margin=x_margin,
+        template_height=template_height,
+        threshold=0.52,
+    )
+    stitched_bgr, infos = stitch_images(bgr_images, params)
+    for idx, info in enumerate(infos, start=1):
+        print(
+            f"[INFO] scroll_stitch pair={idx} conf={info.confidence:.3f} "
+            f"consensus={info.consensus:.3f} offset={info.offset}px "
+            f"overlap={info.overlap_height}px mode={info.mode}"
+        )
+    return Image.fromarray(stitched_bgr[:, :, ::-1])
+
+
 def stitch_screenshots(
     images: List[Image.Image],
     scroll_region: CropRegion | None = None,
@@ -119,6 +154,17 @@ def stitch_screenshots(
         rgb = np.array(image.convert("RGB"))
         cropped.append(_apply_crop(rgb, scroll_region))
     _dump_cropped_frames(cropped)
+
+    backend = os.environ.get("WECLAW_STITCH_BACKEND", "").strip().lower()
+    if backend in ("", "scroll_stitch"):
+        result = _stitch_with_scroll_stitch(
+            cropped=cropped,
+            match_top_trim=match_top_trim,
+            match_bottom_trim=match_bottom_trim,
+        )
+        if result is not None:
+            print("[+] Stitched with scroll_stitch backend.")
+            return result
 
     panorama = cropped[0]
     skips = 0
