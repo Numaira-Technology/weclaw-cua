@@ -12,12 +12,14 @@ Stitched images sent to the VLM are saved under debug_outputs/chat_stitch/ (see 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
+from pathlib import Path
 from typing import List
 
 import numpy as np
 from PIL import Image
 
-from utils.stitch_overlap import body_lo, estimate_vertical_overlap_rows, strip_body_for_match
+from utils.stitch_overlap import body_hi, body_lo, estimate_vertical_overlap_match, strip_body_for_match
 
 
 @dataclass(frozen=True)
@@ -30,12 +32,14 @@ class CropRegion:
 
 def scroll_region_from_image_size(img_w: int, img_h: int) -> CropRegion:
     assert img_w > 80 and img_h > 80
-    y0 = max(1, min(50, img_h // 16))
+    y0 = 0
     y1 = max(y0 + 200, img_h - max(90, img_h // 8))
+    x0 = int(img_w * 0.31)
+    x1 = int(img_w * 0.95)
     return CropRegion(
-        x=int(img_w * 0.30),
+        x=x0,
         y=y0,
-        w=min(int(img_w * 0.69), img_w - int(img_w * 0.30)),
+        w=max(80, min(x1, img_w) - x0),
         h=y1 - y0,
     )
 
@@ -48,15 +52,49 @@ def _apply_crop(rgb: np.ndarray, region: CropRegion) -> np.ndarray:
     return np.asarray(rgb[region.y:y2, region.x:x2])
 
 
+def _dump_cropped_frames(cropped: list[np.ndarray]) -> None:
+    out_dir = os.environ.get("WECLAW_DEBUG_STITCH_FRAMES_DIR", "").strip()
+    if not out_dir:
+        return
+    path = Path(out_dir)
+    path.mkdir(parents=True, exist_ok=True)
+    for idx, frame in enumerate(cropped):
+        Image.fromarray(frame).save(path / f"frame_{idx:03d}.png")
+    print(f"[DEBUG] Chat stitch cropped frames saved: {path}")
+
+
+def _frames_nearly_identical(
+    prev_panel: np.ndarray,
+    next_panel: np.ndarray,
+    top_trim: int,
+    bottom_trim: int,
+) -> bool:
+    if prev_panel.shape != next_panel.shape:
+        return False
+    prev_body = strip_body_for_match(prev_panel, top_trim, bottom_trim)
+    next_body = strip_body_for_match(next_panel, top_trim, bottom_trim)
+    height = min(prev_body.shape[0], next_body.shape[0])
+    width = min(prev_body.shape[1], next_body.shape[1])
+    if height < 40 or width < 40:
+        return False
+    diff = np.abs(
+        prev_body[:height, :width].astype(np.int16)
+        - next_body[:height, :width].astype(np.int16)
+    )
+    changed = float(np.count_nonzero(diff > 6)) / float(diff.size)
+    return changed < 0.003 and float(diff.mean()) < 0.8
+
+
 def stitch_screenshots(
     images: List[Image.Image],
     scroll_region: CropRegion | None = None,
-    match_top_trim: int = 48,
+    match_top_trim: int = 88,
     match_bottom_trim: int = 130,
     duplicate_mse: float = 80.0,
     bad_match_mse: float = 2200.0,
 ) -> Image.Image | None:
     """Crop each image to the chat panel, then merge by removing inter-frame gap."""
+    _ = duplicate_mse, bad_match_mse
     if not images:
         print("[WARN] No images provided to stitch.")
         return None
@@ -80,56 +118,57 @@ def stitch_screenshots(
     for image in images:
         rgb = np.array(image.convert("RGB"))
         cropped.append(_apply_crop(rgb, scroll_region))
+    _dump_cropped_frames(cropped)
 
     panorama = cropped[0]
     skips = 0
+    prev_overlap: int | None = None
 
     for i in range(1, len(cropped)):
         prev_p = cropped[i - 1]
         next_p = cropped[i]
 
-        if prev_p.shape == next_p.shape:
-            mean_diff = float(
-                np.mean(
-                    np.abs(
-                        prev_p.astype(np.float32) - next_p.astype(np.float32),
-                    )
-                )
-            )
-        else:
-            mean_diff = 9999.0
-        if mean_diff < 1.2:
+        if _frames_nearly_identical(prev_p, next_p, match_top_trim, match_bottom_trim):
             print(f"[INFO] stitch: frame {i + 1} nearly identical to {i}; skip.")
             skips += 1
             continue
 
-        ov_b, mse = estimate_vertical_overlap_rows(
+        match = estimate_vertical_overlap_match(
             prev_p,
             next_p,
             match_top_trim,
             match_bottom_trim,
+            overlap_hint=prev_overlap,
         )
         Hn = next_p.shape[0]
-        sa = strip_body_for_match(prev_p, match_top_trim, match_bottom_trim).shape[0]
-        sb = strip_body_for_match(next_p, match_top_trim, match_bottom_trim).shape[0]
-
-        if mse <= duplicate_mse and ov_b >= min(sa, sb) * 0.82:
-            print(f"[INFO] stitch: frame {i + 1} full duplicate (mse={mse:.1f}); skip.")
-            skips += 1
-            continue
-
-        if mse > bad_match_mse or ov_b <= 0:
-            cut = max(int(Hn * 0.12), 80, min(Hn // 4, 200))
-            print(f"[WARN] stitch: weak overlap (mse={mse:.1f}); append from row {cut}.")
-            append_part = next_p[cut:]
+        body_start = body_lo(Hn, match_top_trim)
+        body_end = body_hi(Hn, match_top_trim, match_bottom_trim)
+        body_h = body_end - body_start
+        if match.overlap <= 0:
+            overlap = 0
+            reliable = False
+        elif match.reliable:
+            overlap = match.overlap
+            reliable = True
+        elif prev_overlap is not None:
+            overlap = min(prev_overlap, body_h - 1)
+            reliable = False
         else:
-            cut = body_lo(Hn, match_top_trim) + ov_b
-            cut = max(0, min(Hn - 8, cut))
-            append_part = next_p[cut:]
-            print(f"[+] stitch: overlap ~{cut}px (body ov={ov_b}, mse={mse:.1f}).")
+            overlap = min(match.overlap, max(0, int(body_h * 0.45)))
+            reliable = False
 
+        cut = body_start + overlap + (Hn - body_end)
+        cut = max(body_start, min(Hn - 1, cut))
+        append_part = next_p[cut:]
+        prev_overlap = overlap if overlap > 0 else prev_overlap
+        level = "+" if reliable else "WARN"
+        print(
+            f"[{level}] stitch: cut={cut}px, body_ov={overlap}, "
+            f"score={match.score:.3f}, seam={match.seam_corr:.3f}, "
+            f"cost={match.refine_cost:.1f}, source={match.source}."
+        )
         if append_part.shape[0] < 12:
-            continue
+            print(f"[INFO] stitch: frame {i + 1} contributes {append_part.shape[0]} rows.")
         panorama = np.vstack([panorama, append_part])
 
     print(f"[+] Stitched {len(cropped)} frames -> one strip ({skips} skipped); rows={panorama.shape[0]}.")
