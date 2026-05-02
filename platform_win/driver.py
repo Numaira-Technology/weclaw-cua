@@ -28,6 +28,7 @@ from shared.vision_prompts import (
     CHAT_PANEL_SAFE_CLICK_PROMPT,
     CURRENT_CHAT_Y_PROMPT,
     NEW_MESSAGES_BUTTON_PROMPT,
+    SIDEBAR_CHAT_NAMES_PROMPT,
     SIDEBAR_PROMPT,
 )
 from shared.vision_image_codec import log_vision_timing
@@ -48,7 +49,7 @@ from utils.chat_stitch_debug import (
     save_chat_frame_before_stitch,
     save_chat_stitch_for_vlm,
 )
-from utils.image_stitcher import stitch_screenshots
+from utils.image_stitcher import CropRegion, stitch_screenshots
 
 
 def _clean_header_title(text: str) -> str:
@@ -195,6 +196,79 @@ class WinDriver(PlatformDriver):
         write_sidebar_debug(debug_prefix, raw_lines, [], row_debug_entries)
         print(f"[+] Fast OCR identified {len(rows)} sidebar rows.")
         return rows
+
+    def capture_sidebar_chat_names(
+        self,
+        window: Any,
+        max_scrolls: int,
+    ) -> list[str]:
+        """Capture a stitched sidebar strip and return chat names from first-line text."""
+        assert max_scrolls >= 0
+        hwnd = window
+        screenshots = []
+        for idx in range(max_scrolls + 1):
+            full_screenshot = capture_window(hwnd)
+            if full_screenshot:
+                sidebar_width = int(full_screenshot.width * 0.3)
+                screenshots.append(
+                    full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
+                )
+            if idx >= max_scrolls:
+                break
+            self.scroll_sidebar(window, "down")
+            time.sleep(0.4)
+
+        if not screenshots:
+            print("[WARN] No sidebar screenshots were captured for chat-name whitelist.")
+            return []
+
+        first_width, first_height = screenshots[0].size
+        stitch_started = time.perf_counter()
+        stitched_image = stitch_screenshots(
+            images=screenshots,
+            scroll_region=CropRegion(0, 0, first_width, first_height),
+            match_top_trim=0,
+            match_bottom_trim=0,
+        )
+        if stitched_image is None:
+            print("[WARN] Failed to stitch sidebar screenshots for chat-name whitelist.")
+            return []
+
+        log_vision_timing(
+            "win_sidebar_names",
+            "stitched",
+            input_frames=len(screenshots),
+            width=stitched_image.width,
+            height=stitched_image.height,
+            stitch_ms=round((time.perf_counter() - stitch_started) * 1000, 1),
+        )
+
+        debug_prefix = new_sidebar_debug_prefix()
+        save_sidebar_crop(debug_prefix, stitched_image)
+        response_str = self.vision_ai.query(
+            SIDEBAR_CHAT_NAMES_PROMPT,
+            stitched_image,
+            max_tokens=4096,
+        )
+        if not response_str:
+            print("[WARN] No VLM response for stitched sidebar chat-name whitelist.")
+            return []
+
+        data = parse_json_object_from_model_text(response_str)
+        raw_names = data.get("names", [])
+        if not isinstance(raw_names, list):
+            raise TypeError("sidebar chat-name response must contain a names list")
+
+        names: list[str] = []
+        seen: set[str] = set()
+        for raw_name in raw_names:
+            name = str(raw_name or "").strip()
+            if not name or is_sidebar_ui_chrome_label(name) or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+        print(f"[+] Stitched sidebar whitelist identified {len(names)} chat name(s).")
+        return names
 
     def get_sidebar_rows(self, window: Any) -> list[SidebarRow]:
         """Gets all visible rows in the sidebar using RapidOCR (names) + VLM (semantics)."""
