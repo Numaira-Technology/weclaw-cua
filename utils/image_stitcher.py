@@ -92,7 +92,14 @@ def _stitch_with_scroll_stitch(
 ) -> Image.Image | None:
     import importlib
 
-    stitcher = importlib.import_module("stitcher")
+    try:
+        stitcher = importlib.import_module("stitcher")
+    except ImportError:
+        print(
+            "[WARN] screenshot-stitcher is not installed; "
+            "using overlap stitch. pip install screenshot-stitcher"
+        )
+        return None
     StitchParams = stitcher.StitchParams
     stitch_images = stitcher.stitch_images
 
