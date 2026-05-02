@@ -1,7 +1,7 @@
 """StepwiseBackend: writes image+prompt to a work directory for an external agent.
 
 Instead of calling an LLM, each query() call:
-  1. Saves the image as {step_id}.png
+  1. Saves the image as {step_id}.<configured extension>
   2. Saves the prompt as {step_id}.prompt.txt
   3. Records the pending task in a manifest.json
 
@@ -14,8 +14,20 @@ The finalize command then reads those responses and continues the pipeline.
 import json
 import os
 import threading
+import time
 
 from PIL import Image
+
+from shared.vision_image_codec import encode_vision_image
+from shared.vision_image_codec import log_vision_timing
+
+
+_EXTENSIONS = {
+    "png": "png",
+    "webp_lossless": "webp",
+    "webp": "webp",
+    "jpeg": "jpg",
+}
 
 
 class StepwiseBackend:
@@ -43,8 +55,26 @@ class StepwiseBackend:
         """Save image+prompt to work_dir. Returns None (agent must provide response later)."""
         step_id = self._next_step_id()
 
-        img_path = os.path.join(self.work_dir, f"{step_id}.png")
-        image.save(img_path, format="PNG")
+        started = time.perf_counter()
+        payload = encode_vision_image(image)
+        ext = _EXTENSIONS[payload.format_name]
+        img_path = os.path.join(self.work_dir, f"{step_id}.{ext}")
+        with open(img_path, "wb") as f:
+            f.write(payload.raw_bytes)
+        log_vision_timing(
+            "stepwise",
+            "encoded",
+            step_id=step_id,
+            format=payload.format_name,
+            mime=payload.mime_type,
+            width=payload.width,
+            height=payload.height,
+            bytes=payload.byte_count,
+            b64_chars=payload.base64_char_count,
+            encode_ms=round(payload.encode_seconds * 1000, 1),
+            total_ms=round((time.perf_counter() - started) * 1000, 1),
+            max_tokens=max_tokens,
+        )
 
         prompt_path = os.path.join(self.work_dir, f"{step_id}.prompt.txt")
         with open(prompt_path, "w", encoding="utf-8") as f:
@@ -55,6 +85,9 @@ class StepwiseBackend:
         task = {
             "step_id": step_id,
             "image": os.path.basename(img_path),
+            "image_mime_type": payload.mime_type,
+            "image_format": payload.format_name,
+            "image_bytes": payload.byte_count,
             "prompt_file": os.path.basename(prompt_path),
             "response_file": os.path.basename(response_path),
             "max_tokens": max_tokens,

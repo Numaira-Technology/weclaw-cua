@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 import pyautogui
 
 from shared.datatypes import ChatMessage
+from shared.vision_image_codec import log_vision_timing
 from shared.message_time_window import (
     RECENT_WINDOW_HOURS,
     chunk_reaches_recent_cutoff,
@@ -96,10 +97,23 @@ class MacDriverMessages:
             print(f"--- Processing chunk {idx + 1}/{len(screenshot_chunks)} ---")
             if not chunk:
                 continue
+            stitch_started = time.perf_counter()
             stitched_image = stitch_screenshots(images=chunk, scroll_region=None)
+            stitch_seconds = time.perf_counter() - stitch_started
             if not stitched_image:
                 print(f"[ERROR] Failed to stitch chunk {idx + 1}.")
                 continue
+            log_vision_timing(
+                "mac_driver_messages",
+                "stitch",
+                chat=chat_name,
+                chunk_index=idx + 1,
+                chunk_total=len(screenshot_chunks),
+                frame_count=len(chunk),
+                width=stitched_image.width,
+                height=stitched_image.height,
+                stitch_ms=round(stitch_seconds * 1000, 1),
+            )
             save_chat_stitch_for_vlm(stitch_session, chat_name, idx, stitched_image)
             try:
                 response_str = self.vision_ai.query(

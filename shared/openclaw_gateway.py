@@ -18,11 +18,15 @@ Output spec:
 
 from __future__ import annotations
 
-import base64
-import io
 import json
 import os
+import time
 from dataclasses import dataclass
+
+from PIL import Image
+
+from shared.vision_image_codec import encode_vision_image
+from shared.vision_image_codec import log_vision_timing
 
 
 @dataclass
@@ -78,11 +82,21 @@ class OpenClawGatewayConfig:
         )
 
 
-def _b64_data_url_png(path: str) -> str:
-    with open(path, "rb") as f:
-        raw = f.read()
-    b64 = base64.standard_b64encode(raw).decode("ascii")
-    return f"data:image/png;base64,{b64}"
+def _image_path_data_url(path: str, label: str) -> str:
+    with Image.open(path) as image:
+        payload = encode_vision_image(image)
+    log_vision_timing(
+        label,
+        "encoded",
+        format=payload.format_name,
+        mime=payload.mime_type,
+        width=payload.width,
+        height=payload.height,
+        bytes=payload.byte_count,
+        b64_chars=payload.base64_char_count,
+        encode_ms=round(payload.encode_seconds * 1000, 1),
+    )
+    return payload.data_url
 
 
 def _extra_headers(config: OpenClawGatewayConfig) -> dict[str, str] | None:
@@ -118,6 +132,31 @@ def gateway_chat_vision(
     from openai import OpenAI
 
     client = OpenAI(base_url=config.base_url, api_key=config.api_key)
+    total_started = time.perf_counter()
+    with Image.open(image_path) as image:
+        payload = encode_vision_image(image)
+    log_vision_timing(
+        "openclaw_gateway",
+        "encoded",
+        format=payload.format_name,
+        mime=payload.mime_type,
+        width=payload.width,
+        height=payload.height,
+        bytes=payload.byte_count,
+        b64_chars=payload.base64_char_count,
+        encode_ms=round(payload.encode_seconds * 1000, 1),
+        max_tokens=max_tokens,
+    )
+    log_vision_timing(
+        "openclaw_gateway",
+        "request_start",
+        model=config.model,
+        format=payload.format_name,
+        bytes=payload.byte_count,
+        b64_chars=payload.base64_char_count,
+        max_tokens=max_tokens,
+    )
+    request_started = time.perf_counter()
     resp = client.chat.completions.create(
         model=config.model,
         messages=[
@@ -125,18 +164,30 @@ def gateway_chat_vision(
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": _b64_data_url_png(image_path)}},
+                    {"type": "image_url", "image_url": {"url": payload.data_url}},
                 ],
             }
         ],
         max_tokens=max_tokens,
         extra_headers=_extra_headers(config),
     )
+    request_seconds = time.perf_counter() - request_started
     assert resp.choices, "gateway returned no choices"
     msg = resp.choices[0].message
     assert msg is not None and msg.content is not None
     text = str(msg.content).strip()
     assert text, "gateway returned empty text"
+    log_vision_timing(
+        "openclaw_gateway",
+        "completed",
+        model=config.model,
+        format=payload.format_name,
+        bytes=payload.byte_count,
+        request_ms=round(request_seconds * 1000, 1),
+        total_ms=round((time.perf_counter() - total_started) * 1000, 1),
+        response_chars=len(text),
+        max_tokens=max_tokens,
+    )
     return text
 
 
@@ -149,13 +200,34 @@ class OpenClawVisionBackend:
     def query(self, prompt: str, image, max_tokens: int = 2048) -> str | None:
         assert prompt
         assert max_tokens > 0
-        buffered = io.BytesIO()
-        image.save(buffered, format="PNG")
-        raw = buffered.getvalue()
-        b64 = base64.standard_b64encode(raw).decode("ascii")
+        total_started = time.perf_counter()
+        payload = encode_vision_image(image)
+        log_vision_timing(
+            "openclaw_backend",
+            "encoded",
+            model=self.config.model,
+            format=payload.format_name,
+            mime=payload.mime_type,
+            width=payload.width,
+            height=payload.height,
+            bytes=payload.byte_count,
+            b64_chars=payload.base64_char_count,
+            encode_ms=round(payload.encode_seconds * 1000, 1),
+            max_tokens=max_tokens,
+        )
         from openai import OpenAI
 
+        log_vision_timing(
+            "openclaw_backend",
+            "request_start",
+            model=self.config.model,
+            format=payload.format_name,
+            bytes=payload.byte_count,
+            b64_chars=payload.base64_char_count,
+            max_tokens=max_tokens,
+        )
         client = OpenAI(base_url=self.config.base_url, api_key=self.config.api_key)
+        request_started = time.perf_counter()
         resp = client.chat.completions.create(
             model=self.config.model,
             messages=[
@@ -163,18 +235,29 @@ class OpenClawVisionBackend:
                     "role": "user",
                     "content": [
                         {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                        {"type": "image_url", "image_url": {"url": payload.data_url}},
                     ],
                 }
             ],
             max_tokens=max_tokens,
             extra_headers=_extra_headers(self.config),
         )
+        request_seconds = time.perf_counter() - request_started
         assert resp.choices, "gateway returned no choices"
         msg = resp.choices[0].message
         assert msg is not None and msg.content is not None
         text = str(msg.content).strip()
         assert text, "gateway returned empty text"
+        log_vision_timing(
+            "openclaw_backend",
+            "completed",
+            model=self.config.model,
+            format=payload.format_name,
+            bytes=payload.byte_count,
+            request_ms=round(request_seconds * 1000, 1),
+            total_ms=round((time.perf_counter() - total_started) * 1000, 1),
+            response_chars=len(text),
+        )
         return text
 
 

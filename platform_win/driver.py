@@ -30,6 +30,7 @@ from shared.vision_prompts import (
     NEW_MESSAGES_BUTTON_PROMPT,
     SIDEBAR_PROMPT,
 )
+from shared.vision_image_codec import log_vision_timing
 from platform_win.find_wechat_window import find_wechat_window as find_window
 from platform_win.sidebar_ocr_debug import (
     make_row_debug_entry,
@@ -404,11 +405,23 @@ class WinDriver(PlatformDriver):
             if not chunk:
                 continue
 
+            stitch_started = time.perf_counter()
             stitched_image = stitch_screenshots(images=chunk, scroll_region=None)
 
             if not stitched_image:
                 print(f"[ERROR] Failed to stitch chunk {idx+1}.")
                 continue
+            log_vision_timing(
+                "win_chat_chunk",
+                "stitched",
+                chat=chat_name,
+                chunk_index=idx + 1,
+                chunk_total=len(screenshot_chunks),
+                input_frames=len(chunk),
+                width=stitched_image.width,
+                height=stitched_image.height,
+                stitch_ms=round((time.perf_counter() - stitch_started) * 1000, 1),
+            )
 
             save_chat_stitch_for_vlm(stitch_session, chat_name, idx, stitched_image)
 
