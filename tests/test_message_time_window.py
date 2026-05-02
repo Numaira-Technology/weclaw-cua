@@ -7,7 +7,7 @@ Input spec:
     - Uses synthetic ChatMessage rows with representative time strings.
 
 Output spec:
-    - Verifies parsing, filtering, and cutoff detection for the 24-hour window.
+    - Verifies parsing; filtering/cutoff tests use explicit hours=24 (default RECENT_WINDOW_HOURS is 0 / disabled).
 """
 
 from datetime import datetime
@@ -44,7 +44,7 @@ class TestMessageTimeWindow(unittest.TestCase):
             ChatMessage(sender="A", time="昨天 13:30", content="new", type="text"),
             ChatMessage(sender="A", time=None, content="follow", type="text"),
         ]
-        out = filter_messages_to_recent_window(messages, now=now)
+        out = filter_messages_to_recent_window(messages, hours=24, now=now)
         self.assertEqual([m.content for m in out], ["new", "follow"])
 
     def test_chunk_reaches_recent_cutoff(self) -> None:
@@ -53,7 +53,7 @@ class TestMessageTimeWindow(unittest.TestCase):
             ChatMessage(sender="A", time="昨天 11:30", content="old", type="text"),
             ChatMessage(sender="A", time="昨天 13:30", content="new", type="text"),
         ]
-        self.assertTrue(chunk_reaches_recent_cutoff(messages, now=now))
+        self.assertTrue(chunk_reaches_recent_cutoff(messages, hours=24, now=now))
 
 
 if __name__ == "__main__":

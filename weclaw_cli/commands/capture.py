@@ -10,12 +10,14 @@ but does NOT call any LLM. Instead it writes images and prompts to a work direct
 The calling agent processes them with its own LLM, then calls `weclaw finalize`.
 """
 
+from importlib import import_module
+
 import click
 
 from ..output.formatter import output
 
 
-@click.command()
+@click.group(invoke_without_command=True)
 @click.option("--no-llm", is_flag=True, default=False,
               help="Stepwise mode: output images+prompts, no LLM calls")
 @click.option("--work-dir", default=None,
@@ -59,6 +61,9 @@ def capture(
       4. Agent processes tasks with its own LLM
       5. Agent calls `weclaw finalize --work-dir <dir>` to produce JSON
     """
+    if ctx.invoked_subcommand is not None:
+        return
+
     import os
     import sys
 
@@ -141,3 +146,8 @@ def capture(
             output("\n".join(lines), "text")
         else:
             output("No matching chats found.", "text")
+
+
+capture.add_command(
+    import_module("weclaw_cli.commands.capture_test_img").capture_test_img
+)

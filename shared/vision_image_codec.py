@@ -5,9 +5,10 @@ Usage:
     payload = encode_vision_image(image)
 
 Input spec:
-    - WECLAW_VISION_IMAGE_FORMAT: png, webp_lossless, webp, or jpeg.
+    - WECLAW_VISION_IMAGE_FORMAT: png, webp_lossless, webp, or jpeg (default webp_lossless when unset).
     - WECLAW_VISION_WEBP_QUALITY: integer 1..100 for lossy webp, default 95.
     - WECLAW_VISION_JPEG_QUALITY: integer 1..100 for jpeg, default 92.
+    - encode_vision_image(..., webp_quality=95, jpeg_quality=92) overrides env per call.
     - WECLAW_VISION_TIMING_LOG: 1/true/yes/on enables timing logs, enabled by default.
 
 Output spec:
@@ -27,8 +28,12 @@ from PIL import Image
 
 _FORMAT_ALIASES = {
     "png": "png",
+    "webm-lossless": "webp_lossless",
+    "webm_lossless": "webp_lossless",
     "webp-lossless": "webp_lossless",
     "webp_lossless": "webp_lossless",
+    "webm-lossy": "webp",
+    "webm_lossy": "webp",
     "webp-lossy": "webp",
     "webp_lossy": "webp",
     "webp": "webp",
@@ -61,7 +66,7 @@ def vision_timing_enabled() -> bool:
 
 
 def selected_vision_image_format() -> str:
-    raw = os.environ.get("WECLAW_VISION_IMAGE_FORMAT", "png").strip().lower()
+    raw = os.environ.get("WECLAW_VISION_IMAGE_FORMAT", "webp_lossless").strip().lower()
     value = _FORMAT_ALIASES.get(raw)
     assert value, "WECLAW_VISION_IMAGE_FORMAT must be png, webp_lossless, webp, or jpeg"
     return value
@@ -82,7 +87,29 @@ def _image_for_format(image: Image.Image, format_name: str) -> Image.Image:
     return image.convert("RGB")
 
 
-def _save_image(image: Image.Image, format_name: str, buffer: io.BytesIO) -> str:
+def _quality_value(
+    override: int | None,
+    env_name: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    if override is None:
+        return _env_int(env_name, default, minimum, maximum)
+    assert minimum <= override <= maximum, (
+        f"{env_name} override must be between {minimum} and {maximum}"
+    )
+    return override
+
+
+def _save_image(
+    image: Image.Image,
+    format_name: str,
+    buffer: io.BytesIO,
+    *,
+    webp_quality: int | None = None,
+    jpeg_quality: int | None = None,
+) -> str:
     if format_name == "png":
         image.save(buffer, format="PNG")
         return "image/png"
@@ -90,23 +117,40 @@ def _save_image(image: Image.Image, format_name: str, buffer: io.BytesIO) -> str
         image.save(buffer, format="WEBP", lossless=True, quality=100, method=6)
         return "image/webp"
     if format_name == "webp":
-        quality = _env_int("WECLAW_VISION_WEBP_QUALITY", 95, 1, 100)
+        quality = _quality_value(webp_quality, "WECLAW_VISION_WEBP_QUALITY", 95, 1, 100)
         image.save(buffer, format="WEBP", quality=quality, method=6)
         return "image/webp"
     if format_name == "jpeg":
-        quality = _env_int("WECLAW_VISION_JPEG_QUALITY", 92, 1, 100)
+        quality = _quality_value(jpeg_quality, "WECLAW_VISION_JPEG_QUALITY", 92, 1, 100)
         image.save(buffer, format="JPEG", quality=quality, subsampling=0, optimize=True)
         return "image/jpeg"
     raise AssertionError(f"unsupported VLM image format: {format_name}")
 
 
-def encode_vision_image(image: Image.Image, format_name: str | None = None) -> VisionImagePayload:
+def encode_vision_image(
+    image: Image.Image,
+    format_name: str | None = None,
+    *,
+    webp_quality: int | None = None,
+    jpeg_quality: int | None = None,
+) -> VisionImagePayload:
     assert isinstance(image, Image.Image)
-    selected = format_name or selected_vision_image_format()
+    selected = (
+        _FORMAT_ALIASES.get(format_name.strip().lower(), "")
+        if format_name
+        else selected_vision_image_format()
+    )
+    assert selected, "format_name must be png, webp_lossless, webp, or jpeg"
     prepared = _image_for_format(image, selected)
     started = time.perf_counter()
     buffer = io.BytesIO()
-    mime_type = _save_image(prepared, selected, buffer)
+    mime_type = _save_image(
+        prepared,
+        selected,
+        buffer,
+        webp_quality=webp_quality,
+        jpeg_quality=jpeg_quality,
+    )
     raw = buffer.getvalue()
     encoded = base64.b64encode(raw).decode("ascii")
     elapsed = time.perf_counter() - started
