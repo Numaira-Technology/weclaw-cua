@@ -161,7 +161,7 @@ def screenshot_scroll_capture(ctx, scrolls, output_dir, fmt):
     from utils.image_stitcher import stitch_screenshots
     from shared.vision_prompts import CHAT_PANEL_PROMPT
 
-    chunk_size = 5
+    chunk_size = 25
     chunks = [frames[i:i + chunk_size] for i in range(0, len(frames), chunk_size)]
     output_files = []
 

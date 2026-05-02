@@ -9,6 +9,10 @@
   "llm_provider": "openrouter",
   "openrouter_api_key": "",
   "openai_api_key": "",
+  "deepseek_api_key": "",
+  "kimi_api_key": "",
+  "glm_api_key": "",
+  "qwen_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }

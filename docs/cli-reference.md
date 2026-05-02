@@ -31,6 +31,16 @@ weclaw-cua run --sidebar-max-scrolls 30 --chat-max-scrolls 20
 
  Sidebar return-to-top scrolling is derived from `sidebar_max_scrolls`: after a scan that can move down `N` times, WeClaw scrolls up `N + 2` times before starting the next locate pass.
 
+## Built-in LLM provider
+
+Built-in direct mode reads these fields from `config/config.json`:
+
+- `llm_provider`: `openrouter`, `openai`, `deepseek`, `kimi`, `glm`, or `qwen`.
+- `llm_model`: model identifier. OpenRouter sends the full slug unchanged; native providers strip a `provider/` prefix before calling the provider.
+- `openrouter_api_key`, `openai_api_key`, `deepseek_api_key`, `kimi_api_key`, `glm_api_key`, `qwen_api_key`: API key for the selected provider.
+
+Provider aliases are accepted: `moonshot` routes as `kimi`, while `zhipu` and `z-ai` route as `glm`.
+
 ## Data files
 
 Captured message files are JSON arrays. Each item has this shape:

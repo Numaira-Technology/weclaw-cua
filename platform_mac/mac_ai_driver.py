@@ -120,6 +120,65 @@ class MacDriver(MacDriverMessages, PlatformDriver):
         print(f"[+] VLM identified {len(sidebar_rows)} sidebar rows.")
         return sidebar_rows
 
+    def get_fast_sidebar_rows(self, window: Any) -> list[SidebarRow]:
+        """Return visible sidebar rows using native macOS Vision OCR only."""
+        del window
+        full_screenshot, wb = capture_window_pid_and_bounds(self.pid)
+        from platform_mac.sidebar_detector import Rect, scan_sidebar_once
+
+        window_rect = Rect(wb.x, wb.y, wb.width, wb.height)
+        chats = scan_sidebar_once(
+            full_screenshot,
+            only_unread=False,
+            require_name=True,
+            window_bounds=window_rect,
+        )
+        rows: list[SidebarRow] = []
+        for chat in chats:
+            row_rect = chat.row_rect
+            if row_rect is None:
+                continue
+            badge = None
+            if chat.unread_count is not None:
+                badge = "1" if chat.unread_count < 0 else str(chat.unread_count)
+            x1, y1 = window_image_px_to_screen_pt(
+                row_rect.x,
+                row_rect.y,
+                full_screenshot.width,
+                full_screenshot.height,
+                wb,
+            )
+            x2, y2 = window_image_px_to_screen_pt(
+                row_rect.x2,
+                row_rect.y2,
+                full_screenshot.width,
+                full_screenshot.height,
+                wb,
+            )
+            rows.append(
+                SidebarRow(
+                    name=chat.name,
+                    last_message=None,
+                    badge_text=badge,
+                    bbox=(x1, y1, x2, y2),
+                    is_group=True,
+                )
+            )
+        print(f"[+] Fast native OCR identified {len(rows)} sidebar rows.")
+        return rows
+
+    def resolve_current_chat_title(self, fallback: str = "") -> str:
+        full_screenshot = capture_window_pid(self.pid)
+        if not full_screenshot:
+            return fallback
+        from platform_mac.chat_panel_detector import extract_chat_header_title
+
+        title = extract_chat_header_title(full_screenshot, match_hint=fallback or None)
+        if title:
+            print(f"[+] Header OCR resolved chat title: {title!r}")
+            return title
+        return fallback
+
     def scroll_sidebar(self, window: Any, direction: str) -> None:
         del window
         assert self.pid

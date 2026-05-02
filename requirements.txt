@@ -3,6 +3,7 @@ click>=8.1,<9
 numpy
 opencv-python
 Pillow
+screenshot-stitcher
 pyautogui
 pywin32; sys_platform == "win32"
 

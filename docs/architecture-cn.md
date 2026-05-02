@@ -32,9 +32,10 @@ weclaw-cua/
 │   ├── platform_api.py         # PlatformDriver 协议
 │   ├── vision_backend.py       # VisionBackend 协议
 │   ├── stepwise_backend.py     # StepwiseBackend（为 agent 输出图片+prompt）
-│   ├── vision_ai.py            # OpenRouterBackend（内置 LLM）
+│   ├── vision_ai.py            # 内置 OpenAI 兼容视觉 LLM
 │   ├── message_schema.py       # Message 数据类
-│   └── llm_client.py           # OpenRouter 文本调用封装
+│   ├── llm_routing.py          # 多 provider LLM 路由
+│   └── llm_client.py           # OpenAI 兼容文本调用封装
 │
 ├── config/                     # 配置
 ├── tests/                      # 测试套件

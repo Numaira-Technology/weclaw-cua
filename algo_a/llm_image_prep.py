@@ -1,13 +1,13 @@
-"""送 vision LLM 前的图片准备：缩小、RGB、PNG base64。"""
+"""送 vision LLM 前的图片准备：缩小、RGB、可配置格式 base64。"""
 
 from __future__ import annotations
 
-import base64
-import io
 from pathlib import Path
 from typing import Union
 
 from PIL import Image
+
+from shared.vision_image_codec import VisionImagePayload, encode_vision_image
 
 DEFAULT_MAX_SIDE_PIXELS = 768
 
@@ -33,7 +33,9 @@ def pil_rgb_open(image: Union[Image.Image, Path, str]) -> Image.Image:
     return Image.open(Path(image)).convert("RGB")
 
 
+def pil_to_vision_payload(pil: Image.Image) -> VisionImagePayload:
+    return encode_vision_image(pil)
+
+
 def pil_to_b64_png(pil: Image.Image) -> str:
-    buf = io.BytesIO()
-    pil.save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode("utf-8")
+    return encode_vision_image(pil, format_name="png").base64_data

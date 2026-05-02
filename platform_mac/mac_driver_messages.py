@@ -1,12 +1,12 @@
 """macOS：聊天区消息提取、侧栏当前会话名、新消息按钮。"""
 
-import os
 import time
 from typing import TYPE_CHECKING
 
 import pyautogui
 
 from shared.datatypes import ChatMessage
+from shared.vision_image_codec import log_vision_timing
 from shared.message_time_window import (
     RECENT_WINDOW_HOURS,
     chunk_reaches_recent_cutoff,
@@ -22,7 +22,8 @@ from platform_mac import macos_window as _macos_w
 from platform_mac.chat_panel_scroll_capture import scroll_capture_frames_for_extraction
 from shared.message_dedup import dedupe_chat_messages
 from shared.sidebar_classification import unread_cap_from_badge_text
-from utils.image_stitcher import save_stitched_debug, stitch_screenshots
+from utils.chat_stitch_debug import new_chat_stitch_session_basename, save_chat_stitch_for_vlm
+from utils.image_stitcher import stitch_screenshots
 
 if TYPE_CHECKING:
     from shared.vision_backend import VisionBackend
@@ -46,7 +47,8 @@ class MacDriverMessages:
         time.sleep(1.15)
 
     def click_first_unread_sidebar_row(self) -> int | None:
-        rows = self.get_sidebar_rows(1)
+        getter = getattr(self, "get_fast_sidebar_rows", None)
+        rows = getter(1) if getter is not None else self.get_sidebar_rows(1)
         for row in rows:
             if row.badge_text is None:
                 continue
@@ -66,11 +68,15 @@ class MacDriverMessages:
         chat_name: str,
         max_messages: int | None = None,
         max_scrolls: int | None = None,
+        skip_navigation_vlm: bool = False,
     ) -> list[ChatMessage]:
         cap_s = f", cap={max_messages}" if max_messages else ""
         print(f"[*] Starting message extraction for '{chat_name}'{cap_s}...")
-        self._activate_chat_panel_safely()
-        self.click_new_messages_button()
+        if skip_navigation_vlm:
+            self._activate_chat_panel_by_center()
+        else:
+            self._activate_chat_panel_safely()
+            self.click_new_messages_button()
         screenshots = scroll_capture_frames_for_extraction(
             self,
             max_messages,
@@ -82,21 +88,33 @@ class MacDriverMessages:
         print("[*] Reversing screenshot order for processing...")
         screenshots.reverse()
         all_messages: list[ChatMessage] = []
-        chunk_size = 5
+        chunk_size = 25
         screenshot_chunks = [screenshots[i : i + chunk_size] for i in range(0, len(screenshots), chunk_size)]
         chunk_results: list[tuple[int, list[ChatMessage]]] = []
+        stitch_session = new_chat_stitch_session_basename()
         for idx in range(len(screenshot_chunks) - 1, -1, -1):
             chunk = screenshot_chunks[idx]
             print(f"--- Processing chunk {idx + 1}/{len(screenshot_chunks)} ---")
             if not chunk:
                 continue
+            stitch_started = time.perf_counter()
             stitched_image = stitch_screenshots(images=chunk, scroll_region=None)
+            stitch_seconds = time.perf_counter() - stitch_started
             if not stitched_image:
                 print(f"[ERROR] Failed to stitch chunk {idx + 1}.")
                 continue
-            debug_dir = os.environ.get("WECLAW_DEBUG_STITCH_DIR", "").strip()
-            if debug_dir:
-                save_stitched_debug(stitched_image, debug_dir, chat_name, idx)
+            log_vision_timing(
+                "mac_driver_messages",
+                "stitch",
+                chat=chat_name,
+                chunk_index=idx + 1,
+                chunk_total=len(screenshot_chunks),
+                frame_count=len(chunk),
+                width=stitched_image.width,
+                height=stitched_image.height,
+                stitch_ms=round(stitch_seconds * 1000, 1),
+            )
+            save_chat_stitch_for_vlm(stitch_session, chat_name, idx, stitched_image)
             try:
                 response_str = self.vision_ai.query(
                     CHAT_PANEL_PROMPT, stitched_image, max_tokens=16384
@@ -147,6 +165,29 @@ class MacDriverMessages:
             out = out[-max_messages:]
         print(f"[*] Finished processing all chunks. Total messages: {len(out)} ({len(all_messages)} raw).")
         return out
+
+    def _activate_chat_panel_by_center(self) -> None:
+        print("[*] Activating chat panel at deterministic center.")
+        _macos_w.activate_pid(self.pid)
+        time.sleep(0.2)
+        full_screenshot, wb = _macos_w.capture_window_pid_and_bounds(self.pid)
+        fw, fh = full_screenshot.size
+        chat_panel_x1 = int(full_screenshot.width * 0.31)
+        chat_panel_y1 = 50
+        chat_panel_x2 = int(full_screenshot.width * 0.95)
+        chat_panel_y2 = full_screenshot.height - 50
+        fc_x = (chat_panel_x1 + chat_panel_x2) // 2
+        fc_y = (chat_panel_y1 + chat_panel_y2) // 2
+        click_x, click_y = _macos_w.window_image_px_to_screen_pt(
+            fc_x,
+            fc_y,
+            fw,
+            fh,
+            wb,
+        )
+        pyautogui.moveTo(click_x, click_y, duration=0.1)
+        pyautogui.click()
+        time.sleep(0.3)
 
     def _activate_chat_panel_safely(self) -> None:
         print("[*] Activating chat panel with a safe click...")

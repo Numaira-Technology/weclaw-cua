@@ -6,6 +6,7 @@ This new version uses an OCR-based driver.
 import sys
 import os
 import json
+import re
 import time
 from dataclasses import asdict
 from types import SimpleNamespace
@@ -67,6 +68,111 @@ def _dedupe_config_names(names: list[str]) -> list[str]:
         seen.add(cfg)
         out.append(cfg)
     return out
+
+
+def _safe_output_filename(chat_name: str, fallback: str) -> str:
+    name = str(chat_name or "").strip() or fallback
+    safe = "".join(c for c in name if c.isalnum() or c in (" ", "_")).rstrip()
+    return safe or fallback
+
+
+def _fast_capture_enabled(config: WeclawConfig) -> bool:
+    return (
+        _groups_config_means_all_groups(config.groups_to_monitor)
+        and config.chat_type == "all"
+        and not config.sidebar_unread_only
+    )
+
+
+def _normalized_chat_key(name: str) -> str:
+    clean = re.sub(r"\s+", " ", str(name or "")).strip()
+    return clean.casefold()
+
+
+def _row_signature(rows: list[Any]) -> tuple[tuple[str, int], ...]:
+    out: list[tuple[str, int]] = []
+    for row in rows:
+        name = _normalized_chat_key(getattr(row, "name", ""))
+        bbox = getattr(row, "bbox", None) or (0, 0, 0, 0)
+        y_center = (int(bbox[1]) + int(bbox[3])) // 2 if len(bbox) == 4 else 0
+        out.append((name, y_center))
+    return tuple(out)
+
+
+def _get_fast_sidebar_rows(driver: Any, window: Any) -> list[Any]:
+    getter = getattr(driver, "get_fast_sidebar_rows", None)
+    assert getter is not None, "driver must implement get_fast_sidebar_rows for capture-all fast path"
+    return getter(window)
+
+
+def _capture_sidebar_chat_names(
+    driver: Any,
+    window: Any,
+    max_scrolls: int,
+) -> list[str]:
+    capturer = getattr(driver, "capture_sidebar_chat_names", None)
+    if capturer is None:
+        print("[WARN] Driver has no stitched sidebar name capture; fast path will not prefilter OCR rows.")
+        return []
+    names = capturer(window, max_scrolls=max_scrolls)
+    out: list[str] = []
+    seen_keys: set[str] = set()
+    for name in names:
+        key = _normalized_chat_key(name)
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        out.append(str(name).strip())
+    print(f"[+] Capture-all sidebar name whitelist contains {len(out)} unique name(s).")
+    return out
+
+
+def _row_allowed_by_initial_sidebar_names(
+    row: Any,
+    allowed_sidebar_names: list[str] | set[str],
+) -> bool:
+    if not allowed_sidebar_names:
+        return True
+    sidebar_name = str(getattr(row, "name", "") or "").strip()
+    return any(_is_chat_name_match(sidebar_name, name) for name in allowed_sidebar_names)
+
+
+def _resolve_current_chat_title(driver: Any, fallback: str) -> str:
+    resolver = getattr(driver, "resolve_current_chat_title", None)
+    if resolver is None:
+        return fallback
+    title = str(resolver(fallback=fallback) or "").strip()
+    return title or fallback
+
+
+def _extract_save_current_chat(
+    driver: Any,
+    config: WeclawConfig,
+    chat_name: str,
+    written_paths: list[str],
+) -> bool:
+    messages = driver.get_chat_messages(
+        chat_name,
+        max_scrolls=config.chat_max_scrolls,
+        skip_navigation_vlm=True,
+    )
+    if not messages:
+        print(f"[WARN] No messages were extracted from '{chat_name}'.")
+        return False
+    fallback = f"chat_{len(written_paths) + 1}"
+    safe_filename = _safe_output_filename(chat_name, fallback)
+    output_path = os.path.join(config.output_dir, f"{safe_filename}.json")
+    with open(output_path, "w", encoding="utf-8") as f:
+        rows_out = []
+        for msg in messages:
+            d = asdict(msg)
+            d["chat_name"] = chat_name
+            d["sender"] = d["sender"] or ""
+            rows_out.append(d)
+        json.dump(rows_out, f, ensure_ascii=False, indent=2)
+    print(f"[SUCCESS] Successfully saved {len(messages)} messages to {output_path}")
+    written_paths.append(output_path)
+    return True
 
 
 def _click_verify_extract_save(
@@ -169,6 +275,80 @@ def _find_first_visible_config_match(
     return None
 
 
+def _run_capture_all_fast_path(
+    driver: Any,
+    window: Any,
+    config: WeclawConfig,
+    written_paths: list[str],
+) -> list[str]:
+    sidebar_scrolls = config.sidebar_max_scrolls
+    scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
+    allowed_sidebar_names = _capture_sidebar_chat_names(
+        driver,
+        window,
+        max_scrolls=sidebar_scrolls,
+    )
+    scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
+    seen_viewports: set[tuple[tuple[str, int], ...]] = set()
+    processed_keys: set[str] = set()
+    processed_count = 0
+
+    for scan_idx in range(sidebar_scrolls + 1):
+        rows = _get_fast_sidebar_rows(driver, window)
+        rows = [row for row in rows if str(getattr(row, "name", "") or "").strip()]
+        signature = _row_signature(rows)
+        if not rows:
+            print("[WARN] Fast sidebar scan returned no rows. Stopping capture-all sweep.")
+            break
+        if signature in seen_viewports:
+            print("[*] Fast capture-all reached a repeated viewport. Stopping sweep.")
+            break
+        seen_viewports.add(signature)
+        print(f"--- Fast capture-all viewport {scan_idx + 1}: {len(rows)} row(s) ---")
+
+        for row in rows:
+            sidebar_name = str(getattr(row, "name", "") or "").strip()
+            if not sidebar_name:
+                continue
+            sidebar_key = _normalized_chat_key(sidebar_name)
+            if not _row_allowed_by_initial_sidebar_names(row, allowed_sidebar_names):
+                print(
+                    "[*] Skipping OCR row not in initial sidebar name whitelist: "
+                    f"{sidebar_name!r}"
+                )
+                continue
+            if sidebar_key in processed_keys:
+                print(f"[*] Skipping already processed sidebar row: {sidebar_name!r}")
+                continue
+            driver.click_row(row, attempt=0)
+            time.sleep(0.8)
+            chat_name = _resolve_current_chat_title(driver, sidebar_name)
+            chat_key = _normalized_chat_key(chat_name) or sidebar_key
+            if chat_key in processed_keys:
+                print(f"[*] Skipping duplicate chat title: {chat_name!r}")
+                processed_keys.add(sidebar_key)
+                continue
+            processed_count += 1
+            print(
+                f"\n--- Fast processing chat {processed_count}: "
+                f"sidebar={sidebar_name!r}, title={chat_name!r} ---"
+            )
+            ok = _extract_save_current_chat(driver, config, chat_name, written_paths)
+            processed_keys.add(sidebar_key)
+            processed_keys.add(chat_key)
+            if not ok:
+                print(f"[WARN] Fast capture failed to extract messages from {chat_name!r}.")
+
+        if scan_idx >= sidebar_scrolls:
+            print(f"[*] Reached sidebar max scrolls ({sidebar_scrolls}). Stopping fast sweep.")
+            break
+        driver.scroll_sidebar(window, "down")
+        time.sleep(0.8)
+
+    print("\n[SUCCESS] Fast capture-all sweep finished.")
+    return written_paths
+
+
 def run_pipeline_a(config: WeclawConfig, vision_backend=None) -> list[str]:
     """Run the full message collection pipeline. Return paths to written JSON files."""
     assert config is not None
@@ -202,6 +382,10 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
     uo = config.sidebar_unread_only
     sidebar_scrolls = config.sidebar_max_scrolls
     chat_type = config.chat_type
+    if _fast_capture_enabled(config):
+        print("[*] Mode: true capture-all fast path (OCR sidebar sweep).")
+        return _run_capture_all_fast_path(driver, window, config, written_paths)
+
     if _groups_config_means_all_groups(config.groups_to_monitor):
         print(
             f"[*] Mode: wildcard chats. chat_type={chat_type!r}. Unread filter: {uo}."

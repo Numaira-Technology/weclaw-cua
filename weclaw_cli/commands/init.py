@@ -59,6 +59,10 @@ def init(config_dir, force):
                 "llm_provider": "openrouter",
                 "openrouter_api_key": "",
                 "openai_api_key": "",
+                "deepseek_api_key": "",
+                "kimi_api_key": "",
+                "glm_api_key": "",
+                "qwen_api_key": "",
                 "llm_model": "openai/gpt-4o",
                 "output_dir": "output",
             }
@@ -90,8 +94,8 @@ def init(config_dir, force):
     click.echo(f"\n[+] Setup complete!")
     click.echo("\nNext steps:")
     click.echo(f"  1. Edit {config_path}")
-    click.echo("     - Set llm_provider and its API key")
-    click.echo("     - OpenAI: export OPENAI_API_KEY or set openai_api_key")
-    click.echo("     - OpenRouter: export OPENROUTER_API_KEY or set openrouter_api_key")
+    click.echo("     - Set llm_provider, llm_model, and the matching API key")
+    click.echo("     - Providers: openrouter, openai, deepseek, kimi, glm, qwen")
+    click.echo("     - OpenRouter always routes through OpenRouter for any model slug")
     click.echo("     - Set groups_to_monitor")
     click.echo("  2. Run: weclaw run")

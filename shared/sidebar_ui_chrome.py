@@ -6,7 +6,7 @@ Usage:
         skip row
 
 Input: OCR or UI thread name string (may include spaces / fullwidth chars).
-Output: True if the string denotes pinned-header chrome (fold/unfold), else False.
+Output: True if the string denotes sidebar UI chrome, else False.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from __future__ import annotations
 import unicodedata
 
 _CHROME_PHRASES = (
+    "搜索",
     "折叠置顶聊天",
     "展开置顶聊天",
 )

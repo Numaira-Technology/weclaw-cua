@@ -19,6 +19,18 @@ SIDEBAR_PROMPT = (
     "只输出JSON，不要输出其他文字。"
 )
 
+SIDEBAR_CHAT_NAMES_PROMPT = (
+    "这是微信左侧会话列表的长截图，只包含聊天列表栏。"
+    "请从上到下识别每个聊天条目的聊天标题/群名/联系人名。"
+    "不要只机械依赖第一行/第二行位置判断；要综合视觉和语义判断："
+    "聊天标题通常是黑色或更深色字体，字号略大或更醒目，靠近头像右侧的条目上部；"
+    "最近消息摘要通常是灰色或更浅色字体，语义像一句消息、状态、链接预览、表情描述、文件提示或系统提示。"
+    "排除最近消息摘要、时间、未读数字、搜索框文字、折叠/展开置顶聊天等界面控件。"
+    "如果标题被截断，按截图中可见的标题原样输出。"
+    '直接输出JSON格式：{"names": ["聊天名称1", "聊天名称2"]}。'
+    "只输出JSON，不要输出其他文字。"
+)
+
 COORDS_PROMPT_TEMPLATE = """
 You are a precision UI automation assistant. You will be given a screenshot of a chat application window.
 Your task is to find the bounding box for the chat item with the name "{chat_name}" in the sidebar on the left.

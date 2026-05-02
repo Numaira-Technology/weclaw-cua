@@ -142,6 +142,10 @@ weclaw-cua init
   "llm_provider": "openrouter",
   "openrouter_api_key": "",
   "openai_api_key": "",
+  "deepseek_api_key": "",
+  "kimi_api_key": "",
+  "glm_api_key": "",
+  "qwen_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }
@@ -149,18 +153,26 @@ weclaw-cua init
 
 > **`wechat_app_name` 取决于你的微信界面语言：** 中文界面填 `"微信"`，英文界面填 `"WeChat"`。填错会导致找不到微信窗口。
 
-`llm_provider` 可设为 `openrouter` 或 `openai`。只有在使用内置 LLM 模式时才需要填写对应 API key；如果使用 OpenClaw gateway 模式或 stepwise 模式，请保持为空。
+`llm_provider` 可设为 `openrouter`、`openai`、`deepseek`、`kimi`、`glm` 或 `qwen`。只有在使用内置 LLM 模式时才需要填写对应 API key；当 `llm_provider` 为 `openrouter` 时，所有模型都会通过 OpenRouter 调用。如果使用 OpenClaw gateway 模式或 stepwise 模式，请保持为空。
 
 也可通过环境变量设置 API key：
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-v1-你的key"          # macOS
 export OPENAI_API_KEY="sk-你的-openai-key"            # macOS
+export DEEPSEEK_API_KEY="sk-你的-deepseek-key"        # macOS
+export KIMI_API_KEY="sk-你的-kimi-key"                # macOS
+export GLM_API_KEY="sk-你的-glm-key"                  # macOS
+export QWEN_API_KEY="sk-你的-qwen-key"                # macOS
 ```
 
 ```powershell
 $env:OPENROUTER_API_KEY = "sk-or-v1-你的key"          # Windows PowerShell
 $env:OPENAI_API_KEY = "sk-你的-openai-key"            # Windows PowerShell
+$env:DEEPSEEK_API_KEY = "sk-你的-deepseek-key"        # Windows PowerShell
+$env:KIMI_API_KEY = "sk-你的-kimi-key"                # Windows PowerShell
+$env:GLM_API_KEY = "sk-你的-glm-key"                  # Windows PowerShell
+$env:QWEN_API_KEY = "sk-你的-qwen-key"                # Windows PowerShell
 ```
 
 ### 第三步 &mdash; 使用
@@ -491,7 +503,7 @@ weclaw-cua new-messages    # 后续：仅返回上次之后的新消息
 
 - **Python** >= 3.10
 - **微信桌面版** — 任意版本（纯视觉，无版本依赖）
-- **LLM API key** — 内置 LLM 模式可用 OpenRouter 或 OpenAI；stepwise 模式和 OpenClaw gateway 模式不需要
+- **LLM API key** — 内置 LLM 模式可用 OpenRouter、OpenAI、DeepSeek、Kimi、GLM 或 Qwen；stepwise 模式和 OpenClaw gateway 模式不需要
 
 ---
 
@@ -508,6 +520,10 @@ weclaw-cua new-messages    # 后续：仅返回上次之后的新消息
   "llm_provider": "openrouter",
   "openrouter_api_key": "",
   "openai_api_key": "",
+  "deepseek_api_key": "",
+  "kimi_api_key": "",
+  "glm_api_key": "",
+  "qwen_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }
@@ -519,10 +535,11 @@ weclaw-cua new-messages    # 后续：仅返回上次之后的新消息
 | `groups_to_monitor` | `["*"]` = 全部会话（包括群聊和私聊），或列出指定会话名 |
 | `sidebar_unread_only` | `true` = 仅处理有未读标记的会话 |
 | `report_custom_prompt` | 附加到 LLM 报告 prompt 的自定义指令 |
-| `llm_provider` | 内置 LLM provider：`openrouter` 或 `openai` |
+| `llm_provider` | 内置 LLM provider：`openrouter`、`openai`、`deepseek`、`kimi`、`glm` 或 `qwen`；`moonshot` 等同于 `kimi`，`zhipu`/`z-ai` 等同于 `glm` |
 | `openrouter_api_key` | OpenRouter API key（或使用 `OPENROUTER_API_KEY` 环境变量） |
 | `openai_api_key` | OpenAI API key（或使用 `OPENAI_API_KEY` 环境变量） |
-| `llm_model` | 用于报告生成的 LLM 模型标识符；OpenAI 请使用 `gpt-4o` 这类原生模型名 |
+| `deepseek_api_key`, `kimi_api_key`, `glm_api_key`, `qwen_api_key` | 原生 provider API key；对应环境变量优先 |
+| `llm_model` | LLM 模型标识符。OpenRouter 会原样发送完整 slug；原生 provider 会去掉 `provider/` 前缀后调用。 |
 | `output_dir` | 输出 JSON 文件的目录 |
 
 ---

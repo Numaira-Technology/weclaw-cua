@@ -6,6 +6,9 @@ from shared.sidebar_ui_chrome import is_sidebar_ui_chrome_label
 
 
 class TestSidebarUiChrome(unittest.TestCase):
+    def test_search_box(self):
+        self.assertTrue(is_sidebar_ui_chrome_label("搜索"))
+
     def test_fold_pinned_header(self):
         self.assertTrue(is_sidebar_ui_chrome_label("折叠置顶聊天"))
 
@@ -19,6 +22,7 @@ class TestSidebarUiChrome(unittest.TestCase):
         self.assertFalse(is_sidebar_ui_chrome_label("家庭群"))
         self.assertFalse(is_sidebar_ui_chrome_label(""))
         self.assertFalse(is_sidebar_ui_chrome_label("置顶设计讨论"))
+        self.assertFalse(is_sidebar_ui_chrome_label("搜索助手"))
 
 
 if __name__ == "__main__":
