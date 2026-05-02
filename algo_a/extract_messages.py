@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Union
 
@@ -12,11 +13,12 @@ from algo_a.llm_image_prep import (
     DEFAULT_MAX_SIDE_PIXELS,
     downscale_max_side,
     pil_rgb_open,
-    pil_to_b64_png,
+    pil_to_vision_payload,
 )
 from algo_a.llm_openrouter_headers import ensure_openrouter_ascii_env, openrouter_completion_headers
 from shared.openrouter_api_key import resolve_openrouter_api_key
 from shared.openrouter_litellm_model import litellm_openrouter_model
+from shared.vision_image_codec import log_vision_timing
 
 
 EXTRACT_PROMPT = (
@@ -108,6 +110,7 @@ def _extract_once(
     import sys
     import litellm
 
+    total_started = time.perf_counter()
     ensure_openrouter_ascii_env()
     pil = pil_rgb_open(image)
     scaled, orig_sz, final_sz = downscale_max_side(pil, max_side_pixels)
@@ -118,17 +121,30 @@ def _extract_once(
             flush=True,
             file=sys.stderr,
         )
+    payload = pil_to_vision_payload(scaled)
+    log_vision_timing(
+        "extract_messages",
+        "encoded",
+        format=payload.format_name,
+        mime=payload.mime_type,
+        width=payload.width,
+        height=payload.height,
+        bytes=payload.byte_count,
+        b64_chars=payload.base64_char_count,
+        encode_ms=round(payload.encode_seconds * 1000, 1),
+        max_side=max_side_pixels,
+    )
     print(
-        f"[extract_messages] 请求 LLM（{final_sz[0]}×{final_sz[1]}px, timeout={timeout}s）…",
+        f"[extract_messages] 请求 LLM（{final_sz[0]}×{final_sz[1]}px, "
+        f"format={payload.format_name}, payload={payload.payload_mib:.1f} MiB, timeout={timeout}s）…",
         flush=True,
         file=sys.stderr,
     )
-    image_b64 = pil_to_b64_png(scaled)
     messages = [
         {
             "role": "user",
             "content": [
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+                {"type": "image_url", "image_url": {"url": payload.data_url}},
                 {"type": "text", "text": EXTRACT_PROMPT},
             ],
         }
@@ -136,6 +152,7 @@ def _extract_once(
     litellm_model = litellm_openrouter_model(model)
     key = resolve_openrouter_api_key()
     h = openrouter_completion_headers(litellm_model, key)
+    request_started = time.perf_counter()
     response = litellm.completion(
         model=litellm_model,
         messages=messages,
@@ -143,14 +160,28 @@ def _extract_once(
         api_key=key,
         headers=h,
     )
+    request_seconds = time.perf_counter() - request_started
     raw: str = response.choices[0].message.content or ""
     raw = _sanitize_surrogates(raw)
+    log_vision_timing(
+        "extract_messages",
+        "completed",
+        model=litellm_model,
+        format=payload.format_name,
+        bytes=payload.byte_count,
+        request_ms=round(request_seconds * 1000, 1),
+        total_ms=round((time.perf_counter() - total_started) * 1000, 1),
+        response_chars=len(raw),
+    )
     parsed = _parse_payload(raw)
     parsed["raw_text"] = raw
     parsed["model"] = litellm_model
     parsed["source_image_size"] = list(orig_sz)
     parsed["llm_image_size"] = list(final_sz)
     parsed["max_side_pixels"] = max_side_pixels
+    parsed["vision_image_format"] = payload.format_name
+    parsed["vision_image_bytes"] = payload.byte_count
+    parsed["vision_image_encode_seconds"] = payload.encode_seconds
     return parsed
 
 

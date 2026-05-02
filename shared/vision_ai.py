@@ -5,8 +5,6 @@ Usage:
     Optional env: WECLAW_VISION_HTTP_TIMEOUT_SEC (default 360) for slow multimodal calls.
 """
 
-import base64
-import io
 import os
 import time
 
@@ -16,6 +14,8 @@ from openai import RateLimitError
 from PIL import Image
 
 from config.weclaw_config import load_config
+from shared.vision_image_codec import encode_vision_image
+from shared.vision_image_codec import log_vision_timing
 
 
 def _load_ai_config(config_path: str = "config/config.json") -> tuple[str, str, str, str]:
@@ -113,18 +113,31 @@ class VisionAI:
     def query(self, prompt: str, image: Image.Image, max_tokens: int = 2048) -> str | None:
         assert self.client
         assert max_tokens > 0
+        total_started = time.perf_counter()
         image_to_send = _resize_for_small_ui_task(image, max_tokens)
-        buffered = io.BytesIO()
-        image_to_send.save(buffered, format="PNG")
-        base64_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        approx_mb = len(base64_image) * 0.75 / (1024 * 1024)
+        payload = encode_vision_image(image_to_send)
+        log_vision_timing(
+            "vision_ai",
+            "encoded",
+            provider=self.provider,
+            model=self.model_name,
+            format=payload.format_name,
+            mime=payload.mime_type,
+            width=payload.width,
+            height=payload.height,
+            bytes=payload.byte_count,
+            b64_chars=payload.base64_char_count,
+            encode_ms=round(payload.encode_seconds * 1000, 1),
+            max_tokens=max_tokens,
+        )
         max_retries = 3
         for attempt in range(max_retries):
             print(
                 f"[*] Sending query to Vision AI via {self.provider}... (Attempt {attempt + 1}/{max_retries})"
             )
             print(
-                f"[*] Image payload ~{approx_mb:.1f} MiB ({image_to_send.width}x{image_to_send.height}); "
+                f"[*] Image payload ~{payload.payload_mib:.1f} MiB "
+                f"({payload.width}x{payload.height}, {payload.format_name}); "
                 f"first byte may take 1–6 min (timeout {self.http_timeout_sec:.0f}s)."
             )
             try:
@@ -139,9 +152,7 @@ class VisionAI:
                                 {"type": "text", "text": prompt},
                                 {
                                     "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/png;base64,{base64_image}"
-                                    },
+                                    "image_url": {"url": payload.data_url},
                                 },
                             ],
                         }
@@ -153,7 +164,9 @@ class VisionAI:
                     request_args["max_tokens"] = max_tokens
                 if not uses_openai_reasoning_model:
                     request_args["temperature"] = _temperature_for_provider(self.provider)
+                request_started = time.perf_counter()
                 response = self.client.chat.completions.create(**request_args)
+                request_seconds = time.perf_counter() - request_started
             except APITimeoutError as e:
                 print(
                     f"[!] Vision AI request timed out after {self.http_timeout_sec:.0f}s: {e}"
@@ -177,5 +190,16 @@ class VisionAI:
                 image.save("debug_empty_response_capture.png")
                 time.sleep(1)
                 continue
+            log_vision_timing(
+                "vision_ai",
+                "completed",
+                provider=self.provider,
+                model=self.model_name,
+                format=payload.format_name,
+                bytes=payload.byte_count,
+                request_ms=round(request_seconds * 1000, 1),
+                total_ms=round((time.perf_counter() - total_started) * 1000, 1),
+                response_chars=len(content),
+            )
             return content
         return None
