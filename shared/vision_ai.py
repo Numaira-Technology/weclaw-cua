@@ -164,6 +164,17 @@ class VisionAI:
                     request_args["max_tokens"] = max_tokens
                 if not uses_openai_reasoning_model:
                     request_args["temperature"] = _temperature_for_provider(self.provider)
+                log_vision_timing(
+                    "vision_ai",
+                    "request_start",
+                    provider=self.provider,
+                    model=self.model_name,
+                    format=payload.format_name,
+                    bytes=payload.byte_count,
+                    b64_chars=payload.base64_char_count,
+                    max_tokens=max_tokens,
+                    attempt=attempt + 1,
+                )
                 request_started = time.perf_counter()
                 response = self.client.chat.completions.create(**request_args)
                 request_seconds = time.perf_counter() - request_started

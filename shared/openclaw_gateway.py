@@ -133,7 +133,29 @@ def gateway_chat_vision(
 
     client = OpenAI(base_url=config.base_url, api_key=config.api_key)
     total_started = time.perf_counter()
-    data_url = _image_path_data_url(image_path, "openclaw_gateway")
+    with Image.open(image_path) as image:
+        payload = encode_vision_image(image)
+    log_vision_timing(
+        "openclaw_gateway",
+        "encoded",
+        format=payload.format_name,
+        mime=payload.mime_type,
+        width=payload.width,
+        height=payload.height,
+        bytes=payload.byte_count,
+        b64_chars=payload.base64_char_count,
+        encode_ms=round(payload.encode_seconds * 1000, 1),
+        max_tokens=max_tokens,
+    )
+    log_vision_timing(
+        "openclaw_gateway",
+        "request_start",
+        model=config.model,
+        format=payload.format_name,
+        bytes=payload.byte_count,
+        b64_chars=payload.base64_char_count,
+        max_tokens=max_tokens,
+    )
     request_started = time.perf_counter()
     resp = client.chat.completions.create(
         model=config.model,
@@ -142,7 +164,7 @@ def gateway_chat_vision(
                 "role": "user",
                 "content": [
                     {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": data_url}},
+                    {"type": "image_url", "image_url": {"url": payload.data_url}},
                 ],
             }
         ],
@@ -159,6 +181,8 @@ def gateway_chat_vision(
         "openclaw_gateway",
         "completed",
         model=config.model,
+        format=payload.format_name,
+        bytes=payload.byte_count,
         request_ms=round(request_seconds * 1000, 1),
         total_ms=round((time.perf_counter() - total_started) * 1000, 1),
         response_chars=len(text),
@@ -193,6 +217,15 @@ class OpenClawVisionBackend:
         )
         from openai import OpenAI
 
+        log_vision_timing(
+            "openclaw_backend",
+            "request_start",
+            model=self.config.model,
+            format=payload.format_name,
+            bytes=payload.byte_count,
+            b64_chars=payload.base64_char_count,
+            max_tokens=max_tokens,
+        )
         client = OpenAI(base_url=self.config.base_url, api_key=self.config.api_key)
         request_started = time.perf_counter()
         resp = client.chat.completions.create(

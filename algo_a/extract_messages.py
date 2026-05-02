@@ -152,6 +152,15 @@ def _extract_once(
     litellm_model = litellm_openrouter_model(model)
     key = resolve_openrouter_api_key()
     h = openrouter_completion_headers(litellm_model, key)
+    log_vision_timing(
+        "extract_messages",
+        "request_start",
+        model=litellm_model,
+        format=payload.format_name,
+        bytes=payload.byte_count,
+        b64_chars=payload.base64_char_count,
+        timeout_s=timeout,
+    )
     request_started = time.perf_counter()
     response = litellm.completion(
         model=litellm_model,
