@@ -105,6 +105,38 @@ def _get_fast_sidebar_rows(driver: Any, window: Any) -> list[Any]:
     return getter(window)
 
 
+def _capture_sidebar_chat_names(
+    driver: Any,
+    window: Any,
+    max_scrolls: int,
+) -> list[str]:
+    capturer = getattr(driver, "capture_sidebar_chat_names", None)
+    if capturer is None:
+        print("[WARN] Driver has no stitched sidebar name capture; fast path will not prefilter OCR rows.")
+        return []
+    names = capturer(window, max_scrolls=max_scrolls)
+    out: list[str] = []
+    seen_keys: set[str] = set()
+    for name in names:
+        key = _normalized_chat_key(name)
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        out.append(str(name).strip())
+    print(f"[+] Capture-all sidebar name whitelist contains {len(out)} unique name(s).")
+    return out
+
+
+def _row_allowed_by_initial_sidebar_names(
+    row: Any,
+    allowed_sidebar_names: list[str] | set[str],
+) -> bool:
+    if not allowed_sidebar_names:
+        return True
+    sidebar_name = str(getattr(row, "name", "") or "").strip()
+    return any(_is_chat_name_match(sidebar_name, name) for name in allowed_sidebar_names)
+
+
 def _resolve_current_chat_title(driver: Any, fallback: str) -> str:
     resolver = getattr(driver, "resolve_current_chat_title", None)
     if resolver is None:
@@ -251,6 +283,12 @@ def _run_capture_all_fast_path(
 ) -> list[str]:
     sidebar_scrolls = config.sidebar_max_scrolls
     scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
+    allowed_sidebar_names = _capture_sidebar_chat_names(
+        driver,
+        window,
+        max_scrolls=sidebar_scrolls,
+    )
+    scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
     seen_viewports: set[tuple[tuple[str, int], ...]] = set()
     processed_keys: set[str] = set()
     processed_count = 0
@@ -273,6 +311,12 @@ def _run_capture_all_fast_path(
             if not sidebar_name:
                 continue
             sidebar_key = _normalized_chat_key(sidebar_name)
+            if not _row_allowed_by_initial_sidebar_names(row, allowed_sidebar_names):
+                print(
+                    "[*] Skipping OCR row not in initial sidebar name whitelist: "
+                    f"{sidebar_name!r}"
+                )
+                continue
             if sidebar_key in processed_keys:
                 print(f"[*] Skipping already processed sidebar row: {sidebar_name!r}")
                 continue

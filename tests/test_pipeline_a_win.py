@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from shared.datatypes import ChatMessage, SidebarRow
 from algo_a.pipeline_a_win import _find_first_visible_config_match
-from algo_a.pipeline_a_win import _normalized_chat_key
+from algo_a.pipeline_a_win import _row_allowed_by_initial_sidebar_names
 from algo_a.pipeline_a_win import _run_capture_all_fast_path
 
 
@@ -42,6 +42,11 @@ class FakeFastCaptureDriver:
     def get_fast_sidebar_rows(self, window: object) -> list[SidebarRow]:
         assert window is not None
         return self.viewports[self.viewport_idx]
+
+    def capture_sidebar_chat_names(self, window: object, max_scrolls: int) -> list[str]:
+        assert window is not None
+        assert max_scrolls == 1
+        return ["Short A", "Short B", "Short C"]
 
     def click_row(self, row: SidebarRow, attempt: int = 0) -> None:
         assert attempt == 0
@@ -110,7 +115,22 @@ def test_fast_capture_all_sweeps_without_current_chat_vlm(tmp_path) -> None:
         ("Full Chat B", True),
         ("Full Chat C", True),
     ]
-    assert driver.scrolls == ["up", "up", "up", "down"]
+    assert driver.scrolls == ["up", "up", "up", "up", "up", "up", "down"]
+
+
+def test_initial_sidebar_whitelist_rejects_message_summary() -> None:
+    name_row = SidebarRow("运营核心群", None, None, (0, 0, 100, 40), False)
+    summary_row = SidebarRow("收到，谢谢", None, None, (0, 40, 100, 80), False)
+    allowed = ["运营核心群"]
+
+    assert _row_allowed_by_initial_sidebar_names(name_row, allowed)
+    assert not _row_allowed_by_initial_sidebar_names(summary_row, allowed)
+
+
+def test_initial_sidebar_whitelist_allows_truncated_name() -> None:
+    row = SidebarRow("运营核心群…", None, None, (0, 0, 100, 40), False)
+
+    assert _row_allowed_by_initial_sidebar_names(row, ["运营核心群后半段被隐藏"])
 
 
 def test_configured_name_match_requires_unread_when_enabled() -> None:
