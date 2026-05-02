@@ -46,7 +46,7 @@ class MacDriverMessages:
         pyautogui.scroll(clicks)
         time.sleep(1.15)
 
-    def click_first_unread_sidebar_row(self) -> int | None:
+    def click_first_unread_sidebar_row(self) -> tuple[int | None, str]:
         getter = getattr(self, "get_fast_sidebar_rows", None)
         rows = getter(1) if getter is not None else self.get_sidebar_rows(1)
         for row in rows:
@@ -59,9 +59,9 @@ class MacDriverMessages:
             )
             self.click_row(row, attempt=0)
             time.sleep(0.45)
-            return cap
+            return cap, row.name
         print("[WARN] 侧栏 Vision 结果中没有任何未读角标行。")
-        return None
+        return None, ""
 
     def get_chat_messages(
         self,

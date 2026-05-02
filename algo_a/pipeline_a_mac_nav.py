@@ -6,9 +6,13 @@ Usage:
 
 Input spec:
     - WeclawConfig，且 sidebar_unread_only 为 True（未读驱动）。
+    - 未读行列表来自 click_first_unread_sidebar_row：优先 get_fast_sidebar_rows
+      （本机 Vision / scan_sidebar_once），无快路径时再 get_sidebar_rows。
+    - groups_to_monitor 仅与本次侧栏行名比对，顶栏 OCR 不参与（避免误识消息预览等）。
 
 Output spec:
-    - 与 pipeline_a_win.run_pipeline_a 相同：写入的 JSON 路径列表。
+    - 与 pipeline_a_win.run_pipeline_a 相同：写入的 JSON 路径列表；chat_name 与文件名
+      使用本次点击的侧栏行名；顶栏 OCR 不参与写出与 groups_to_monitor。
 """
 
 from __future__ import annotations
@@ -17,11 +21,10 @@ import json
 import os
 import time
 from dataclasses import asdict
-from typing import Any
 
+from algo_a.list_unread_chats import ocr_chat_allowed_by_groups_to_monitor
 from algo_a.list_target_chats_win import _normalize_chat_label
 from config.weclaw_config import WeclawConfig
-from platform_mac.chat_panel_detector import sidebar_name_matches_config_group
 
 _MAX_JUMPS = 200
 _SAME_TITLE_BREAK = 5
@@ -34,16 +37,20 @@ def _groups_config_means_all_groups(names: list[str]) -> bool:
     return len(names) == 1 and str(names[0]).strip() == "*"
 
 
-def _allowed_chat_title(title: str, groups: list[str]) -> bool:
-    if not title or not str(title).strip():
+def _allowed_sidebar_row_for_groups(sidebar_row_name: str, groups: list[str]) -> bool:
+    """侧栏行名（未读跳转中通常为本机 Vision 快路径 OCR）是否与 groups_to_monitor 匹配。
+
+    与 list_unread_chats / filter_chats_by_groups_to_monitor 使用同一套
+    sidebar_name_matches_config_group 规则；不得传入顶栏 OCR 字符串。
+    """
+    if not sidebar_row_name or not str(sidebar_row_name).strip():
         return False
     if _groups_config_means_all_groups(groups):
         return True
-    allowed = [g.strip() for g in groups if g and str(g).strip()]
-    if not allowed:
-        return False
-    t = title.strip()
-    return any(sidebar_name_matches_config_group(t, g) for g in allowed)
+    return ocr_chat_allowed_by_groups_to_monitor(sidebar_row_name.strip(), groups)
+
+
+_allowed_chat_title = _allowed_sidebar_row_for_groups
 
 
 def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[str]:
@@ -68,7 +75,9 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         print("[ERROR] Pipeline failed: Could not find WeChat window.")
         return written_paths
 
-    print("[*] macOS: 使用左侧消息图标双击依次处理未读（不滚侧栏枚举）。")
+    print("[*] macOS: 使用左侧消息图标双击依次处理未读（不滚侧栏枚举）；"
+          "侧栏未读行用本机 Vision 快路径（get_fast_sidebar_rows）；"
+          "写出与 groups_to_monitor 仅以侧栏行名为准（顶栏 OCR 不参与）。")
 
     if not driver.nav_messages_has_unread_badge():
         print("[+] 左侧消息入口无未读角标，无需处理。")
@@ -83,16 +92,15 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         jumps += 1
         driver.double_click_messages_nav()
         time.sleep(_SETTLE_AFTER_DBL)
-        read_cap = driver.click_first_unread_sidebar_row()
+        read_cap, sidebar_clicked = driver.click_first_unread_sidebar_row()
         if read_cap is None:
             print("[WARN] 未能点击未读侧栏行，跳过本轮。")
             continue
-        title = driver.resolve_current_chat_title()
+        title = str(sidebar_clicked or "").strip()
         if not title:
-            same_title_run += 1
-            if same_title_run >= _SAME_TITLE_BREAK:
-                driver.clear_messages_nav_click_cache()
-                same_title_run = 0
+            print(
+                "[WARN] 侧栏行名为空，跳过（顶栏 OCR 不参与监控列表与写出文件名）。"
+            )
             continue
         if title == last_title:
             same_title_run += 1
@@ -104,7 +112,7 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         same_title_run = 0
         last_title = title
 
-        if not _allowed_chat_title(title, config.groups_to_monitor):
+        if not _allowed_sidebar_row_for_groups(title, config.groups_to_monitor):
             print(f"[*] 跳过（不在监控范围）: {title!r}")
             continue
 

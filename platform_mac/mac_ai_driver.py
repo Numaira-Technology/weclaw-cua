@@ -61,8 +61,13 @@ class MacDriver(MacDriverMessages, PlatformDriver):
                 print(f"[+] Precise coordinates for '{chat_name}' found via OCR: ({sx}, {sy})")
                 return (sx, sy)
             print(f"[WARN] OCR could not locate '{chat_name}'; falling back to VLM...")
+        except ModuleNotFoundError as e:
+            print(
+                f"[WARN] HunyuanOCR unavailable (missing {e.name!r}); falling back to VLM for '{chat_name}'. "
+                "Install: pip install -e \".[macos,llm,hunyuan-ocr]\" (or pip install -r requirements-macos.txt)"
+            )
         except Exception as e:
-            print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}); falling back to VLM for '{chat_name}'.")
+            print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}: {e}); falling back to VLM for '{chat_name}'.")
         prompt = COORDS_PROMPT_TEMPLATE.format(chat_name=chat_name)
         response_str = self.vision_ai.query(prompt, full_screenshot)
         if not response_str:
@@ -89,8 +94,14 @@ class MacDriver(MacDriverMessages, PlatformDriver):
         try:
             ocr_engine = get_ocr_engine()
             ocr_rows = sidebar_rows_from_hunyuan(full_screenshot, wb, ocr_engine)
+        except ModuleNotFoundError as e:
+            print(
+                f"[WARN] HunyuanOCR unavailable (missing {e.name!r}); using VLM sidebar detection. "
+                "Install: pip install -e \".[macos,llm,hunyuan-ocr]\" (or pip install -r requirements-macos.txt)"
+            )
+            ocr_rows = []
         except Exception as e:
-            print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}); using VLM sidebar detection.")
+            print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}: {e}); using VLM sidebar detection.")
             ocr_rows = []
 
         if ocr_rows:
