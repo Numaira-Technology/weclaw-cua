@@ -21,7 +21,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). This pr
 ### Added
 
 - OpenAI-compatible API settings in `config.json` (alongside OpenRouter)
-- Optional `[hunyuan-ocr]` extra — local Hunyuan vision OCR on macOS and Windows (see `pyproject.toml` pins)
+- Optional `[hunyuan-ocr]` extra — local Hunyuan vision OCR on macOS and Windows. The required HunyuanOCR Transformers commit must be installed manually because PyPI package metadata cannot include git dependencies.
 - `capture` and `run` flags `--sidebar-max-scrolls` and `--chat-max-scrolls` to override scroll depth per run
 
 ### Changed
