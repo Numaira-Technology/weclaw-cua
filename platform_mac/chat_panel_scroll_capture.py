@@ -6,8 +6,6 @@ from typing import Any, List
 
 from PIL import Image
 
-from platform_mac import macos_window as _macos_w
-
 SCROLL_UP_WHEN_UNREAD_AT_LEAST = 5
 LIGHT_SCROLL_COUNT = 2
 FULL_SCROLL_COUNT = 10
@@ -34,7 +32,13 @@ def scroll_capture_frames_for_extraction(
         scroll_count = min(scroll_count, max_scrolls)
         print(f"[*] 聊天框上滑次数上限: {max_scrolls}；本次执行 {scroll_count} 次。")
 
+    from platform_mac import macos_window as _macos_w
+
     out: List[Image.Image] = []
+    current = _macos_w.capture_window_pid(driver.pid)
+    if current:
+        out.append(current)
+
     for _ in range(scroll_count):
         driver.scroll_chat_panel(direction="up")
         screenshot = _macos_w.capture_window_pid(driver.pid)

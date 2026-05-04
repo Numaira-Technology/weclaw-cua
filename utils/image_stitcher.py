@@ -153,6 +153,18 @@ def stitch_screenshots(
     for image in images:
         rgb = np.array(image.convert("RGB"))
         cropped.append(_apply_crop(rgb, scroll_region))
+    deduped: list[np.ndarray] = []
+    for frame in cropped:
+        if deduped and _frames_nearly_identical(
+            deduped[-1],
+            frame,
+            match_top_trim,
+            match_bottom_trim,
+        ):
+            print("[INFO] stitch: consecutive frame nearly identical; skip before stitching.")
+            continue
+        deduped.append(frame)
+    cropped = deduped
     _dump_cropped_frames(cropped)
 
     backend = os.environ.get("WECLAW_STITCH_BACKEND", "").strip().lower()

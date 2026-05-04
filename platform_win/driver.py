@@ -449,6 +449,9 @@ class WinDriver(PlatformDriver):
         scroll_count = 10 if max_scrolls is None else max_scrolls
         assert scroll_count >= 0
         screenshots = []
+        current_screenshot = capture_window(self.hwnd)
+        if current_screenshot:
+            screenshots.append(current_screenshot)
         for i in range(scroll_count):
             self.scroll_chat_panel(direction="up")
             screenshot = capture_window(self.hwnd)
