@@ -154,6 +154,7 @@ def _extract_save_current_chat(
     messages = driver.get_chat_messages(
         chat_name,
         max_scrolls=config.chat_max_scrolls,
+        recent_window_hours=config.recent_window_hours,
         skip_navigation_vlm=True,
     )
     if not messages:
@@ -212,7 +213,11 @@ def _click_verify_extract_save(
         )
         return False
 
-    messages = driver.get_chat_messages(chat.name, max_scrolls=config.chat_max_scrolls)
+    messages = driver.get_chat_messages(
+        chat.name,
+        max_scrolls=config.chat_max_scrolls,
+        recent_window_hours=config.recent_window_hours,
+    )
     if not messages:
         print(f"[WARN] No messages were extracted from '{chat.name}'.")
     else:

@@ -19,6 +19,9 @@ class FakeSidebarDriver:
 class FakeConfig:
     output_dir: str
     chat_max_scrolls: int = 0
+    sidebar_max_scrolls: int = 5
+    recent_window_hours: int = 0
+    chat_max_scrolls: int = 0
     sidebar_max_scrolls: int = 1
 
 
@@ -64,6 +67,7 @@ class FakeFastCaptureDriver:
         self,
         chat_name: str,
         max_scrolls: int | None = None,
+        recent_window_hours: int = 0,
         skip_navigation_vlm: bool = False,
     ) -> list[ChatMessage]:
         self.message_calls.append((chat_name, skip_navigation_vlm))

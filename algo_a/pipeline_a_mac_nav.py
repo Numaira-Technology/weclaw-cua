@@ -117,6 +117,7 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
             title,
             max_messages=read_cap,
             max_scrolls=config.chat_max_scrolls,
+            recent_window_hours=config.recent_window_hours,
         )
         if not messages:
             print(f"[WARN] 未提取到消息，跳过保存: {title!r}")

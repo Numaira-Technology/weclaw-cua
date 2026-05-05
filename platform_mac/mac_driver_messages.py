@@ -8,7 +8,6 @@ import pyautogui
 from shared.datatypes import ChatMessage
 from shared.vision_image_codec import log_vision_timing
 from shared.message_time_window import (
-    RECENT_WINDOW_HOURS,
     chunk_reaches_recent_cutoff,
     filter_messages_to_recent_window,
 )
@@ -68,6 +67,7 @@ class MacDriverMessages:
         chat_name: str,
         max_messages: int | None = None,
         max_scrolls: int | None = None,
+        recent_window_hours: int = 0,
         skip_navigation_vlm: bool = False,
     ) -> list[ChatMessage]:
         cap_s = f", cap={max_messages}" if max_messages else ""
@@ -141,17 +141,17 @@ class MacDriverMessages:
             if chunk_messages:
                 filtered_chunk = filter_messages_to_recent_window(
                     chunk_messages,
-                    hours=RECENT_WINDOW_HOURS,
+                    hours=recent_window_hours,
                 )
                 print(f"[+] Extracted {len(chunk_messages)} messages from chunk {idx + 1}.")
                 if filtered_chunk:
                     chunk_results.append((idx, filtered_chunk))
                 if chunk_reaches_recent_cutoff(
                     chunk_messages,
-                    hours=RECENT_WINDOW_HOURS,
+                    hours=recent_window_hours,
                 ):
                     print(
-                        f"[*] Chunk {idx + 1} reached the {RECENT_WINDOW_HOURS}-hour cutoff. "
+                        f"[*] Chunk {idx + 1} reached the {recent_window_hours}-hour cutoff. "
                         "Skipping older chunks."
                     )
                     break

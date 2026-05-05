@@ -19,6 +19,7 @@ def apply_capture_overrides(
     unread_mode: str | None = None,
     sidebar_max_scrolls: int | None = None,
     chat_max_scrolls: int | None = None,
+    recent_window_hours: int | None = None,
 ):
     """Apply capture-related CLI overrides to a loaded WeclawConfig."""
     if chat_type is not None:
@@ -29,6 +30,8 @@ def apply_capture_overrides(
         config.sidebar_max_scrolls = sidebar_max_scrolls
     if chat_max_scrolls is not None:
         config.chat_max_scrolls = chat_max_scrolls
+    if recent_window_hours is not None:
+        config.recent_window_hours = recent_window_hours
     config.__post_init__()
     return config
 
