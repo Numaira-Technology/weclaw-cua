@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass
@@ -19,6 +20,24 @@ class ChatMessage:
     content: str
     time: str | None
     type: str  # e.g., 'text', 'image', 'file', 'system'
+
+
+@dataclass
+class ChatImageChunk:
+    """A stitched chat-image chunk ready for message extraction."""
+
+    chunk_index: int
+    chunk_total: int
+    image: Any
+
+
+@dataclass
+class CapturedChatImages:
+    """Captured/stitched images for one chat, before VLM message extraction."""
+
+    chat_name: str
+    chunks: list[ChatImageChunk]
+    max_messages: int | None = None
 
 
 @dataclass

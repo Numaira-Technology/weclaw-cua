@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 from shared.datatypes import ChatMessage, SidebarRow
 from algo_a.pipeline_a_win import _find_first_visible_config_match
@@ -37,6 +38,8 @@ class FakeFastCaptureDriver:
         self.viewport_idx = 0
         self.clicked: list[str] = []
         self.message_calls: list[tuple[str, bool]] = []
+        self.capture_calls: list[tuple[str, bool]] = []
+        self.extract_calls: list[str] = []
         self.scrolls: list[str] = []
 
     def get_fast_sidebar_rows(self, window: object) -> list[SidebarRow]:
@@ -67,6 +70,22 @@ class FakeFastCaptureDriver:
         skip_navigation_vlm: bool = False,
     ) -> list[ChatMessage]:
         self.message_calls.append((chat_name, skip_navigation_vlm))
+        return [ChatMessage(sender="Alice", content=f"hello {chat_name}", time=None, type="text")]
+
+    def capture_chat_messages(
+        self,
+        chat_name: str,
+        max_messages: int | None = None,
+        max_scrolls: int | None = None,
+        skip_navigation_vlm: bool = False,
+    ) -> object:
+        assert max_messages is None
+        self.capture_calls.append((chat_name, skip_navigation_vlm))
+        return SimpleNamespace(chat_name=chat_name)
+
+    def extract_chat_messages_from_capture(self, captured: object) -> list[ChatMessage]:
+        chat_name = str(getattr(captured, "chat_name"))
+        self.extract_calls.append(chat_name)
         return [ChatMessage(sender="Alice", content=f"hello {chat_name}", time=None, type="text")]
 
     def scroll_sidebar(self, window: object, direction: str) -> None:
@@ -102,7 +121,9 @@ class FakeRect:
         return self.y + self.height
 
 
-def test_fast_capture_all_sweeps_without_current_chat_vlm(tmp_path) -> None:
+def test_fast_capture_all_sweeps_without_current_chat_vlm(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_WORKERS", "1")
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_MAX_PENDING", "2")
     driver = FakeFastCaptureDriver()
     config = FakeConfig(output_dir=str(tmp_path))
 
@@ -110,11 +131,13 @@ def test_fast_capture_all_sweeps_without_current_chat_vlm(tmp_path) -> None:
 
     assert len(paths) == 3
     assert driver.clicked == ["Short A", "Short B", "Short C"]
-    assert driver.message_calls == [
+    assert driver.message_calls == []
+    assert driver.capture_calls == [
         ("Full Chat A", True),
         ("Full Chat B", True),
         ("Full Chat C", True),
     ]
+    assert driver.extract_calls == ["Full Chat A", "Full Chat B", "Full Chat C"]
     assert driver.scrolls == ["up", "up", "up", "up", "up", "up", "down"]
 
 
