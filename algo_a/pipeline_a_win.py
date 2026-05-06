@@ -5,10 +5,8 @@ This new version uses an OCR-based driver.
 
 import sys
 import os
-import json
 import re
 import time
-from dataclasses import asdict
 from types import SimpleNamespace
 from typing import Any
 
@@ -16,6 +14,14 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+from algo_a.async_chat_extraction import (
+    AsyncChatExtractionQueue,
+    ChatWriteResult,
+    PendingChatWrite,
+    make_async_queue,
+    record_chat_write_results,
+    write_chat_messages_json,
+)
 from algo_a.list_target_chats_win import _sidebar_names_match, list_target_chats
 from algo_a.sidebar_scroll_to_top import scroll_sidebar_to_top
 from config.weclaw_config import WeclawConfig
@@ -150,6 +156,7 @@ def _extract_save_current_chat(
     config: WeclawConfig,
     chat_name: str,
     written_paths: list[str],
+    output_index: int | None = None,
 ) -> bool:
     messages = driver.get_chat_messages(
         chat_name,
@@ -159,19 +166,75 @@ def _extract_save_current_chat(
     if not messages:
         print(f"[WARN] No messages were extracted from '{chat_name}'.")
         return False
-    fallback = f"chat_{len(written_paths) + 1}"
-    safe_filename = _safe_output_filename(chat_name, fallback)
-    output_path = os.path.join(config.output_dir, f"{safe_filename}.json")
-    with open(output_path, "w", encoding="utf-8") as f:
-        rows_out = []
-        for msg in messages:
-            d = asdict(msg)
-            d["chat_name"] = chat_name
-            d["sender"] = d["sender"] or ""
-            rows_out.append(d)
-        json.dump(rows_out, f, ensure_ascii=False, indent=2)
+    output_path = write_chat_messages_json(
+        output_dir=config.output_dir,
+        chat_name=chat_name,
+        messages=messages,
+        output_index=output_index or len(written_paths) + 1,
+    )
     print(f"[SUCCESS] Successfully saved {len(messages)} messages to {output_path}")
     written_paths.append(output_path)
+    return True
+
+
+def _finish_async_extractions(
+    extraction_queue: AsyncChatExtractionQueue | None,
+    async_results: list[ChatWriteResult],
+    written_paths: list[str],
+) -> None:
+    if extraction_queue is None:
+        return
+    async_results.extend(extraction_queue.drain())
+    record_chat_write_results(async_results, written_paths)
+
+
+def _capture_or_queue_current_chat(
+    driver: Any,
+    config: WeclawConfig,
+    chat_name: str,
+    written_paths: list[str],
+    *,
+    output_index: int,
+    skip_navigation_vlm: bool,
+    extraction_queue: AsyncChatExtractionQueue | None,
+    async_results: list[ChatWriteResult],
+) -> bool:
+    if extraction_queue is None:
+        messages = driver.get_chat_messages(
+            chat_name,
+            max_scrolls=config.chat_max_scrolls,
+            skip_navigation_vlm=skip_navigation_vlm,
+        )
+        if not messages:
+            print(f"[WARN] No messages were extracted from '{chat_name}'.")
+            return False
+        output_path = write_chat_messages_json(
+            output_dir=config.output_dir,
+            chat_name=chat_name,
+            messages=messages,
+            output_index=output_index,
+        )
+        print(f"[SUCCESS] Successfully saved {len(messages)} messages to {output_path}")
+        written_paths.append(output_path)
+        return True
+
+    captured = driver.capture_chat_messages(
+        chat_name,
+        max_scrolls=config.chat_max_scrolls,
+        skip_navigation_vlm=skip_navigation_vlm,
+    )
+    if getattr(captured, "chunks", None) == []:
+        print(f"[WARN] No screenshots were captured for '{chat_name}'.")
+        return False
+    async_results.extend(
+        extraction_queue.submit(
+            PendingChatWrite(
+                output_index=output_index,
+                chat_name=chat_name,
+                captured=captured,
+            )
+        )
+    )
     return True
 
 
@@ -182,6 +245,10 @@ def _click_verify_extract_save(
     matched_cfg: str,
     row: Any,
     written_paths: list[str],
+    *,
+    output_index: int,
+    extraction_queue: AsyncChatExtractionQueue | None,
+    async_results: list[ChatWriteResult],
 ) -> bool:
     chat = SimpleNamespace(name=row.name, ui_element=row)
     click_successful = False
@@ -212,22 +279,16 @@ def _click_verify_extract_save(
         )
         return False
 
-    messages = driver.get_chat_messages(chat.name, max_scrolls=config.chat_max_scrolls)
-    if not messages:
-        print(f"[WARN] No messages were extracted from '{chat.name}'.")
-    else:
-        safe_filename = "".join(c for c in chat.name if c.isalnum() or c in (" ", "_")).rstrip()
-        output_path = os.path.join(config.output_dir, f"{safe_filename}.json")
-        with open(output_path, "w", encoding="utf-8") as f:
-            messages_as_dict = []
-            for msg in messages:
-                d = asdict(msg)
-                d["chat_name"] = chat.name
-                d["sender"] = d["sender"] or ""
-                messages_as_dict.append(d)
-            json.dump(messages_as_dict, f, ensure_ascii=False, indent=2)
-        print(f"[SUCCESS] Successfully saved {len(messages)} messages to {output_path}")
-        written_paths.append(output_path)
+    _capture_or_queue_current_chat(
+        driver,
+        config,
+        chat.name,
+        written_paths,
+        output_index=output_index,
+        skip_navigation_vlm=False,
+        extraction_queue=extraction_queue,
+        async_results=async_results,
+    )
     return True
 
 
@@ -281,6 +342,8 @@ def _run_capture_all_fast_path(
     config: WeclawConfig,
     written_paths: list[str],
 ) -> list[str]:
+    extraction_queue = make_async_queue(driver, config.output_dir)
+    async_results: list[ChatWriteResult] = []
     sidebar_scrolls = config.sidebar_max_scrolls
     scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
     allowed_sidebar_names = _capture_sidebar_chat_names(
@@ -333,7 +396,16 @@ def _run_capture_all_fast_path(
                 f"\n--- Fast processing chat {processed_count}: "
                 f"sidebar={sidebar_name!r}, title={chat_name!r} ---"
             )
-            ok = _extract_save_current_chat(driver, config, chat_name, written_paths)
+            ok = _capture_or_queue_current_chat(
+                driver,
+                config,
+                chat_name,
+                written_paths,
+                output_index=processed_count,
+                skip_navigation_vlm=True,
+                extraction_queue=extraction_queue,
+                async_results=async_results,
+            )
             processed_keys.add(sidebar_key)
             processed_keys.add(chat_key)
             if not ok:
@@ -346,6 +418,7 @@ def _run_capture_all_fast_path(
         time.sleep(0.8)
 
     print("\n[SUCCESS] Fast capture-all sweep finished.")
+    _finish_async_extractions(extraction_queue, async_results, written_paths)
     return written_paths
 
 
@@ -386,6 +459,9 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
         print("[*] Mode: true capture-all fast path (OCR sidebar sweep).")
         return _run_capture_all_fast_path(driver, window, config, written_paths)
 
+    extraction_queue = make_async_queue(driver, config.output_dir)
+    async_results: list[ChatWriteResult] = []
+
     if _groups_config_means_all_groups(config.groups_to_monitor):
         print(
             f"[*] Mode: wildcard chats. chat_type={chat_type!r}. Unread filter: {uo}."
@@ -401,6 +477,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
         )
         if not target_chats:
             print("[+] No target chats found. Pipeline finished.")
+            _finish_async_extractions(extraction_queue, async_results, written_paths)
             return written_paths
         names_order = [c.name for c in target_chats]
         print(f"[+] Located {len(names_order)} target chat(s). Proceeding to click them.")
@@ -435,12 +512,21 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
                 continue
 
             ok = _click_verify_extract_save(
-                driver, window, config, matched_cfg, row, written_paths
+                driver,
+                window,
+                config,
+                matched_cfg,
+                row,
+                written_paths,
+                output_index=processed_num,
+                extraction_queue=extraction_queue,
+                async_results=async_results,
             )
             if not ok:
                 print(f"[WARN] Click failed for {matched_cfg!r}. Skipping.")
 
         print("\n[SUCCESS] Pipeline finished processing all target chats.")
+        _finish_async_extractions(extraction_queue, async_results, written_paths)
         return written_paths
     else:
         print(
@@ -451,6 +537,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
         print(f"[*] Pending config names: {pending!r}")
         if not pending:
             print("[+] No target chats found. Pipeline finished.")
+            _finish_async_extractions(extraction_queue, async_results, written_paths)
             return written_paths
         if pending:
             print(
@@ -484,7 +571,15 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
             print(f"\n--- Processing chat {processed_count}: lookup={matched_cfg!r}, seen={row.name!r} ---")
 
             ok = _click_verify_extract_save(
-                driver, window, config, matched_cfg, row, written_paths
+                driver,
+                window,
+                config,
+                matched_cfg,
+                row,
+                written_paths,
+                output_index=processed_count,
+                extraction_queue=extraction_queue,
+                async_results=async_results,
             )
             if not ok:
                 print(
@@ -511,6 +606,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
             )
 
         print("\n[SUCCESS] Pipeline finished processing named targets.")
+        _finish_async_extractions(extraction_queue, async_results, written_paths)
         return written_paths
 
 
