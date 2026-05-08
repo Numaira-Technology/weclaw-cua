@@ -7,6 +7,7 @@ Input spec:
     - Message fields: chat_name, sender, time (nullable), content, type.
     - type is one of: "text", "system", "link_card", "image", "file",
       "recalled", "unsupported" (aligns with vision chat-panel extraction).
+    - Unknown types are automatically converted to "unsupported".
 
 Output spec:
     - messages_to_json: list[Message] -> JSON string.
@@ -37,7 +38,8 @@ class Message:
     type: str
 
     def __post_init__(self) -> None:
-        assert self.type in VALID_MESSAGE_TYPES, f"invalid type: {self.type}"
+        if self.type not in VALID_MESSAGE_TYPES:
+            self.type = "unsupported"
 
 
 def messages_to_json(messages: list[Message]) -> str:
