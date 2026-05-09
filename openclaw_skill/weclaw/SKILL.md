@@ -82,7 +82,7 @@ Use this file in automation to decide whether to notify the user or attach paths
 
 When the user asks about WeChat content **after** a successful run:
 
-1. Run `weclaw-cua qa-context "<user question>"` from `WECLAW_ROOT`. This reads `last_run.json`, ranks nearby message snippets across the captured JSON files, and returns cited context.
+1. Run `weclaw-cua ask "<user question>"` from `WECLAW_ROOT`. This reads `last_run.json`, ranks nearby message snippets across the captured JSON files, and returns cited context.
 2. Answer only from the returned snippets. Prefer quoting chat facts with chat/sender/time; do not invent messages.
 3. If the user explicitly asks about older history, rerun with `--all-history` and optional `--chat "Name"` filters.
 4. If ranked snippets are insufficient, say what is missing and use `weclaw-cua search`, `weclaw-cua history`, or direct JSON reads as a follow-up.

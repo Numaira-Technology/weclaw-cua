@@ -21,7 +21,7 @@ from shared.chat_context import build_message_context
 from shared.chat_context import discover_message_json_paths
 from shared.message_schema import Message, messages_to_json
 from shared.run_manifest import build_last_run_payload, write_last_run
-from weclaw_cli.commands.qa_context import qa_context
+from weclaw_cli.commands.ask import ask
 
 
 class TestChatContext(unittest.TestCase):
@@ -102,7 +102,7 @@ class TestChatContext(unittest.TestCase):
         self.assertEqual(chunks[0].chat, "Alice")
         self.assertIn("12:30", chunks[0].messages[0]["content"])
 
-    def test_qa_context_cli_returns_ranked_chunks(self) -> None:
+    def test_ask_cli_returns_ranked_chunks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             message_path = self._write_messages(
                 temp_dir,
@@ -133,7 +133,7 @@ class TestChatContext(unittest.TestCase):
             )
             write_last_run(temp_dir, payload)
 
-            result = CliRunner().invoke(qa_context, ["approval"], obj={"config_path": config_path})
+            result = CliRunner().invoke(ask, ["approval"], obj={"config_path": config_path})
 
         self.assertEqual(result.exit_code, 0, result.output)
         payload = json.loads(result.output)

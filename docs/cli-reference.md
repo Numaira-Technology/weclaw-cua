@@ -273,7 +273,7 @@ JSON output:
 }
 ```
 
-### `qa-context`
+### `ask`
 
 Retrieves ranked message windows for answering a natural-language question. By default it reads `last_run.json` and searches only the files captured by the most recent run. Use `--all-history` to search every captured chat JSON file in `output_dir`.
 

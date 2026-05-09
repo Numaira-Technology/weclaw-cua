@@ -1,8 +1,8 @@
-"""qa-context command — retrieve ranked message context for answering questions.
+"""ask command — retrieve ranked message context for answering questions.
 
 Usage:
-    weclaw qa-context "When is tomorrow's meeting?"
-    weclaw qa-context "Who needs a reply?" --all-history --chat "Team"
+    weclaw ask "When is tomorrow's meeting?"
+    weclaw ask "Who needs a reply?" --all-history --chat "Team"
 
 Input spec:
     - Reads last_run.json message_json_paths by default.
@@ -24,7 +24,7 @@ from shared.chat_context import discover_message_json_paths
 from ..output.formatter import output
 
 
-@click.command("qa-context")
+@click.command("ask")
 @click.argument("question")
 @click.option("--chat", multiple=True, help="Limit to specific chat(s)")
 @click.option("--limit", default=5, help="Max context chunks (max 50)")
@@ -37,14 +37,14 @@ from ..output.formatter import output
               type=click.Choice(["text", "system", "link_card", "image", "file", "recalled", "unsupported"]),
               help="Filter center messages by type")
 @click.pass_context
-def qa_context(ctx, question, chat, limit, window, all_history, fmt, msg_type):
-    """Return ranked message snippets for agent Q&A.
+def ask(ctx, question, chat, limit, window, all_history, fmt, msg_type):
+    """Return ranked message snippets for answering a chat-log question.
 
     \b
     Examples:
-      weclaw qa-context "明天中午客户会几点？"
-      weclaw qa-context "Who mentioned approval?" --all-history
-      weclaw qa-context "deadline" --chat "Project Alpha" --format text
+      weclaw ask "明天中午客户会几点？"
+      weclaw ask "Who mentioned approval?" --all-history
+      weclaw ask "deadline" --chat "Project Alpha" --format text
     """
     from ..context import load_app_context
 
@@ -85,7 +85,7 @@ def qa_context(ctx, question, chat, limit, window, all_history, fmt, msg_type):
 
 def _format_text(result: dict) -> str:
     lines = [
-        f'Q&A context for "{result["question"]}" ({result["count"]} chunks, scope={result["scope"]})',
+        f'Ask context for "{result["question"]}" ({result["count"]} chunks, scope={result["scope"]})',
         result["answer_instructions"],
     ]
     if not result["chunks"]:

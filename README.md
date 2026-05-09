@@ -46,7 +46,7 @@
 | **OpenClaw gateway** | Reuse your local OpenClaw gateway — no separate OpenRouter key |
 | **AI-first** | JSON output by default, designed for LLM agent tool calls |
 | **Fully local** | All UI automation runs on your machine; data never leaves your device |
-| **14 commands** | init, run, capture, finalize, report, build-report-prompt, sessions, history, search, qa-context, export, stats, unread, new-messages |
+| **14 commands** | init, run, capture, finalize, report, build-report-prompt, sessions, history, search, ask, export, stats, unread, new-messages |
 
 ---
 
@@ -235,7 +235,7 @@ weclaw-cua report                   # report from existing captures
 weclaw-cua sessions                 # list captured chats
 weclaw-cua history "Group A" --limit 20
 weclaw-cua search "deadline" --chat "Team"
-weclaw-cua qa-context "Who needs a reply?"
+weclaw-cua ask "Who needs a reply?"
 ```
 
 ---
@@ -379,7 +379,7 @@ Query commands (work on captured data, no LLM needed):
 - `weclaw-cua sessions` — list captured chats
 - `weclaw-cua history "NAME" --limit 20 --format text` — view messages
 - `weclaw-cua search "KEYWORD" --chat "CHAT_NAME"` — search messages
-- `weclaw-cua qa-context "QUESTION"` — ranked snippets for answering questions from captured messages
+- `weclaw-cua ask "QUESTION"` — ranked snippets for answering questions from captured messages
 - `weclaw-cua stats "CHAT" --format text` — statistics
 - `weclaw-cua export "CHAT" --format markdown` — export chat
 - `weclaw-cua new-messages` — incremental new messages
@@ -404,7 +404,7 @@ See [`docs/cli-reference.md`](docs/cli-reference.md) for every command's options
 | `sessions` | List captured chat sessions |
 | `history` | View messages from a specific session |
 | `search` | Search across captured messages |
-| `qa-context` | Retrieve ranked cited snippets for agent Q&A |
+| `ask` | Retrieve ranked cited snippets for chat-log Q&A |
 | `export` | Export a session to markdown or plain text |
 | `stats` | Message statistics for a session |
 | `unread` | Scan sidebar for unread chats via vision AI |
@@ -500,12 +500,12 @@ weclaw-cua search "report" --type text
 
 Options: `--chat` (repeatable), `--limit`, `--offset`, `--type`, `--format`
 
-### `qa-context`
+### `ask`
 
 ```bash
-weclaw-cua qa-context "When is tomorrow's meeting?"
-weclaw-cua qa-context "Who needs a reply?" --all-history
-weclaw-cua qa-context "deadline" --chat "Team" --format text
+weclaw-cua ask "When is tomorrow's meeting?"
+weclaw-cua ask "Who needs a reply?" --all-history
+weclaw-cua ask "deadline" --chat "Team" --format text
 ```
 
 Returns ranked message windows for an agent to answer from, using `last_run.json` by default and `--all-history` when older exports are needed.
