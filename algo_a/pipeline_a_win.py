@@ -7,7 +7,6 @@ import sys
 import os
 import re
 import time
-from types import SimpleNamespace
 from typing import Any
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -54,6 +53,19 @@ def _chat_type_allows_row(row: Any, chat_type: str) -> bool:
         or (chat_type == "group" and is_group)
         or (chat_type == "private" and not is_group)
     )
+
+
+def _sidebar_filter_rejection_reason(
+    row: Any,
+    unread_only: bool,
+    chat_type: str,
+) -> str | None:
+    assert chat_type in ("group", "private", "all")
+    if not _chat_type_allows_row(row, chat_type):
+        return f"chat_type={chat_type!r}"
+    if unread_only and getattr(row, "badge_text", None) is None:
+        return "no_unread_badge"
+    return None
 
 
 def _is_chat_name_match(ui_name: str, config_name: str) -> bool:
@@ -250,14 +262,14 @@ def _click_verify_extract_save(
     extraction_queue: AsyncChatExtractionQueue | None,
     async_results: list[ChatWriteResult],
 ) -> bool:
-    chat = SimpleNamespace(name=row.name, ui_element=row)
+    chat_name = str(getattr(row, "name", "") or "").strip()
     click_successful = False
     for attempt in range(3):
         print(
-            f"[*] Attempting to click '{chat.name}' (lookup={matched_cfg!r}, "
+            f"[*] Attempting to click '{chat_name}' (lookup={matched_cfg!r}, "
             f"Attempt {attempt + 1}/3)"
         )
-        driver.click_row(chat.ui_element, attempt=attempt)
+        driver.click_row(row, attempt=attempt)
         time.sleep(2)
 
         current_chat_name = driver.get_current_chat_name()
@@ -275,14 +287,14 @@ def _click_verify_extract_save(
 
     if not click_successful:
         print(
-            f"[ERROR] Failed to click on chat '{chat.name}' after 3 attempts."
+            f"[ERROR] Failed to click on chat '{chat_name}' after 3 attempts."
         )
         return False
 
     _capture_or_queue_current_chat(
         driver,
         config,
-        chat.name,
+        chat_name,
         written_paths,
         output_index=output_index,
         skip_navigation_vlm=False,
@@ -290,6 +302,37 @@ def _click_verify_extract_save(
         async_results=async_results,
     )
     return True
+
+
+def _click_extract_save_fast(
+    driver: Any,
+    config: WeclawConfig,
+    matched_cfg: str,
+    row: Any,
+    written_paths: list[str],
+    *,
+    output_index: int,
+    extraction_queue: AsyncChatExtractionQueue | None,
+    async_results: list[ChatWriteResult],
+) -> bool:
+    sidebar_name = str(getattr(row, "name", "") or "").strip()
+    print(f"[*] Fast-clicking named chat: lookup={matched_cfg!r}, seen={sidebar_name!r}")
+    driver.click_row(row, attempt=0)
+    time.sleep(0.8)
+    chat_name = _resolve_current_chat_title(driver, sidebar_name or matched_cfg)
+    ok = _capture_or_queue_current_chat(
+        driver,
+        config,
+        chat_name,
+        written_paths,
+        output_index=output_index,
+        skip_navigation_vlm=True,
+        extraction_queue=extraction_queue,
+        async_results=async_results,
+    )
+    if not ok:
+        print(f"[WARN] Fast named capture failed for {matched_cfg!r}.")
+    return ok
 
 
 def _find_first_visible_config_match(
@@ -317,11 +360,9 @@ def _find_first_visible_config_match(
         if not ui_name:
             print(f"[DEBUG] Filter row #{idx:02d}: reject empty_name")
             continue
-        if not _chat_type_allows_row(row, chat_type):
-            print(f"[DEBUG] Filter row #{idx:02d}: reject chat_type={chat_type!r}")
-            continue
-        if unread_only and getattr(row, "badge_text", None) is None:
-            print(f"[DEBUG] Filter row #{idx:02d}: reject no_unread_badge")
+        rejection_reason = _sidebar_filter_rejection_reason(row, unread_only, chat_type)
+        if rejection_reason is not None:
+            print(f"[DEBUG] Filter row #{idx:02d}: reject {rejection_reason}")
             continue
         for cfg_name in pending_names:
             match = _is_chat_name_match(ui_name, cfg_name)
@@ -547,55 +588,75 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
             )
 
         scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
-        scroll_attempts = 0
-        max_scroll_attempts = sidebar_scrolls
+        seen_viewports: set[tuple[tuple[str, int], ...]] = set()
         processed_count = 0
 
-        while pending and scroll_attempts <= max_scroll_attempts:
-            hit = _find_first_visible_config_match(
-                driver,
-                window,
-                pending,
-                unread_only=uo,
-                chat_type=chat_type,
+        for scan_idx in range(sidebar_scrolls + 1):
+            rows = _get_fast_sidebar_rows(driver, window)
+            rows = [row for row in rows if str(getattr(row, "name", "") or "").strip()]
+            signature = _row_signature(rows)
+            if not rows:
+                print("[WARN] OCR named-chat scan returned no rows. Stopping sweep.")
+                break
+            if signature in seen_viewports:
+                print("[*] OCR named-chat scan reached a repeated viewport. Stopping sweep.")
+                break
+            seen_viewports.add(signature)
+            print(
+                f"--- OCR named-chat viewport {scan_idx + 1}: "
+                f"{len(rows)} row(s), pending={pending!r} ---"
             )
-            if hit is None:
-                scroll_attempts += 1
-                print(f"[*] No pending target in current viewport. Scrolling down ({scroll_attempts}/{max_scroll_attempts})")
-                driver.scroll_sidebar(window, "down")
-                time.sleep(1)
-                continue
 
-            matched_cfg, row = hit
-            processed_count += 1
-            print(f"\n--- Processing chat {processed_count}: lookup={matched_cfg!r}, seen={row.name!r} ---")
-
-            ok = _click_verify_extract_save(
-                driver,
-                window,
-                config,
-                matched_cfg,
-                row,
-                written_paths,
-                output_index=processed_count,
-                extraction_queue=extraction_queue,
-                async_results=async_results,
-            )
-            if not ok:
-                print(
-                    f"[ERROR] Failed to click on chat after 3 attempts. Keeping it pending."
+            for row in rows:
+                ui_name = str(getattr(row, "name", "") or "").strip()
+                rejection_reason = _sidebar_filter_rejection_reason(row, uo, chat_type)
+                if rejection_reason is not None:
+                    print(
+                        f"[DEBUG] OCR named row rejected by {rejection_reason}: "
+                        f"name={ui_name!r} "
+                        f"badge={getattr(row, 'badge_text', None)!r} "
+                        f"is_group={getattr(row, 'is_group', None)!r} "
+                        f"unread_only={uo}; chat_type={chat_type!r}"
+                    )
+                    continue
+                matched_cfg = next(
+                    (cfg_name for cfg_name in pending if _is_chat_name_match(ui_name, cfg_name)),
+                    None,
                 )
-                if scroll_attempts >= max_scroll_attempts:
-                    break
-                scroll_attempts += 1
-                driver.scroll_sidebar(window, "down")
-                time.sleep(1)
-                continue
+                if matched_cfg is None:
+                    continue
 
-            pending = [n for n in pending if n != matched_cfg]
-            print(f"[*] Completed and removed from pending: {matched_cfg!r}; remaining={pending!r}")
-            scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
-            scroll_attempts = 0
+                processed_count += 1
+                print(
+                    f"\n--- Fast processing named chat {processed_count}: "
+                    f"lookup={matched_cfg!r}, seen={ui_name!r} ---"
+                )
+                ok = _click_extract_save_fast(
+                    driver,
+                    config,
+                    matched_cfg,
+                    row,
+                    written_paths,
+                    output_index=processed_count,
+                    extraction_queue=extraction_queue,
+                    async_results=async_results,
+                )
+                if ok:
+                    pending = [n for n in pending if n != matched_cfg]
+                    print(
+                        f"[*] Completed and removed from pending: "
+                        f"{matched_cfg!r}; remaining={pending!r}"
+                    )
+                if not pending:
+                    break
+
+            if not pending:
+                break
+            if scan_idx >= sidebar_scrolls:
+                print(f"[*] Reached sidebar max scrolls ({sidebar_scrolls}). Stopping OCR named sweep.")
+                break
+            driver.scroll_sidebar(window, "down")
+            time.sleep(0.8)
 
         if pending:
             print(f"[WARN] Unresolved config names (not found/verified): {pending!r}")

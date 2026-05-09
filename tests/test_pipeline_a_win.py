@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 from shared.datatypes import ChatMessage, SidebarRow
+import algo_a.pipeline_a_win as pipeline_a_win
 from algo_a.pipeline_a_win import _find_first_visible_config_match
 from algo_a.pipeline_a_win import _row_allowed_by_initial_sidebar_names
 from algo_a.pipeline_a_win import _run_capture_all_fast_path
@@ -98,6 +99,50 @@ class FakeFastCaptureDriver:
         raise AssertionError("fast path must not call VLM current-chat verification")
 
 
+class FakeNamedFastDriver(FakeFastCaptureDriver):
+    def __init__(self) -> None:
+        super().__init__()
+        self.viewports = [
+            [
+                SidebarRow("运营核心群", None, None, (0, 0, 100, 40), False),
+                SidebarRow("无关群", None, None, (0, 40, 100, 80), False),
+            ],
+            [
+                SidebarRow("NY Cua...", None, None, (0, 0, 100, 40), False),
+                SidebarRow("其他群", None, None, (0, 40, 100, 80), False),
+            ],
+        ]
+
+    def find_wechat_window(self, app_name: str) -> object:
+        assert app_name == "微信"
+        return object()
+
+    def get_sidebar_rows(self, window: object) -> list[SidebarRow]:
+        raise AssertionError("named fast path must not call sidebar VLM")
+
+    def resolve_current_chat_title(self, fallback: str = "") -> str:
+        titles = {
+            "运营核心群": "运营核心群",
+            "NY Cua...": "NY Cua Full Name",
+        }
+        return titles.get(fallback, fallback)
+
+
+class FakeFilteredNamedFastDriver(FakeNamedFastDriver):
+    def __init__(self) -> None:
+        super().__init__()
+        self.viewports = [
+            [
+                SidebarRow("Read Group", None, None, (0, 0, 100, 40), True),
+                SidebarRow("Unread Private", None, "1", (0, 40, 100, 80), False),
+                SidebarRow("Unread Group", None, "2", (0, 80, 100, 120), True),
+            ],
+        ]
+
+    def resolve_current_chat_title(self, fallback: str = "") -> str:
+        return fallback
+
+
 class FakeMacChatInfo:
     def __init__(self, name: str, row_rect: object, unread_count: int | None = None) -> None:
         self.name = name
@@ -139,6 +184,59 @@ def test_fast_capture_all_sweeps_without_current_chat_vlm(tmp_path, monkeypatch)
     ]
     assert driver.extract_calls == ["Full Chat A", "Full Chat B", "Full Chat C"]
     assert driver.scrolls == ["up", "up", "up", "up", "up", "up", "down"]
+
+
+def test_named_chats_use_ocr_fast_path_without_navigation_vlm(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_WORKERS", "1")
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_MAX_PENDING", "2")
+    driver = FakeNamedFastDriver()
+    config = SimpleNamespace(
+        wechat_app_name="微信",
+        groups_to_monitor=["运营核心群", "NY Cua Full Name"],
+        sidebar_unread_only=False,
+        chat_type="all",
+        sidebar_max_scrolls=1,
+        chat_max_scrolls=0,
+        output_dir=str(tmp_path),
+    )
+    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+
+    paths = pipeline_a_win._run_sidebar_scan_pipeline(config)
+
+    assert len(paths) == 2
+    assert driver.clicked == ["运营核心群", "NY Cua..."]
+    assert driver.capture_calls == [
+        ("运营核心群", True),
+        ("NY Cua Full Name", True),
+    ]
+    assert driver.extract_calls == ["运营核心群", "NY Cua Full Name"]
+    assert driver.scrolls == ["up", "up", "up", "down"]
+
+
+def test_named_chats_ocr_fast_path_respects_unread_and_chat_type_filters(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_WORKERS", "1")
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_MAX_PENDING", "2")
+    driver = FakeFilteredNamedFastDriver()
+    config = SimpleNamespace(
+        wechat_app_name="微信",
+        groups_to_monitor=["Read Group", "Unread Private", "Unread Group"],
+        sidebar_unread_only=True,
+        chat_type="group",
+        sidebar_max_scrolls=0,
+        chat_max_scrolls=0,
+        output_dir=str(tmp_path),
+    )
+    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+
+    paths = pipeline_a_win._run_sidebar_scan_pipeline(config)
+
+    assert len(paths) == 1
+    assert driver.clicked == ["Unread Group"]
+    assert driver.capture_calls == [("Unread Group", True)]
+    assert driver.extract_calls == ["Unread Group"]
 
 
 def test_initial_sidebar_whitelist_rejects_message_summary() -> None:
@@ -234,6 +332,66 @@ def test_configured_name_matches_truncated_visible_prefix_with_ellipsis() -> Non
     )
 
     assert match == ("运营核心群后半段被隐藏", target)
+
+
+def test_configured_name_matches_ocr_single_dot_truncated_prefix() -> None:
+    target = SidebarRow(
+        name="深圳奇鸟科技.",
+        last_message=None,
+        badge_text=None,
+        bbox=(0, 0, 100, 40),
+        is_group=True,
+    )
+    driver = FakeSidebarDriver([target])
+
+    match = _find_first_visible_config_match(
+        driver,
+        window=object(),
+        pending_names=["深圳奇鸟科技有限公司  泓灼财税服务群"],
+        unread_only=False,
+    )
+
+    assert match == ("深圳奇鸟科技有限公司  泓灼财税服务群", target)
+
+
+def test_configured_name_matches_visible_prefix_without_truncation_marker() -> None:
+    target = SidebarRow(
+        name="深圳奇鸟科技",
+        last_message=None,
+        badge_text=None,
+        bbox=(0, 0, 100, 40),
+        is_group=True,
+    )
+    driver = FakeSidebarDriver([target])
+
+    match = _find_first_visible_config_match(
+        driver,
+        window=object(),
+        pending_names=["深圳奇鸟科技有限公司  泓灼财税服务群"],
+        unread_only=False,
+    )
+
+    assert match == ("深圳奇鸟科技有限公司  泓灼财税服务群", target)
+
+
+def test_configured_name_matches_punctuation_noisy_visible_prefix() -> None:
+    target = SidebarRow(
+        name="深圳-奇鸟科技",
+        last_message=None,
+        badge_text=None,
+        bbox=(0, 0, 100, 40),
+        is_group=True,
+    )
+    driver = FakeSidebarDriver([target])
+
+    match = _find_first_visible_config_match(
+        driver,
+        window=object(),
+        pending_names=["深圳奇鸟科技有限公司  泓灼财税服务群"],
+        unread_only=False,
+    )
+
+    assert match == ("深圳奇鸟科技有限公司  泓灼财税服务群", target)
 
 
 def test_configured_name_rejects_short_truncated_prefix() -> None:
