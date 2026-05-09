@@ -1,30 +1,33 @@
-"""macOS：左侧「消息」图标双击依次跳入未读会话，替代侧栏反复滚动枚举。
+"""macOS unread navigation pipeline.
+
+Uses the left Messages navigation icon to jump through unread chats, then captures
+each selected chat. Message VLM extraction is queued asynchronously when the
+driver exposes capture/extract hooks.
 
 Usage:
     from algo_a.pipeline_a_mac_nav import run_pipeline_a_mac_nav
     paths = run_pipeline_a_mac_nav(config)
 
-Input spec:
-    - WeclawConfig，且 sidebar_unread_only 为 True（未读驱动）。
-    - 未读行列表来自 click_first_unread_sidebar_row：优先 get_fast_sidebar_rows
-      （本机 Vision / scan_sidebar_once），无快路径时再 get_sidebar_rows。
-    - groups_to_monitor 仅与本次侧栏行名比对，顶栏 OCR 不参与（避免误识消息预览等）。
-
-Output spec:
-    - 与 pipeline_a_win.run_pipeline_a 相同：写入的 JSON 路径列表；chat_name 与文件名
-      使用本次点击的侧栏行名；顶栏 OCR 不参与写出与 groups_to_monitor。
+Matching ``groups_to_monitor`` uses the **sidebar row label** from Vision / fast path
+(``click_first_unread_sidebar_row``), not the header/title bar OCR.
 """
 
 from __future__ import annotations
 
-import json
 import os
 import time
-from dataclasses import asdict
+from typing import Any
 
-from algo_a.list_unread_chats import ocr_chat_allowed_by_groups_to_monitor
+from algo_a.async_chat_extraction import (
+    ChatWriteResult,
+    PendingChatWrite,
+    make_async_queue,
+    record_chat_write_results,
+    write_chat_messages_json,
+)
 from algo_a.list_target_chats_win import _normalize_chat_label
 from config.weclaw_config import WeclawConfig
+from platform_mac.chat_panel_detector import sidebar_name_matches_config_group
 
 _MAX_JUMPS = 200
 _SAME_TITLE_BREAK = 5
@@ -37,20 +40,97 @@ def _groups_config_means_all_groups(names: list[str]) -> bool:
     return len(names) == 1 and str(names[0]).strip() == "*"
 
 
-def _allowed_sidebar_row_for_groups(sidebar_row_name: str, groups: list[str]) -> bool:
-    """侧栏行名（未读跳转中通常为本机 Vision 快路径 OCR）是否与 groups_to_monitor 匹配。
-
-    与 list_unread_chats / filter_chats_by_groups_to_monitor 使用同一套
-    sidebar_name_matches_config_group 规则；不得传入顶栏 OCR 字符串。
-    """
-    if not sidebar_row_name or not str(sidebar_row_name).strip():
+def _allowed_chat_title(title: str, groups: list[str]) -> bool:
+    if not title or not str(title).strip():
         return False
     if _groups_config_means_all_groups(groups):
         return True
-    return ocr_chat_allowed_by_groups_to_monitor(sidebar_row_name.strip(), groups)
+    allowed = [g.strip() for g in groups if g and str(g).strip()]
+    if not allowed:
+        return False
+    t = title.strip()
+    return any(sidebar_name_matches_config_group(t, g) for g in allowed)
 
 
-_allowed_chat_title = _allowed_sidebar_row_for_groups
+def _matching_config_chat_name(title: str, groups: list[str]) -> str | None:
+    """If ``groups_to_monitor`` is an explicit allow-list, map resolved title onto the config string for output."""
+    if not title or not str(title).strip():
+        return None
+    if _groups_config_means_all_groups(groups):
+        return None
+    allowed = [g.strip() for g in groups if g and str(g).strip()]
+    if not allowed:
+        return None
+    t = title.strip()
+    for g in allowed:
+        if sidebar_name_matches_config_group(t, g):
+            return g
+    return None
+
+
+def _finish_async_extractions(
+    extraction_queue: Any,
+    async_results: list[ChatWriteResult],
+    written_paths: list[str],
+) -> None:
+    if extraction_queue is None:
+        return
+    async_results.extend(extraction_queue.drain())
+    record_chat_write_results(async_results, written_paths)
+
+
+def _capture_or_queue_chat(
+    *,
+    driver: Any,
+    config: WeclawConfig,
+    title: str,
+    read_cap: int,
+    output_index: int,
+    written_paths: list[str],
+    extraction_queue: Any,
+    async_results: list[ChatWriteResult],
+    persist_chat_name: str | None = None,
+) -> bool:
+    """``title``: window/header string for extraction; ``persist_chat_name``: config label for saved JSON."""
+    label_for_jobs = persist_chat_name if persist_chat_name else title
+    if extraction_queue is None:
+        messages = driver.get_chat_messages(
+            title,
+            max_messages=read_cap,
+            max_scrolls=config.chat_max_scrolls,
+        )
+        if not messages:
+            print(f"[WARN] No messages were extracted from {title!r}.")
+            return False
+        output_path = write_chat_messages_json(
+            output_dir=config.output_dir,
+            chat_name=title,
+            messages=messages,
+            output_index=output_index,
+            persist_chat_name=persist_chat_name,
+        )
+        print(f"[SUCCESS] Saved {len(messages)} messages to {output_path}")
+        written_paths.append(output_path)
+        return True
+
+    captured = driver.capture_chat_messages(
+        title,
+        max_messages=read_cap,
+        max_scrolls=config.chat_max_scrolls,
+    )
+    if getattr(captured, "chunks", None) == []:
+        print(f"[WARN] No screenshots were captured for {title!r}.")
+        return False
+    async_results.extend(
+        extraction_queue.submit(
+            PendingChatWrite(
+                output_index=output_index,
+                chat_name=label_for_jobs,
+                captured=captured,
+            )
+        )
+    )
+    return True
 
 
 def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[str]:
@@ -63,6 +143,7 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         from algo_a.pipeline_a_win import _run_sidebar_scan_pipeline
 
         return _run_sidebar_scan_pipeline(config, vision_backend=vision_backend)
+
     os.makedirs(config.output_dir, exist_ok=True)
     written_paths: list[str] = []
 
@@ -75,18 +156,22 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         print("[ERROR] Pipeline failed: Could not find WeChat window.")
         return written_paths
 
-    print("[*] macOS: 使用左侧消息图标双击依次处理未读（不滚侧栏枚举）；"
-          "侧栏未读行用本机 Vision 快路径（get_fast_sidebar_rows）；"
-          "写出与 groups_to_monitor 仅以侧栏行名为准（顶栏 OCR 不参与）。")
+    print(
+        "[*] macOS: unread via left Messages icon; sidebar row names from Vision "
+        "(groups_to_monitor matches sidebar labels, not header OCR)."
+    )
 
     if not driver.nav_messages_has_unread_badge():
-        print("[+] 左侧消息入口无未读角标，无需处理。")
+        print("[+] No unread badge on the left Messages entry. Nothing to process.")
         return written_paths
 
+    extraction_queue = make_async_queue(driver, config.output_dir)
+    async_results: list[ChatWriteResult] = []
     jumps = 0
     same_title_run = 0
     last_title: str | None = None
     saved_keys: set[str] = set()
+    processed_count = 0
 
     while driver.nav_messages_has_unread_badge() and jumps < _MAX_JUMPS:
         jumps += 1
@@ -94,14 +179,14 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         time.sleep(_SETTLE_AFTER_DBL)
         read_cap, sidebar_clicked = driver.click_first_unread_sidebar_row()
         if read_cap is None:
-            print("[WARN] 未能点击未读侧栏行，跳过本轮。")
+            print("[WARN] Could not click an unread sidebar row; skipping this round.")
             continue
+
         title = str(sidebar_clicked or "").strip()
         if not title:
-            print(
-                "[WARN] 侧栏行名为空，跳过（顶栏 OCR 不参与监控列表与写出文件名）。"
-            )
+            print("[WARN] Sidebar row name empty; skipping (header OCR not used for monitoring).")
             continue
+
         if title == last_title:
             same_title_run += 1
             if same_title_run >= _SAME_TITLE_BREAK:
@@ -109,43 +194,38 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
                 same_title_run = 0
                 last_title = None
             continue
+
         same_title_run = 0
         last_title = title
 
-        if not _allowed_sidebar_row_for_groups(title, config.groups_to_monitor):
-            print(f"[*] 跳过（不在监控范围）: {title!r}")
+        if not _allowed_chat_title(title, config.groups_to_monitor):
+            print(f"[*] Skipping out-of-scope chat: {title!r}")
             continue
 
         save_key = _normalize_chat_label(title) or title
         if save_key in saved_keys:
-            print(f"[*] 本会话已保存过，跳过重复写出: {title!r}")
+            print(f"[*] Chat already queued/saved; skipping duplicate: {title!r}")
             continue
 
-        messages = driver.get_chat_messages(
-            title,
-            max_messages=read_cap,
-            max_scrolls=config.chat_max_scrolls,
+        processed_count += 1
+        persist = _matching_config_chat_name(title, config.groups_to_monitor)
+        ok = _capture_or_queue_chat(
+            driver=driver,
+            config=config,
+            title=title,
+            read_cap=read_cap,
+            output_index=processed_count,
+            written_paths=written_paths,
+            extraction_queue=extraction_queue,
+            async_results=async_results,
+            persist_chat_name=persist,
         )
-        if not messages:
-            print(f"[WARN] 未提取到消息，跳过保存: {title!r}")
-            continue
-
-        safe_filename = "".join(c for c in title if c.isalnum() or c in (" ", "_")).rstrip()
-        output_path = os.path.join(config.output_dir, f"{safe_filename}.json")
-        with open(output_path, "w", encoding="utf-8") as f:
-            rows_out = []
-            for msg in messages:
-                d = asdict(msg)
-                d["chat_name"] = title
-                d["sender"] = d["sender"] or ""
-                rows_out.append(d)
-            json.dump(rows_out, f, ensure_ascii=False, indent=2)
-        print(f"[SUCCESS] 已保存 {len(messages)} 条消息到 {output_path}")
-        written_paths.append(output_path)
-        saved_keys.add(save_key)
+        if ok:
+            saved_keys.add(save_key)
 
     if jumps >= _MAX_JUMPS:
-        print(f"[WARN] 已达最大跳转次数 {_MAX_JUMPS}，停止。")
+        print(f"[WARN] Reached max unread jumps ({_MAX_JUMPS}); stopping.")
 
-    print("\n[SUCCESS] macOS 未读跳转流水线结束。")
+    print("\n[SUCCESS] macOS unread navigation pipeline finished.")
+    _finish_async_extractions(extraction_queue, async_results, written_paths)
     return written_paths

@@ -23,6 +23,9 @@ if project_root not in sys.path:
 from shared.platform_api import PlatformDriver
 
 MIN_TRUNCATED_PREFIX_LEN = 4
+# Truncated sidebar vs longer config name: stems shorter than this are treated as ambiguous
+# (see test_configured_name_rejects_short_truncated_prefix: "运营" must not match 运营核心群…).
+MIN_REVERSE_SIDEBAR_PREFIX_LEN = 3
 
 
 @dataclass
@@ -74,11 +77,24 @@ def _sidebar_compact_compare(s: str) -> str:
     return t
 
 
+def _chat_identity_key(text: str) -> str:
+    clean = _normalize_chat_label(text)
+    chars = []
+    for ch in clean:
+        category = unicodedata.category(ch)
+        if category[0] in ("P", "S", "Z"):
+            continue
+        chars.append(ch.casefold())
+    return "".join(chars)
+
+
 def _strip_trailing_ellipsis(text: str) -> str:
     t = text.rstrip()
-    while t.endswith("..."):
-        t = t[:-3].rstrip()
-    return t
+    while True:
+        stripped = t.rstrip(".。．…⋯").rstrip()
+        if stripped == t:
+            return t
+        t = stripped
 
 
 def _safe_truncated_prefix_match(ui_name: str, filter_name: str) -> bool:
@@ -96,7 +112,16 @@ def _safe_truncated_prefix_match(ui_name: str, filter_name: str) -> bool:
         return False
     if len(compact_prefix) >= len(compact_filter):
         return False
-    return compact_filter.startswith(compact_prefix)
+    if compact_filter.startswith(compact_prefix):
+        return True
+
+    identity_prefix = _chat_identity_key(prefix)
+    identity_filter = _chat_identity_key(filter_name)
+    if len(identity_prefix) < MIN_TRUNCATED_PREFIX_LEN:
+        return False
+    if len(identity_prefix) >= len(identity_filter):
+        return False
+    return identity_filter.startswith(identity_prefix)
 
 
 def _sidebar_names_match(ui_name: str, filter_name: str) -> bool:
@@ -106,7 +131,19 @@ def _sidebar_names_match(ui_name: str, filter_name: str) -> bool:
     want = _normalize_chat_label(filter_name)
     if clean_ui == want:
         return True
-    if _sidebar_compact_compare(clean_ui) == _sidebar_compact_compare(want):
+    cu_c = _sidebar_compact_compare(clean_ui)
+    w_c = _sidebar_compact_compare(want)
+    if cu_c == w_c:
+        return True
+    # Config name shorter than OCR label (counts, parentheses, subtitle) — prefix still matches.
+    if len(w_c) >= 2 and len(cu_c) >= len(w_c) and cu_c.startswith(w_c):
+        return True
+    # Sidebar shows a truncated stem of the configured label (compact OCR strictly shorter).
+    if (
+        len(cu_c) >= MIN_REVERSE_SIDEBAR_PREFIX_LEN
+        and len(w_c) > len(cu_c)
+        and w_c.startswith(cu_c)
+    ):
         return True
     return _safe_truncated_prefix_match(clean_ui, want)
 
