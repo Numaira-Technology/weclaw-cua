@@ -21,7 +21,7 @@ from shared.chat_context import build_message_context
 from shared.chat_context import discover_message_json_paths
 from shared.message_schema import Message, messages_to_json
 from shared.run_manifest import build_last_run_payload, write_last_run
-from weclaw_cli.main import cli
+from weclaw_cli.commands.qa_context import qa_context
 
 
 class TestChatContext(unittest.TestCase):
@@ -133,7 +133,7 @@ class TestChatContext(unittest.TestCase):
             )
             write_last_run(temp_dir, payload)
 
-            result = CliRunner().invoke(cli, ["--config", config_path, "qa-context", "approval"])
+            result = CliRunner().invoke(qa_context, ["approval"], obj={"config_path": config_path})
 
         self.assertEqual(result.exit_code, 0, result.output)
         payload = json.loads(result.output)

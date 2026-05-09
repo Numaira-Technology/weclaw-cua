@@ -1,18 +1,8 @@
 """Ranked context retrieval for captured chat messages.
 
-Usage:
-    from shared.chat_context import build_message_context, discover_message_json_paths
-    paths = discover_message_json_paths("output", use_last_run=True)
-    chunks = build_message_context("When is the meeting?", paths)
-
-Input spec:
-    - output_dir contains captured chat JSON files and optional last_run.json.
-    - Message JSON files are arrays of objects with chat_name, sender, time, content, type.
-    - question is the user's natural-language question.
-
-Output spec:
-    - discover_message_json_paths returns absolute JSON paths.
-    - build_message_context returns ranked MessageContextChunk objects with cited messages.
+Usage: build_message_context("When is the meeting?", json_paths)
+Input spec: chat JSON arrays with chat_name, sender, time, content, type.
+Output spec: ranked MessageContextChunk objects with cited message windows.
 """
 
 from __future__ import annotations
@@ -22,42 +12,14 @@ import math
 import os
 import re
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 
-
-@dataclass
-class MessageContextChunk:
-    chat: str
-    source_path: str
-    center_index: int
-    score: float
-    matched_terms: list[str]
-    messages: list[dict]
+from shared.chat_context_paths import discover_message_json_paths
+from shared.message_context_chunk import MessageContextChunk
 
 
 TOKEN_RE = re.compile(r"[a-z0-9_]+|[\u4e00-\u9fff]+", re.IGNORECASE)
 CJK_RE = re.compile(r"^[\u4e00-\u9fff]+$")
-METADATA_FILES = {"last_run.json", "last_check.json"}
-
-
-def discover_message_json_paths(output_dir: str, *, use_last_run: bool = True) -> list[str]:
-    assert output_dir
-    output_dir = os.path.abspath(output_dir)
-    manifest_path = os.path.join(output_dir, "last_run.json")
-    if use_last_run and os.path.isfile(manifest_path):
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            manifest = json.load(f)
-        assert isinstance(manifest, dict)
-        paths = manifest.get("message_json_paths", [])
-        assert isinstance(paths, list)
-        return [os.path.abspath(str(path)) for path in paths]
-
-    assert os.path.isdir(output_dir), f"output directory not found: {output_dir}"
-    names = [
-        name for name in os.listdir(output_dir)
-        if name.endswith(".json") and name not in METADATA_FILES and not name.startswith("last_")
-    ]
-    return [os.path.abspath(os.path.join(output_dir, name)) for name in sorted(names)]
 
 
 def build_message_context(
