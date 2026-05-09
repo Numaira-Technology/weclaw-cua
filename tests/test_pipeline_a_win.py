@@ -151,6 +151,30 @@ class FakeFilteredNamedFastDriver(FakeNamedFastDriver):
         raise AssertionError("semantic named filters must not use OCR-only rows")
 
 
+class FakeSemanticFailureNamedDriver(FakeFilteredNamedFastDriver):
+    def __init__(self) -> None:
+        super().__init__()
+        self.viewports = [
+            [
+                SidebarRow("Failed Group", None, "1", (0, 0, 100, 40), True),
+                SidebarRow("Unread Group", None, "2", (0, 40, 100, 80), True),
+            ],
+        ]
+
+    def capture_chat_messages(
+        self,
+        chat_name: str,
+        max_messages: int | None = None,
+        max_scrolls: int | None = None,
+        skip_navigation_vlm: bool = False,
+    ) -> object:
+        assert max_messages is None
+        self.capture_calls.append((chat_name, skip_navigation_vlm))
+        if chat_name == "Failed Group":
+            return SimpleNamespace(chat_name=chat_name, chunks=[])
+        return SimpleNamespace(chat_name=chat_name)
+
+
 class FakeMacChatInfo:
     def __init__(self, name: str, row_rect: object, unread_count: int | None = None) -> None:
         self.name = name
@@ -249,6 +273,35 @@ def test_named_chats_semantic_path_respects_unread_and_chat_type_filters(
     assert len(paths) == 1
     assert driver.clicked == ["Unread Group"]
     assert driver.capture_calls == [("Unread Group", True)]
+    assert driver.extract_calls == ["Unread Group"]
+
+
+def test_named_chats_semantic_path_continues_after_failed_capture(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_WORKERS", "1")
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_MAX_PENDING", "2")
+    driver = FakeSemanticFailureNamedDriver()
+    config = SimpleNamespace(
+        wechat_app_name="微信",
+        groups_to_monitor=["Failed Group", "Unread Group"],
+        sidebar_unread_only=True,
+        chat_type="group",
+        sidebar_max_scrolls=0,
+        chat_max_scrolls=0,
+        output_dir=str(tmp_path),
+    )
+    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+
+    paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
+
+    assert len(paths) == 1
+    assert driver.clicked == ["Failed Group", "Unread Group"]
+    assert driver.capture_calls == [
+        ("Failed Group", True),
+        ("Unread Group", True),
+    ]
     assert driver.extract_calls == ["Unread Group"]
 
 

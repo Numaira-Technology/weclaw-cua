@@ -596,12 +596,14 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
             print("[*] Using semantic sidebar scan for named chat filters.")
             scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
             processed_count = 0
+            attempted_names: set[str] = set()
             for scan_idx in range(sidebar_scrolls + 1):
-                while pending:
+                pending_candidates = [name for name in pending if name not in attempted_names]
+                while pending_candidates:
                     hit = _find_first_visible_config_match(
                         driver,
                         window,
-                        pending,
+                        pending_candidates,
                         unread_only=uo,
                         chat_type=chat_type,
                     )
@@ -626,9 +628,11 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
                             f"{matched_cfg!r}; remaining={pending!r}"
                         )
                     else:
-                        break
+                        attempted_names.add(matched_cfg)
+                        print(f"[WARN] Failed semantic named capture for {matched_cfg!r}. Continuing scan.")
                     if not pending:
                         break
+                    pending_candidates = [name for name in pending if name not in attempted_names]
                 if not pending:
                     break
                 if scan_idx >= sidebar_scrolls:
@@ -684,7 +688,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
                         f"unread_only={uo}; chat_type={chat_type!r}"
                     )
                     continue
-                matched_cfg = next(
+                matched_cfg: str | None = next(
                     (cfg_name for cfg_name in pending if _is_chat_name_match(ui_name, cfg_name)),
                     None,
                 )
