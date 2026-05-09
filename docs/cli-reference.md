@@ -273,6 +273,46 @@ JSON output:
 }
 ```
 
+### `qa-context`
+
+Retrieves ranked message windows for answering a natural-language question. By default it reads `last_run.json` and searches only the files captured by the most recent run. Use `--all-history` to search every captured chat JSON file in `output_dir`.
+
+Options:
+
+- `--chat NAME`: repeatable chat filter.
+- `--limit N`: maximum ranked chunks, capped at 50.
+- `--window N`: number of messages before and after each matched center message.
+- `--all-history`: search all exports instead of only `last_run.json` paths.
+- `--type text|system|link_card|image|file|recalled|unsupported`: filter center messages by type.
+- `--format json|text`.
+
+JSON output:
+
+```json
+{
+  "question": "When is tomorrow's meeting?",
+  "scope": "last run",
+  "context_method": "ranked lexical chunks over captured message files",
+  "answer_instructions": "Answer only from these cited messages; if they are insufficient, say what is missing.",
+  "source_files": ["/abs/output/Team.json"],
+  "chat": [],
+  "type": null,
+  "count": 1,
+  "limit": 5,
+  "window": 2,
+  "chunks": [
+    {
+      "chat": "Team",
+      "source_path": "/abs/output/Team.json",
+      "center_index": 3,
+      "score": 12.5,
+      "matched_terms": ["meeting"],
+      "messages": []
+    }
+  ]
+}
+```
+
  ### `export`
 
  Exports one captured chat as Markdown or plain text.
