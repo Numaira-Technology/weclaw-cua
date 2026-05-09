@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from types import SimpleNamespace
+from typing import Any, cast
 
 from shared.datatypes import ChatMessage, SidebarRow
 import algo_a.pipeline_a_win as pipeline_a_win
@@ -142,6 +143,13 @@ class FakeFilteredNamedFastDriver(FakeNamedFastDriver):
     def resolve_current_chat_title(self, fallback: str = "") -> str:
         return fallback
 
+    def get_sidebar_rows(self, window: object) -> list[SidebarRow]:
+        assert window is not None
+        return self.viewports[self.viewport_idx]
+
+    def get_fast_sidebar_rows(self, window: object) -> list[SidebarRow]:
+        raise AssertionError("semantic named filters must not use OCR-only rows")
+
 
 class FakeMacChatInfo:
     def __init__(self, name: str, row_rect: object, unread_count: int | None = None) -> None:
@@ -172,7 +180,12 @@ def test_fast_capture_all_sweeps_without_current_chat_vlm(tmp_path, monkeypatch)
     driver = FakeFastCaptureDriver()
     config = FakeConfig(output_dir=str(tmp_path))
 
-    paths = _run_capture_all_fast_path(driver, window=object(), config=config, written_paths=[])
+    paths = _run_capture_all_fast_path(
+        driver,
+        window=object(),
+        config=cast(Any, config),
+        written_paths=[],
+    )
 
     assert len(paths) == 3
     assert driver.clicked == ["Short A", "Short B", "Short C"]
@@ -201,7 +214,7 @@ def test_named_chats_use_ocr_fast_path_without_navigation_vlm(tmp_path, monkeypa
     )
     monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
 
-    paths = pipeline_a_win._run_sidebar_scan_pipeline(config)
+    paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
 
     assert len(paths) == 2
     assert driver.clicked == ["运营核心群", "NY Cua..."]
@@ -213,7 +226,7 @@ def test_named_chats_use_ocr_fast_path_without_navigation_vlm(tmp_path, monkeypa
     assert driver.scrolls == ["up", "up", "up", "down"]
 
 
-def test_named_chats_ocr_fast_path_respects_unread_and_chat_type_filters(
+def test_named_chats_semantic_path_respects_unread_and_chat_type_filters(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -231,7 +244,7 @@ def test_named_chats_ocr_fast_path_respects_unread_and_chat_type_filters(
     )
     monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
 
-    paths = pipeline_a_win._run_sidebar_scan_pipeline(config)
+    paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
 
     assert len(paths) == 1
     assert driver.clicked == ["Unread Group"]
