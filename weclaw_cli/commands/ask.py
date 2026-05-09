@@ -18,9 +18,6 @@ import os
 
 import click
 
-from shared.chat_context import build_message_context
-from shared.chat_context import context_chunks_to_dicts
-from shared.chat_context import discover_message_json_paths
 from ..output.formatter import output
 
 
@@ -47,6 +44,9 @@ def ask(ctx, question, chat, limit, window, all_history, fmt, msg_type):
       weclaw ask "deadline" --chat "Project Alpha" --format text
     """
     from ..context import load_app_context
+    from shared.chat_context import build_message_context
+    from shared.chat_context import context_chunks_to_dicts
+    from shared.chat_context import discover_message_json_paths
 
     assert limit > 0
     assert limit <= 50

@@ -102,6 +102,11 @@ def _fast_capture_enabled(config: WeclawConfig) -> bool:
     )
 
 
+def _fast_named_scan_enabled(unread_only: bool, chat_type: str) -> bool:
+    assert chat_type in ("group", "private", "all")
+    return chat_type == "all" and not unread_only
+
+
 def _normalized_chat_key(name: str) -> str:
     clean = re.sub(r"\s+", " ", str(name or "")).strip()
     return clean.casefold()
@@ -587,6 +592,70 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
                 "chat allowed by chat_type."
             )
 
+        if not _fast_named_scan_enabled(uo, chat_type):
+            print("[*] Using semantic sidebar scan for named chat filters.")
+            scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
+            processed_count = 0
+            attempted_names: set[str] = set()
+            for scan_idx in range(sidebar_scrolls + 1):
+                pending_candidates = [name for name in pending if name not in attempted_names]
+                while pending_candidates:
+                    hit = _find_first_visible_config_match(
+                        driver,
+                        window,
+                        pending_candidates,
+                        unread_only=uo,
+                        chat_type=chat_type,
+                    )
+                    if hit is None:
+                        break
+                    matched_cfg, row = hit
+                    processed_count += 1
+                    ok = _click_extract_save_fast(
+                        driver,
+                        config,
+                        matched_cfg,
+                        row,
+                        written_paths,
+                        output_index=processed_count,
+                        extraction_queue=extraction_queue,
+                        async_results=async_results,
+                    )
+                    if ok:
+                        pending = [n for n in pending if n != matched_cfg]
+                        print(
+                            f"[*] Completed and removed from pending: "
+                            f"{matched_cfg!r}; remaining={pending!r}"
+                        )
+                    else:
+                        attempted_names.add(matched_cfg)
+                        print(f"[WARN] Failed semantic named capture for {matched_cfg!r}. Continuing scan.")
+                    if not pending:
+                        break
+                    pending_candidates = [name for name in pending if name not in attempted_names]
+                if not pending:
+                    break
+                if scan_idx >= sidebar_scrolls:
+                    print(
+                        f"[*] Reached sidebar max scrolls ({sidebar_scrolls}). "
+                        "Stopping semantic named scan."
+                    )
+                    break
+                driver.scroll_sidebar(window, "down")
+                time.sleep(1)
+
+            if pending:
+                print(f"[WARN] Unresolved config names (not found/verified): {pending!r}")
+                print(
+                    "[HINT] If these names are examples or stale config values, set "
+                    'groups_to_monitor to [] or ["*"] to capture every chat allowed by '
+                    "chat_type, or paste exact sidebar strings from the debug logs."
+                )
+
+            print("\n[SUCCESS] Pipeline finished processing named targets.")
+            _finish_async_extractions(extraction_queue, async_results, written_paths)
+            return written_paths
+
         scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
         seen_viewports: set[tuple[tuple[str, int], ...]] = set()
         processed_count = 0
@@ -619,7 +688,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
                         f"unread_only={uo}; chat_type={chat_type!r}"
                     )
                     continue
-                matched_cfg = next(
+                matched_cfg: str | None = next(
                     (cfg_name for cfg_name in pending if _is_chat_name_match(ui_name, cfg_name)),
                     None,
                 )
