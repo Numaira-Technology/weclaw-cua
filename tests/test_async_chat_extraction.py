@@ -4,8 +4,18 @@ from types import SimpleNamespace
 from algo_a.async_chat_extraction import (
     AsyncChatExtractionQueue,
     PendingChatWrite,
+    sanitize_chat_json_filename,
 )
 from shared.datatypes import ChatMessage
+
+
+def test_sanitize_chat_json_filename_keeps_cjk_and_emoji() -> None:
+    name = "\U0001f5fd纽约2025艺术新生交流群"
+    assert sanitize_chat_json_filename(name, "fb") == name
+
+
+def test_sanitize_chat_json_filename_strips_illegal_chars() -> None:
+    assert sanitize_chat_json_filename('a:b/c', "fb") == "a_b_c"
 
 
 class SlowFakeDriver:

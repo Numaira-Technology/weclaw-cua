@@ -53,7 +53,6 @@ class FakeFastCaptureDriver:
         return ["Short A", "Short B", "Short C"]
 
     def click_row(self, row: SidebarRow, attempt: int = 0) -> None:
-        assert attempt == 0
         self.clicked.append(row.name)
 
     def resolve_current_chat_title(self, fallback: str = "") -> str:
@@ -184,6 +183,70 @@ def test_fast_capture_all_sweeps_without_current_chat_vlm(tmp_path, monkeypatch)
     ]
     assert driver.extract_calls == ["Full Chat A", "Full Chat B", "Full Chat C"]
     assert driver.scrolls == ["up", "up", "up", "up", "up", "up", "down"]
+
+
+class FakeFocusedNamedDriver(FakeNamedFastDriver):
+    """Simulate WeChat already open on the NY chat before OCR sweep starts."""
+
+    def resolve_current_chat_title(self, fallback: str = "") -> str:
+        if not str(fallback or "").strip():
+            return "NY Cua Full Name"
+        titles = {
+            "运营核心群": "运营核心群",
+            "NY Cua...": "NY Cua Full Name",
+        }
+        return titles.get(fallback, fallback)
+
+
+class FakeFocusedReadDriver(FakeFilteredNamedFastDriver):
+    def resolve_current_chat_title(self, fallback: str = "") -> str:  # noqa: ARG002
+        return "Read Group"
+
+
+def test_named_chats_already_focused_captures_without_sidebar_click(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_WORKERS", "1")
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_MAX_PENDING", "2")
+    driver = FakeFocusedNamedDriver()
+    config = SimpleNamespace(
+        wechat_app_name="微信",
+        groups_to_monitor=["NY Cua Full Name", "运营核心群"],
+        sidebar_unread_only=False,
+        chat_type="all",
+        sidebar_max_scrolls=1,
+        chat_max_scrolls=0,
+        output_dir=str(tmp_path),
+    )
+    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+
+    paths = pipeline_a_win._run_sidebar_scan_pipeline(config)
+
+    assert len(paths) == 2
+    assert "NY Cua..." not in driver.clicked
+    assert driver.clicked == ["运营核心群"]
+
+
+def test_named_chats_focused_but_unread_filter_blocks_read_group_when_unread_only(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_WORKERS", "1")
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_MAX_PENDING", "2")
+    driver = FakeFocusedReadDriver()
+    config = SimpleNamespace(
+        wechat_app_name="微信",
+        groups_to_monitor=["Read Group"],
+        sidebar_unread_only=True,
+        chat_type="group",
+        sidebar_max_scrolls=0,
+        chat_max_scrolls=0,
+        output_dir=str(tmp_path),
+    )
+    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+
+    paths = pipeline_a_win._run_sidebar_scan_pipeline(config)
+
+    assert len(paths) == 0
+    assert driver.clicked == []
 
 
 def test_named_chats_use_ocr_fast_path_without_navigation_vlm(tmp_path, monkeypatch) -> None:

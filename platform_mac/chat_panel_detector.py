@@ -27,6 +27,8 @@ HEADER_PANEL_WIDTH_RATIO = 0.82
 VIEWPORT_TOP_RATIO = 0.07
 VIEWPORT_BOTTOM_RATIO = 0.10
 MIN_TRUNCATED_PREFIX_LEN = 4
+# Shorter substring / prefix stems below this collide with unrelated names (see titles_match + pipeline tests).
+MIN_TITLE_LOOSE_MATCH_STEM_LEN = 3
 
 
 def capture_right_panel(window_img: Image.Image) -> Image.Image:
@@ -335,24 +337,36 @@ def titles_match(detected: str, target: str) -> bool:
     if dn == tn or dn.casefold() == tn.casefold():
         return True
 
-    # 2. 包含匹配
-    if len(tn) >= 2 and tn in dn:
+    # 2. 包含匹配（短串须够长，避免「运营」命中「运营核心群…」）
+    if len(tn) >= 2 and len(tn) < len(dn) and tn in dn and len(tn) >= MIN_TITLE_LOOSE_MATCH_STEM_LEN:
         return True
-    if len(dn) >= 2 and dn in tn:
+    if len(dn) >= 2 and len(dn) < len(tn) and dn in tn and len(dn) >= MIN_TITLE_LOOSE_MATCH_STEM_LEN:
         return True
-    if len(tn) >= 2 and tn.casefold() in dn.casefold():
+    if (
+        len(tn) >= 2
+        and len(tn) < len(dn)
+        and tn.casefold() in dn.casefold()
+        and len(tn) >= MIN_TITLE_LOOSE_MATCH_STEM_LEN
+    ):
         return True
-    if len(dn) >= 2 and dn.casefold() in tn.casefold():
+    if (
+        len(dn) >= 2
+        and len(dn) < len(tn)
+        and dn.casefold() in tn.casefold()
+        and len(dn) >= MIN_TITLE_LOOSE_MATCH_STEM_LEN
+    ):
         return True
 
     if _hyphenated_last_segment_clash(dn, tn):
         return False
 
-    # 3. 整段前缀
-    if len(tn) >= 2 and (dn.startswith(tn) or tn.startswith(dn)):
+    # 3. 整段前缀（短串须够长，否则与规则 2 同类误判）
+    if min(len(dn), len(tn)) >= MIN_TITLE_LOOSE_MATCH_STEM_LEN and (dn.startswith(tn) or tn.startswith(dn)):
         return True
     dnf, tnf = dn.casefold(), tn.casefold()
-    if len(tn) >= 2 and (dnf.startswith(tnf) or tnf.startswith(dnf)):
+    if min(len(dnf), len(tnf)) >= MIN_TITLE_LOOSE_MATCH_STEM_LEN and (
+        dnf.startswith(tnf) or tnf.startswith(dnf)
+    ):
         return True
 
     # 4. 字符级重叠（处理 emoji OCR 伪影 + 单字 OCR 错误）

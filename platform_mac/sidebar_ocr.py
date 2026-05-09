@@ -116,7 +116,7 @@ def _rows_from_lines(
                 last_message=None,
                 badge_text=None,
                 bbox=(sx1, sy1, sx2, sy2),
-                is_group=True,
+                is_group=None,
             )
         )
     return rows

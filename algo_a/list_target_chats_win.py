@@ -23,6 +23,9 @@ if project_root not in sys.path:
 from shared.platform_api import PlatformDriver
 
 MIN_TRUNCATED_PREFIX_LEN = 4
+# Truncated sidebar vs longer config name: stems shorter than this are treated as ambiguous
+# (see test_configured_name_rejects_short_truncated_prefix: "运营" must not match 运营核心群…).
+MIN_REVERSE_SIDEBAR_PREFIX_LEN = 3
 
 
 @dataclass
@@ -128,7 +131,19 @@ def _sidebar_names_match(ui_name: str, filter_name: str) -> bool:
     want = _normalize_chat_label(filter_name)
     if clean_ui == want:
         return True
-    if _sidebar_compact_compare(clean_ui) == _sidebar_compact_compare(want):
+    cu_c = _sidebar_compact_compare(clean_ui)
+    w_c = _sidebar_compact_compare(want)
+    if cu_c == w_c:
+        return True
+    # Config name shorter than OCR label (counts, parentheses, subtitle) — prefix still matches.
+    if len(w_c) >= 2 and len(cu_c) >= len(w_c) and cu_c.startswith(w_c):
+        return True
+    # Sidebar shows a truncated stem of the configured label (compact OCR strictly shorter).
+    if (
+        len(cu_c) >= MIN_REVERSE_SIDEBAR_PREFIX_LEN
+        and len(w_c) > len(cu_c)
+        and w_c.startswith(cu_c)
+    ):
         return True
     return _safe_truncated_prefix_match(clean_ui, want)
 
