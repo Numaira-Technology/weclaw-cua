@@ -7,6 +7,7 @@ Usage:
     weclaw-cua sessions              # list captured message files
     weclaw-cua history "GroupName"   # show messages from a captured chat
     weclaw-cua search "keyword"      # search across captured messages
+    weclaw-cua ask "question"        # ranked snippets for chat-log Q&A
     weclaw-cua export "GroupName"    # export a chat as markdown/txt
     weclaw-cua stats "GroupName"     # message statistics
 
@@ -38,6 +39,7 @@ def cli(ctx, config_path):
       weclaw-cua sessions                          # list captured chats
       weclaw-cua history "Group A" --limit 20      # view chat messages
       weclaw-cua search "deadline" --chat "Team"   # search messages
+      weclaw-cua ask "Who needs a reply?"           # ranked Q&A snippets
       weclaw-cua export "Group A" --format markdown # export chat
     """
     ctx.ensure_object(dict)
@@ -53,6 +55,7 @@ from .commands.build_report_prompt import build_report_prompt
 from .commands.sessions import sessions
 from .commands.history import history
 from .commands.search import search
+from .commands.ask import ask
 from .commands.export import export
 from .commands.stats import stats
 from .commands.unread import unread
@@ -67,6 +70,7 @@ cli.add_command(build_report_prompt)
 cli.add_command(sessions)
 cli.add_command(history)
 cli.add_command(search)
+cli.add_command(ask)
 cli.add_command(export)
 cli.add_command(stats)
 cli.add_command(unread)
