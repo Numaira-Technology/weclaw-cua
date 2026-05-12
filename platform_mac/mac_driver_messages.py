@@ -5,21 +5,17 @@ from typing import TYPE_CHECKING
 
 import pyautogui
 
-from shared.datatypes import ChatMessage
+from shared.chat_chunk_extraction import extract_messages_from_captured_chat
+from shared.datatypes import CapturedChatImages, ChatImageChunk, ChatMessage
 from shared.vision_image_codec import log_vision_timing
-from shared.message_time_window import (
-    chunk_reaches_recent_cutoff,
-    filter_messages_to_recent_window,
-)
 from shared.vision_response_json import parse_json_object_from_model_text
 from shared.vision_prompts import (
-    CHAT_PANEL_PROMPT, CHAT_PANEL_SAFE_CLICK_PROMPT, CURRENT_CHAT_PROMPT,
+    CHAT_PANEL_SAFE_CLICK_PROMPT, CURRENT_CHAT_PROMPT,
     CURRENT_CHAT_Y_PROMPT, NEW_MESSAGES_BUTTON_PROMPT,
 )
 from shared.ocr_hunyuan import get_ocr_engine
 from platform_mac import macos_window as _macos_w
 from platform_mac.chat_panel_scroll_capture import scroll_capture_frames_for_extraction
-from shared.message_dedup import dedupe_chat_messages
 from shared.sidebar_classification import unread_cap_from_badge_text
 from utils.chat_stitch_debug import new_chat_stitch_session_basename, save_chat_stitch_for_vlm
 from utils.image_stitcher import stitch_screenshots
@@ -70,8 +66,29 @@ class MacDriverMessages:
         recent_window_hours: int = 0,
         skip_navigation_vlm: bool = False,
     ) -> list[ChatMessage]:
+        captured = self.capture_chat_messages(
+            chat_name,
+            max_messages=max_messages,
+            max_scrolls=max_scrolls,
+            skip_navigation_vlm=skip_navigation_vlm,
+        )
+        if not captured.chunks:
+            return []
+        return self.extract_chat_messages_from_capture(
+            captured,
+            recent_window_hours=recent_window_hours,
+        )
+
+    def capture_chat_messages(
+        self,
+        chat_name: str,
+        max_messages: int | None = None,
+        max_scrolls: int | None = None,
+        skip_navigation_vlm: bool = False,
+    ) -> CapturedChatImages:
+        """Capture, reverse, chunk, and stitch chat screenshots without VLM extraction."""
         cap_s = f", cap={max_messages}" if max_messages else ""
-        print(f"[*] Starting message extraction for '{chat_name}'{cap_s}...")
+        print(f"[*] Starting message capture for '{chat_name}'{cap_s}...")
         if skip_navigation_vlm:
             self._activate_chat_panel_by_center()
         else:
@@ -84,16 +101,14 @@ class MacDriverMessages:
         )
         if not screenshots:
             print("[WARN] No screenshots were captured.")
-            return []
+            return CapturedChatImages(chat_name=chat_name, chunks=[], max_messages=max_messages)
         print("[*] Reversing screenshot order for processing...")
         screenshots.reverse()
-        all_messages: list[ChatMessage] = []
         chunk_size = 25
         screenshot_chunks = [screenshots[i : i + chunk_size] for i in range(0, len(screenshots), chunk_size)]
-        chunk_results: list[tuple[int, list[ChatMessage]]] = []
+        image_chunks: list[ChatImageChunk] = []
         stitch_session = new_chat_stitch_session_basename()
-        for idx in range(len(screenshot_chunks) - 1, -1, -1):
-            chunk = screenshot_chunks[idx]
+        for idx, chunk in enumerate(screenshot_chunks):
             print(f"--- Processing chunk {idx + 1}/{len(screenshot_chunks)} ---")
             if not chunk:
                 continue
@@ -115,56 +130,32 @@ class MacDriverMessages:
                 stitch_ms=round(stitch_seconds * 1000, 1),
             )
             save_chat_stitch_for_vlm(stitch_session, chat_name, idx, stitched_image)
-            try:
-                response_str = self.vision_ai.query(
-                    CHAT_PANEL_PROMPT, stitched_image, max_tokens=16384
+            image_chunks.append(
+                ChatImageChunk(
+                    chunk_index=idx,
+                    chunk_total=len(screenshot_chunks),
+                    image=stitched_image,
                 )
-            except Exception as e:
-                print(f"[ERROR] Vision AI query for chunk {idx + 1} failed: {e}")
-                continue
-            if not response_str:
-                print(f"[ERROR] No response from AI for message extraction on chunk {idx + 1}.")
-                continue
-            try:
-                data = parse_json_object_from_model_text(response_str)
-                messages_data = data.get("messages", [])
-            except Exception as e:
-                print(f"[ERROR] Failed to parse messages from AI response for chunk {idx + 1}: {e}")
-                print(f"Raw response was: {response_str}")
-                continue
-            chunk_messages = []
-            for j, msg_data in enumerate(messages_data):
-                if "content" not in msg_data:
-                    print(f"[WARN] Chunk {idx + 1}, Msg {j + 1}: Skipping message: {msg_data}")
-                    continue
-                chunk_messages.append(ChatMessage(**msg_data))
-            if chunk_messages:
-                filtered_chunk = filter_messages_to_recent_window(
-                    chunk_messages,
-                    hours=recent_window_hours,
-                )
-                print(f"[+] Extracted {len(chunk_messages)} messages from chunk {idx + 1}.")
-                if filtered_chunk:
-                    chunk_results.append((idx, filtered_chunk))
-                if chunk_reaches_recent_cutoff(
-                    chunk_messages,
-                    hours=recent_window_hours,
-                ):
-                    print(
-                        f"[*] Chunk {idx + 1} reached the {recent_window_hours}-hour cutoff. "
-                        "Skipping older chunks."
-                    )
-                    break
-            else:
-                print(f"[WARN] No valid messages extracted from chunk {idx + 1}.")
-        chunk_results.sort(key=lambda item: item[0])
-        for _, chunk_messages in chunk_results:
-            all_messages.extend(chunk_messages)
-        out = dedupe_chat_messages(all_messages)
-        if max_messages is not None and max_messages > 0 and len(out) > max_messages:
-            out = out[-max_messages:]
-        print(f"[*] Finished processing all chunks. Total messages: {len(out)} ({len(all_messages)} raw).")
-        return out
+            )
+        return CapturedChatImages(
+            chat_name=chat_name,
+            chunks=image_chunks,
+            max_messages=max_messages,
+        )
+
+    def extract_chat_messages_from_capture(
+        self,
+        captured: CapturedChatImages,
+        *,
+        recent_window_hours: int = 0,
+    ) -> list[ChatMessage]:
+        """Run VLM extraction for a captured chat payload."""
+        print(f"[*] Starting queued VLM message extraction for '{captured.chat_name}'...")
+        return extract_messages_from_captured_chat(
+            captured,
+            self.vision_ai,
+            recent_window_hours=recent_window_hours,
+        )
 
     def _activate_chat_panel_by_center(self) -> None:
         print("[*] Activating chat panel at deterministic center.")

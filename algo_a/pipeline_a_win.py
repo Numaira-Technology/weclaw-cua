@@ -5,17 +5,22 @@ This new version uses an OCR-based driver.
 
 import sys
 import os
-import json
 import re
 import time
-from dataclasses import asdict
-from types import SimpleNamespace
 from typing import Any
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+from algo_a.async_chat_extraction import (
+    AsyncChatExtractionQueue,
+    ChatWriteResult,
+    PendingChatWrite,
+    make_async_queue,
+    record_chat_write_results,
+    write_chat_messages_json,
+)
 from algo_a.list_target_chats_win import _sidebar_names_match, list_target_chats
 from algo_a.sidebar_scroll_to_top import scroll_sidebar_to_top
 from config.weclaw_config import WeclawConfig
@@ -50,6 +55,19 @@ def _chat_type_allows_row(row: Any, chat_type: str) -> bool:
     )
 
 
+def _sidebar_filter_rejection_reason(
+    row: Any,
+    unread_only: bool,
+    chat_type: str,
+) -> str | None:
+    assert chat_type in ("group", "private", "all")
+    if not _chat_type_allows_row(row, chat_type):
+        return f"chat_type={chat_type!r}"
+    if unread_only and getattr(row, "badge_text", None) is None:
+        return "no_unread_badge"
+    return None
+
+
 def _is_chat_name_match(ui_name: str, config_name: str) -> bool:
     """
     Compares a chat name from the UI with a name from the config,
@@ -82,6 +100,11 @@ def _fast_capture_enabled(config: WeclawConfig) -> bool:
         and config.chat_type == "all"
         and not config.sidebar_unread_only
     )
+
+
+def _fast_named_scan_enabled(unread_only: bool, chat_type: str) -> bool:
+    assert chat_type in ("group", "private", "all")
+    return chat_type == "all" and not unread_only
 
 
 def _normalized_chat_key(name: str) -> str:
@@ -150,29 +173,88 @@ def _extract_save_current_chat(
     config: WeclawConfig,
     chat_name: str,
     written_paths: list[str],
+    output_index: int | None = None,
 ) -> bool:
     messages = driver.get_chat_messages(
         chat_name,
         max_scrolls=config.chat_max_scrolls,
-        recent_window_hours=config.recent_window_hours,
+        recent_window_hours=getattr(config, "recent_window_hours", 0),
         skip_navigation_vlm=True,
     )
     if not messages:
         print(f"[WARN] No messages were extracted from '{chat_name}'.")
         return False
-    fallback = f"chat_{len(written_paths) + 1}"
-    safe_filename = _safe_output_filename(chat_name, fallback)
-    output_path = os.path.join(config.output_dir, f"{safe_filename}.json")
-    with open(output_path, "w", encoding="utf-8") as f:
-        rows_out = []
-        for msg in messages:
-            d = asdict(msg)
-            d["chat_name"] = chat_name
-            d["sender"] = d["sender"] or ""
-            rows_out.append(d)
-        json.dump(rows_out, f, ensure_ascii=False, indent=2)
+    output_path = write_chat_messages_json(
+        output_dir=config.output_dir,
+        chat_name=chat_name,
+        messages=messages,
+        output_index=output_index or len(written_paths) + 1,
+    )
     print(f"[SUCCESS] Successfully saved {len(messages)} messages to {output_path}")
     written_paths.append(output_path)
+    return True
+
+
+def _finish_async_extractions(
+    extraction_queue: AsyncChatExtractionQueue | None,
+    async_results: list[ChatWriteResult],
+    written_paths: list[str],
+) -> None:
+    if extraction_queue is None:
+        return
+    async_results.extend(extraction_queue.drain())
+    record_chat_write_results(async_results, written_paths)
+
+
+def _capture_or_queue_current_chat(
+    driver: Any,
+    config: WeclawConfig,
+    chat_name: str,
+    written_paths: list[str],
+    *,
+    output_index: int,
+    skip_navigation_vlm: bool,
+    extraction_queue: AsyncChatExtractionQueue | None,
+    async_results: list[ChatWriteResult],
+) -> bool:
+    if extraction_queue is None:
+        messages = driver.get_chat_messages(
+            chat_name,
+            max_scrolls=config.chat_max_scrolls,
+            recent_window_hours=getattr(config, "recent_window_hours", 0),
+            skip_navigation_vlm=skip_navigation_vlm,
+        )
+        if not messages:
+            print(f"[WARN] No messages were extracted from '{chat_name}'.")
+            return False
+        output_path = write_chat_messages_json(
+            output_dir=config.output_dir,
+            chat_name=chat_name,
+            messages=messages,
+            output_index=output_index,
+        )
+        print(f"[SUCCESS] Successfully saved {len(messages)} messages to {output_path}")
+        written_paths.append(output_path)
+        return True
+
+    captured = driver.capture_chat_messages(
+        chat_name,
+        max_scrolls=config.chat_max_scrolls,
+        skip_navigation_vlm=skip_navigation_vlm,
+    )
+    if getattr(captured, "chunks", None) == []:
+        print(f"[WARN] No screenshots were captured for '{chat_name}'.")
+        return False
+    async_results.extend(
+        extraction_queue.submit(
+            PendingChatWrite(
+                output_index=output_index,
+                chat_name=chat_name,
+                captured=captured,
+                recent_window_hours=getattr(config, "recent_window_hours", 0),
+            )
+        )
+    )
     return True
 
 
@@ -183,15 +265,19 @@ def _click_verify_extract_save(
     matched_cfg: str,
     row: Any,
     written_paths: list[str],
+    *,
+    output_index: int,
+    extraction_queue: AsyncChatExtractionQueue | None,
+    async_results: list[ChatWriteResult],
 ) -> bool:
-    chat = SimpleNamespace(name=row.name, ui_element=row)
+    chat_name = str(getattr(row, "name", "") or "").strip()
     click_successful = False
     for attempt in range(3):
         print(
-            f"[*] Attempting to click '{chat.name}' (lookup={matched_cfg!r}, "
+            f"[*] Attempting to click '{chat_name}' (lookup={matched_cfg!r}, "
             f"Attempt {attempt + 1}/3)"
         )
-        driver.click_row(chat.ui_element, attempt=attempt)
+        driver.click_row(row, attempt=attempt)
         time.sleep(2)
 
         current_chat_name = driver.get_current_chat_name()
@@ -209,31 +295,52 @@ def _click_verify_extract_save(
 
     if not click_successful:
         print(
-            f"[ERROR] Failed to click on chat '{chat.name}' after 3 attempts."
+            f"[ERROR] Failed to click on chat '{chat_name}' after 3 attempts."
         )
         return False
 
-    messages = driver.get_chat_messages(
-        chat.name,
-        max_scrolls=config.chat_max_scrolls,
-        recent_window_hours=config.recent_window_hours,
+    _capture_or_queue_current_chat(
+        driver,
+        config,
+        chat_name,
+        written_paths,
+        output_index=output_index,
+        skip_navigation_vlm=False,
+        extraction_queue=extraction_queue,
+        async_results=async_results,
     )
-    if not messages:
-        print(f"[WARN] No messages were extracted from '{chat.name}'.")
-    else:
-        safe_filename = "".join(c for c in chat.name if c.isalnum() or c in (" ", "_")).rstrip()
-        output_path = os.path.join(config.output_dir, f"{safe_filename}.json")
-        with open(output_path, "w", encoding="utf-8") as f:
-            messages_as_dict = []
-            for msg in messages:
-                d = asdict(msg)
-                d["chat_name"] = chat.name
-                d["sender"] = d["sender"] or ""
-                messages_as_dict.append(d)
-            json.dump(messages_as_dict, f, ensure_ascii=False, indent=2)
-        print(f"[SUCCESS] Successfully saved {len(messages)} messages to {output_path}")
-        written_paths.append(output_path)
     return True
+
+
+def _click_extract_save_fast(
+    driver: Any,
+    config: WeclawConfig,
+    matched_cfg: str,
+    row: Any,
+    written_paths: list[str],
+    *,
+    output_index: int,
+    extraction_queue: AsyncChatExtractionQueue | None,
+    async_results: list[ChatWriteResult],
+) -> bool:
+    sidebar_name = str(getattr(row, "name", "") or "").strip()
+    print(f"[*] Fast-clicking named chat: lookup={matched_cfg!r}, seen={sidebar_name!r}")
+    driver.click_row(row, attempt=0)
+    time.sleep(0.8)
+    chat_name = _resolve_current_chat_title(driver, sidebar_name or matched_cfg)
+    ok = _capture_or_queue_current_chat(
+        driver,
+        config,
+        chat_name,
+        written_paths,
+        output_index=output_index,
+        skip_navigation_vlm=True,
+        extraction_queue=extraction_queue,
+        async_results=async_results,
+    )
+    if not ok:
+        print(f"[WARN] Fast named capture failed for {matched_cfg!r}.")
+    return ok
 
 
 def _find_first_visible_config_match(
@@ -261,11 +368,9 @@ def _find_first_visible_config_match(
         if not ui_name:
             print(f"[DEBUG] Filter row #{idx:02d}: reject empty_name")
             continue
-        if not _chat_type_allows_row(row, chat_type):
-            print(f"[DEBUG] Filter row #{idx:02d}: reject chat_type={chat_type!r}")
-            continue
-        if unread_only and getattr(row, "badge_text", None) is None:
-            print(f"[DEBUG] Filter row #{idx:02d}: reject no_unread_badge")
+        rejection_reason = _sidebar_filter_rejection_reason(row, unread_only, chat_type)
+        if rejection_reason is not None:
+            print(f"[DEBUG] Filter row #{idx:02d}: reject {rejection_reason}")
             continue
         for cfg_name in pending_names:
             match = _is_chat_name_match(ui_name, cfg_name)
@@ -286,6 +391,8 @@ def _run_capture_all_fast_path(
     config: WeclawConfig,
     written_paths: list[str],
 ) -> list[str]:
+    extraction_queue = make_async_queue(driver, config.output_dir)
+    async_results: list[ChatWriteResult] = []
     sidebar_scrolls = config.sidebar_max_scrolls
     scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
     allowed_sidebar_names = _capture_sidebar_chat_names(
@@ -338,7 +445,16 @@ def _run_capture_all_fast_path(
                 f"\n--- Fast processing chat {processed_count}: "
                 f"sidebar={sidebar_name!r}, title={chat_name!r} ---"
             )
-            ok = _extract_save_current_chat(driver, config, chat_name, written_paths)
+            ok = _capture_or_queue_current_chat(
+                driver,
+                config,
+                chat_name,
+                written_paths,
+                output_index=processed_count,
+                skip_navigation_vlm=True,
+                extraction_queue=extraction_queue,
+                async_results=async_results,
+            )
             processed_keys.add(sidebar_key)
             processed_keys.add(chat_key)
             if not ok:
@@ -351,6 +467,7 @@ def _run_capture_all_fast_path(
         time.sleep(0.8)
 
     print("\n[SUCCESS] Fast capture-all sweep finished.")
+    _finish_async_extractions(extraction_queue, async_results, written_paths)
     return written_paths
 
 
@@ -391,6 +508,9 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
         print("[*] Mode: true capture-all fast path (OCR sidebar sweep).")
         return _run_capture_all_fast_path(driver, window, config, written_paths)
 
+    extraction_queue = make_async_queue(driver, config.output_dir)
+    async_results: list[ChatWriteResult] = []
+
     if _groups_config_means_all_groups(config.groups_to_monitor):
         print(
             f"[*] Mode: wildcard chats. chat_type={chat_type!r}. Unread filter: {uo}."
@@ -406,6 +526,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
         )
         if not target_chats:
             print("[+] No target chats found. Pipeline finished.")
+            _finish_async_extractions(extraction_queue, async_results, written_paths)
             return written_paths
         names_order = [c.name for c in target_chats]
         print(f"[+] Located {len(names_order)} target chat(s). Proceeding to click them.")
@@ -440,12 +561,21 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
                 continue
 
             ok = _click_verify_extract_save(
-                driver, window, config, matched_cfg, row, written_paths
+                driver,
+                window,
+                config,
+                matched_cfg,
+                row,
+                written_paths,
+                output_index=processed_num,
+                extraction_queue=extraction_queue,
+                async_results=async_results,
             )
             if not ok:
                 print(f"[WARN] Click failed for {matched_cfg!r}. Skipping.")
 
         print("\n[SUCCESS] Pipeline finished processing all target chats.")
+        _finish_async_extractions(extraction_queue, async_results, written_paths)
         return written_paths
     else:
         print(
@@ -456,6 +586,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
         print(f"[*] Pending config names: {pending!r}")
         if not pending:
             print("[+] No target chats found. Pipeline finished.")
+            _finish_async_extractions(extraction_queue, async_results, written_paths)
             return written_paths
         if pending:
             print(
@@ -464,48 +595,140 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
                 "chat allowed by chat_type."
             )
 
+        if not _fast_named_scan_enabled(uo, chat_type):
+            print("[*] Using semantic sidebar scan for named chat filters.")
+            scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
+            processed_count = 0
+            attempted_names: set[str] = set()
+            for scan_idx in range(sidebar_scrolls + 1):
+                pending_candidates = [name for name in pending if name not in attempted_names]
+                while pending_candidates:
+                    hit = _find_first_visible_config_match(
+                        driver,
+                        window,
+                        pending_candidates,
+                        unread_only=uo,
+                        chat_type=chat_type,
+                    )
+                    if hit is None:
+                        break
+                    matched_cfg, row = hit
+                    processed_count += 1
+                    ok = _click_extract_save_fast(
+                        driver,
+                        config,
+                        matched_cfg,
+                        row,
+                        written_paths,
+                        output_index=processed_count,
+                        extraction_queue=extraction_queue,
+                        async_results=async_results,
+                    )
+                    if ok:
+                        pending = [n for n in pending if n != matched_cfg]
+                        print(
+                            f"[*] Completed and removed from pending: "
+                            f"{matched_cfg!r}; remaining={pending!r}"
+                        )
+                    else:
+                        attempted_names.add(matched_cfg)
+                        print(f"[WARN] Failed semantic named capture for {matched_cfg!r}. Continuing scan.")
+                    if not pending:
+                        break
+                    pending_candidates = [name for name in pending if name not in attempted_names]
+                if not pending:
+                    break
+                if scan_idx >= sidebar_scrolls:
+                    print(
+                        f"[*] Reached sidebar max scrolls ({sidebar_scrolls}). "
+                        "Stopping semantic named scan."
+                    )
+                    break
+                driver.scroll_sidebar(window, "down")
+                time.sleep(1)
+
+            if pending:
+                print(f"[WARN] Unresolved config names (not found/verified): {pending!r}")
+                print(
+                    "[HINT] If these names are examples or stale config values, set "
+                    'groups_to_monitor to [] or ["*"] to capture every chat allowed by '
+                    "chat_type, or paste exact sidebar strings from the debug logs."
+                )
+
+            print("\n[SUCCESS] Pipeline finished processing named targets.")
+            _finish_async_extractions(extraction_queue, async_results, written_paths)
+            return written_paths
+
         scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
-        scroll_attempts = 0
-        max_scroll_attempts = sidebar_scrolls
+        seen_viewports: set[tuple[tuple[str, int], ...]] = set()
         processed_count = 0
 
-        while pending and scroll_attempts <= max_scroll_attempts:
-            hit = _find_first_visible_config_match(
-                driver,
-                window,
-                pending,
-                unread_only=uo,
-                chat_type=chat_type,
+        for scan_idx in range(sidebar_scrolls + 1):
+            rows = _get_fast_sidebar_rows(driver, window)
+            rows = [row for row in rows if str(getattr(row, "name", "") or "").strip()]
+            signature = _row_signature(rows)
+            if not rows:
+                print("[WARN] OCR named-chat scan returned no rows. Stopping sweep.")
+                break
+            if signature in seen_viewports:
+                print("[*] OCR named-chat scan reached a repeated viewport. Stopping sweep.")
+                break
+            seen_viewports.add(signature)
+            print(
+                f"--- OCR named-chat viewport {scan_idx + 1}: "
+                f"{len(rows)} row(s), pending={pending!r} ---"
             )
-            if hit is None:
-                scroll_attempts += 1
-                print(f"[*] No pending target in current viewport. Scrolling down ({scroll_attempts}/{max_scroll_attempts})")
-                driver.scroll_sidebar(window, "down")
-                time.sleep(1)
-                continue
 
-            matched_cfg, row = hit
-            processed_count += 1
-            print(f"\n--- Processing chat {processed_count}: lookup={matched_cfg!r}, seen={row.name!r} ---")
-
-            ok = _click_verify_extract_save(
-                driver, window, config, matched_cfg, row, written_paths
-            )
-            if not ok:
-                print(
-                    f"[ERROR] Failed to click on chat after 3 attempts. Keeping it pending."
+            for row in rows:
+                ui_name = str(getattr(row, "name", "") or "").strip()
+                rejection_reason = _sidebar_filter_rejection_reason(row, uo, chat_type)
+                if rejection_reason is not None:
+                    print(
+                        f"[DEBUG] OCR named row rejected by {rejection_reason}: "
+                        f"name={ui_name!r} "
+                        f"badge={getattr(row, 'badge_text', None)!r} "
+                        f"is_group={getattr(row, 'is_group', None)!r} "
+                        f"unread_only={uo}; chat_type={chat_type!r}"
+                    )
+                    continue
+                matched_cfg: str | None = next(
+                    (cfg_name for cfg_name in pending if _is_chat_name_match(ui_name, cfg_name)),
+                    None,
                 )
-                if scroll_attempts >= max_scroll_attempts:
-                    break
-                scroll_attempts += 1
-                driver.scroll_sidebar(window, "down")
-                time.sleep(1)
-                continue
+                if matched_cfg is None:
+                    continue
 
-            pending = [n for n in pending if n != matched_cfg]
-            print(f"[*] Completed and removed from pending: {matched_cfg!r}; remaining={pending!r}")
-            scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
-            scroll_attempts = 0
+                processed_count += 1
+                print(
+                    f"\n--- Fast processing named chat {processed_count}: "
+                    f"lookup={matched_cfg!r}, seen={ui_name!r} ---"
+                )
+                ok = _click_extract_save_fast(
+                    driver,
+                    config,
+                    matched_cfg,
+                    row,
+                    written_paths,
+                    output_index=processed_count,
+                    extraction_queue=extraction_queue,
+                    async_results=async_results,
+                )
+                if ok:
+                    pending = [n for n in pending if n != matched_cfg]
+                    print(
+                        f"[*] Completed and removed from pending: "
+                        f"{matched_cfg!r}; remaining={pending!r}"
+                    )
+                if not pending:
+                    break
+
+            if not pending:
+                break
+            if scan_idx >= sidebar_scrolls:
+                print(f"[*] Reached sidebar max scrolls ({sidebar_scrolls}). Stopping OCR named sweep.")
+                break
+            driver.scroll_sidebar(window, "down")
+            time.sleep(0.8)
 
         if pending:
             print(f"[WARN] Unresolved config names (not found/verified): {pending!r}")
@@ -516,6 +739,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
             )
 
         print("\n[SUCCESS] Pipeline finished processing named targets.")
+        _finish_async_extractions(extraction_queue, async_results, written_paths)
         return written_paths
 
 

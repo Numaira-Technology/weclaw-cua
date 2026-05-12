@@ -7,7 +7,7 @@ Input spec:
     - Uses synthetic ChatMessage rows with representative time strings.
 
 Output spec:
-    - Verifies parsing; filtering/cutoff tests use explicit hours=24 (default RECENT_WINDOW_HOURS is 0 / disabled).
+    - Verifies parsing; filtering/cutoff tests use explicit hours=24.
 """
 
 from datetime import datetime

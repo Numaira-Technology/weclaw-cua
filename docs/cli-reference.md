@@ -18,13 +18,14 @@ This document describes command behavior, capture-selection controls, and output
 - `sidebar_unread_only`: `true` processes only rows with unread badges; `false` processes both read and unread rows.
 - `sidebar_max_scrolls`: maximum downward sidebar scrolls during each scan.
 - `chat_max_scrolls`: maximum upward chat-panel scrolls while collecting one chat.
+- `recent_window_hours`: keep only messages from the last N hours; `0` disables the time filter.
 
  `run` and `capture` can override those values for a single invocation:
 
 ```bash
 weclaw-cua capture --chat-type private --unread-mode unread
 weclaw-cua run --chat-type all --unread-mode all
-weclaw-cua run --sidebar-max-scrolls 30 --chat-max-scrolls 20
+weclaw-cua run --sidebar-max-scrolls 30 --chat-max-scrolls 20 --recent-window-hours 24
 ```
 
  `unread` supports `--chat-type` and `--sidebar-max-scrolls`.
@@ -83,6 +84,7 @@ Captures selected WeChat chats and writes message JSON files. Direct mode calls 
 - `--unread-mode unread|all`.
 - `--sidebar-max-scrolls N`.
 - `--chat-max-scrolls N`.
+- `--recent-window-hours N`.
 
 Capture-selection options override only the current command invocation and do not rewrite `config.json`.
 
@@ -123,6 +125,7 @@ JSON output in stepwise mode:
  - `--unread-mode unread|all`.
  - `--sidebar-max-scrolls N`.
  - `--chat-max-scrolls N`.
+ - `--recent-window-hours N`.
 
 Capture-selection options override only the current command invocation and do not rewrite `config.json`.
 
@@ -268,6 +271,46 @@ JSON output:
       "time": "10:15",
       "content": "deadline is Friday",
       "type": "text"
+    }
+  ]
+}
+```
+
+### `ask`
+
+Retrieves ranked message windows for answering a natural-language question. By default it reads `last_run.json` and searches only the files captured by the most recent run. Use `--all-history` to search every captured chat JSON file in `output_dir`.
+
+Options:
+
+- `--chat NAME`: repeatable chat filter.
+- `--limit N`: maximum ranked chunks, capped at 50.
+- `--window N`: number of messages before and after each matched center message.
+- `--all-history`: search all exports instead of only `last_run.json` paths.
+- `--type text|system|link_card|image|file|recalled|unsupported`: filter center messages by type.
+- `--format json|text`.
+
+JSON output:
+
+```json
+{
+  "question": "When is tomorrow's meeting?",
+  "scope": "last run",
+  "context_method": "ranked lexical chunks over captured message files",
+  "answer_instructions": "Answer only from these cited messages; if they are insufficient, say what is missing.",
+  "source_files": ["/abs/output/Team.json"],
+  "chat": [],
+  "type": null,
+  "count": 1,
+  "limit": 5,
+  "window": 2,
+  "chunks": [
+    {
+      "chat": "Team",
+      "source_path": "/abs/output/Team.json",
+      "center_index": 3,
+      "score": 12.5,
+      "matched_terms": ["meeting"],
+      "messages": []
     }
   ]
 }

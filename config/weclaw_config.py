@@ -18,6 +18,7 @@ config.json schema:
         "chat_type": "group",
         "sidebar_max_scrolls": 16,
         "chat_max_scrolls": 10,
+        "recent_window_hours": 0,
         "report_custom_prompt": "Summarize key decisions and action items.",
         "llm_provider": "openrouter",
         "openrouter_api_key": "",

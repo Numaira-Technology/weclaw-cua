@@ -10,20 +10,16 @@ from typing import Any
 import pyautogui  # type: ignore[import-untyped]
 import win32gui  # type: ignore[import-untyped]
 
-from shared.datatypes import ChatMessage, SidebarRow
+from shared.chat_chunk_extraction import extract_messages_from_captured_chat
+from shared.datatypes import CapturedChatImages, ChatImageChunk, ChatMessage, SidebarRow
 from shared.sidebar_ui_chrome import is_sidebar_ui_chrome_label
 from shared.platform_api import PlatformDriver
 from shared.sidebar_classification import (
     parse_threads_json,
     threads_to_sidebar_rows,
 )
-from shared.message_time_window import (
-    chunk_reaches_recent_cutoff,
-    filter_messages_to_recent_window,
-)
 from shared.vision_backend import VisionBackend, create_vision_backend
 from shared.vision_prompts import (
-    CHAT_PANEL_PROMPT,
     CHAT_PANEL_SAFE_CLICK_PROMPT,
     CURRENT_CHAT_Y_PROMPT,
     NEW_MESSAGES_BUTTON_PROMPT,
@@ -40,7 +36,6 @@ from platform_win.sidebar_ocr_debug import (
     write_sidebar_debug,
 )
 from platform_win.vision import _force_foreground_window, capture_window
-from shared.message_dedup import dedupe_chat_messages
 from shared.ocr_paddle import get_ocr_engine
 from shared.vision_response_json import parse_json_object_from_model_text
 from utils.chat_stitch_debug import (
@@ -438,7 +433,28 @@ class WinDriver(PlatformDriver):
         chat messages from the current chat.
         This version scrolls UP, captures, and then reverses the sequence for stitching.
         """
-        print(f"[*] Starting message extraction for '{chat_name}'...")
+        captured = self.capture_chat_messages(
+            chat_name,
+            max_scrolls=max_scrolls,
+            skip_navigation_vlm=skip_navigation_vlm,
+        )
+        if not captured.chunks:
+            return []
+        return self.extract_chat_messages_from_capture(
+            captured,
+            recent_window_hours=recent_window_hours,
+        )
+
+    def capture_chat_messages(
+        self,
+        chat_name: str,
+        max_messages: int | None = None,
+        max_scrolls: int | None = None,
+        skip_navigation_vlm: bool = False,
+    ) -> CapturedChatImages:
+        """Capture, reverse, chunk, and stitch chat screenshots without VLM extraction."""
+        del max_messages
+        print(f"[*] Starting message capture for '{chat_name}'...")
 
         if skip_navigation_vlm:
             self._activate_chat_panel_by_center()
@@ -460,7 +476,7 @@ class WinDriver(PlatformDriver):
 
         if not screenshots:
             print("[WARN] No screenshots were captured.")
-            return []
+            return CapturedChatImages(chat_name=chat_name, chunks=[])
 
         stitch_session = new_chat_stitch_session_basename()
         for i, frame in enumerate(screenshots):
@@ -469,15 +485,13 @@ class WinDriver(PlatformDriver):
         print("[*] Reversing screenshot order for processing...")
         screenshots.reverse()
 
-        all_messages = []
         chunk_size = 25
         screenshot_chunks = [screenshots[i:i + chunk_size] for i in range(0, len(screenshots), chunk_size)]
-        chunk_results = []
+        image_chunks: list[ChatImageChunk] = []
 
         print(f"[*] Processing {len(screenshots)} screenshots in {len(screenshot_chunks)} chunks of size {chunk_size}.")
 
-        for idx in range(len(screenshot_chunks) - 1, -1, -1):
-            chunk = screenshot_chunks[idx]
+        for idx, chunk in enumerate(screenshot_chunks):
             print(f"--- Processing chunk {idx+1}/{len(screenshot_chunks)} ---")
             if not chunk:
                 continue
@@ -501,65 +515,29 @@ class WinDriver(PlatformDriver):
             )
 
             save_chat_stitch_for_vlm(stitch_session, chat_name, idx, stitched_image)
-
-            try:
-                response_str = self.vision_ai.query(
-                    CHAT_PANEL_PROMPT, stitched_image, max_tokens=16384
+            image_chunks.append(
+                ChatImageChunk(
+                    chunk_index=idx,
+                    chunk_total=len(screenshot_chunks),
+                    image=stitched_image,
                 )
-            except Exception as e:
-                print(f"[ERROR] Vision AI query for chunk {idx+1} failed: {e}")
-                continue
+            )
 
-            if not response_str:
-                print(f"[ERROR] No response from AI for message extraction on chunk {idx+1}.")
-                continue
+        return CapturedChatImages(chat_name=chat_name, chunks=image_chunks)
 
-            try:
-                data = parse_json_object_from_model_text(response_str)
-                messages_data = data.get("messages", [])
-                chunk_messages = []
-
-                for j, msg_data in enumerate(messages_data):
-                    if "content" not in msg_data:
-                        print(f"[WARN] Chunk {idx+1}, Msg {j+1}: Skipping message due to missing 'content': {msg_data}")
-                        continue
-
-                    try:
-                        chunk_messages.append(ChatMessage(**msg_data))
-                    except TypeError as e:
-                        print(f"[WARN] Chunk {idx+1}, Msg {j+1}: Skipping message during creation: {msg_data}. Error: {e}")
-
-                if chunk_messages:
-                    filtered_chunk = filter_messages_to_recent_window(
-                        chunk_messages,
-                        hours=recent_window_hours,
-                    )
-                    print(f"[+] Extracted {len(chunk_messages)} messages from chunk {idx+1}.")
-                    if filtered_chunk:
-                        chunk_results.append((idx, filtered_chunk))
-                    if chunk_reaches_recent_cutoff(
-                        chunk_messages,
-                        hours=recent_window_hours,
-                    ):
-                        print(
-                            f"[*] Chunk {idx+1} reached the {recent_window_hours}-hour cutoff. "
-                            "Skipping older chunks."
-                        )
-                        break
-                else:
-                    print(f"[WARN] No valid messages extracted from chunk {idx+1}.")
-
-            except Exception as e:
-                print(f"[ERROR] Failed to parse messages from AI response for chunk {idx+1}: {e}")
-                print(f"Raw response was: {response_str}")
-                continue
-
-        chunk_results.sort(key=lambda item: item[0])
-        for _, chunk_messages in chunk_results:
-            all_messages.extend(chunk_messages)
-        out = dedupe_chat_messages(all_messages)
-        print(f"[*] Finished processing all chunks. Total messages: {len(out)} ({len(all_messages)} raw).")
-        return out
+    def extract_chat_messages_from_capture(
+        self,
+        captured: CapturedChatImages,
+        *,
+        recent_window_hours: int = 0,
+    ) -> list[ChatMessage]:
+        """Run VLM extraction for a captured chat payload."""
+        print(f"[*] Starting queued VLM message extraction for '{captured.chat_name}'...")
+        return extract_messages_from_captured_chat(
+            captured,
+            self.vision_ai,
+            recent_window_hours=recent_window_hours,
+        )
 
     def _activate_chat_panel_by_center(self) -> None:
         print("[*] Activating chat panel at deterministic center.")
