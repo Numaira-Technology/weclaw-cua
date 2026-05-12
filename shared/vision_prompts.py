@@ -100,6 +100,13 @@ For each message, you must extract the following information:
 - Messages from others are on the left, with the sender's name above the message bubble.
 - Messages from "You" (the user) are on the right, and do not have a visible sender name. You should explicitly set the sender to "You".
 - System messages (like timestamps, "You recalled a message", etc.) are centered and have no sender. The sender should be `null` and the type should be 'system'.
+- For group chats, the `sender` must be one of these sources only:
+  visible nickname text above/near a left-side bubble, the same nickname inferred from a contiguous same-avatar left-side message group, or "You" for right-side green bubbles.
+- Never use mention text such as "@AARON", "@Pauline", or "@Frank" as the sender. Mentions belong in `content`.
+- Never set `sender` to `null` for a normal text/image/file message. If a normal message is cut off at the top/bottom and its sender cannot be read or inferred from the same visible avatar group, omit that message.
+- User avatars/profile photos beside bubbles are not messages and must not add `[Image]` to `content`.
+- Centered timestamp separators such as "16:15", "Yesterday 22:08", or "昨天 22:08" are not messages. Do not include them in `messages`; use them only as the `time` for following messages.
+- Centered call/status notices such as "Pauline发起了语音通话" are system messages with `sender: null`.
 
 Respond with a JSON object containing a single key "messages", which is a list of message objects.
 Each message object must have the keys "sender", "content", "time", and "type".

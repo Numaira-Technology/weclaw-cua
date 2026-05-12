@@ -21,6 +21,8 @@ from __future__ import annotations
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed
 from dataclasses import dataclass
 
 from PIL import Image
@@ -103,6 +105,19 @@ def _extra_headers(config: OpenClawGatewayConfig) -> dict[str, str] | None:
     if not config.backend_model:
         return None
     return {"x-openclaw-model": config.backend_model}
+
+
+def _async_vlm_worker_count(workers: int | None) -> int:
+    if workers is not None:
+        assert workers >= 0, "workers must be >= 0"
+        if workers > 0:
+            return workers
+    raw = os.environ.get("WECLAW_ASYNC_VLM_WORKERS", "").strip()
+    if raw:
+        value = int(raw)
+        assert value >= 0, "WECLAW_ASYNC_VLM_WORKERS must be >= 0"
+        return value
+    return 2
 
 
 def gateway_chat_text(config: OpenClawGatewayConfig, prompt: str, max_tokens: int = 4096) -> str:
@@ -267,6 +282,7 @@ def fill_stepwise_responses(
     config: OpenClawGatewayConfig,
     skip_existing: bool = False,
     force: bool = False,
+    workers: int | None = None,
 ) -> dict:
     manifest_path = os.path.join(work_dir, "manifest.json")
     assert os.path.isfile(manifest_path), f"manifest not found: {manifest_path}"
@@ -275,8 +291,8 @@ def fill_stepwise_responses(
     tasks = manifest.get("tasks", [])
     assert isinstance(tasks, list) and tasks, "manifest has no tasks"
 
-    written = 0
     skipped = 0
+    pending_tasks = []
     for task in tasks:
         step_id = task["step_id"]
         img_path = os.path.join(work_dir, task["image"])
@@ -296,19 +312,80 @@ def fill_stepwise_responses(
         with open(prompt_path, "r", encoding="utf-8") as f:
             prompt_text = f.read()
         assert prompt_text.strip(), f"empty prompt: {prompt_path}"
-        text = gateway_chat_vision(
-            config=config,
-            prompt=prompt_text,
-            image_path=img_path,
-            max_tokens=max_tokens,
-        )
-        with open(out_path, "w", encoding="utf-8") as f:
-            f.write(text)
-        written += 1
-        print(f"[ok] {step_id} -> {os.path.basename(out_path)}")
+        pending_tasks.append((step_id, img_path, prompt_text, out_path, max_tokens))
+
+    worker_count = _async_vlm_worker_count(workers)
+    if not pending_tasks:
+        return {
+            "total_tasks": len(tasks),
+            "responses_written": 0,
+            "responses_skipped": skipped,
+            "workers": 0,
+        }
+    if worker_count <= 0:
+        written = 0
+        for step_id, img_path, prompt_text, out_path, max_tokens in pending_tasks:
+            _fill_one_stepwise_response(
+                config=config,
+                step_id=step_id,
+                img_path=img_path,
+                prompt_text=prompt_text,
+                out_path=out_path,
+                max_tokens=max_tokens,
+            )
+            written += 1
+        return {
+            "total_tasks": len(tasks),
+            "responses_written": written,
+            "responses_skipped": skipped,
+            "workers": worker_count,
+        }
+
+    max_workers = min(worker_count, len(pending_tasks))
+    written = 0
+    with ThreadPoolExecutor(
+        max_workers=max_workers,
+        thread_name_prefix="weclaw-openclaw",
+    ) as pool:
+        futures = [
+            pool.submit(
+                _fill_one_stepwise_response,
+                config=config,
+                step_id=step_id,
+                img_path=img_path,
+                prompt_text=prompt_text,
+                out_path=out_path,
+                max_tokens=max_tokens,
+            )
+            for step_id, img_path, prompt_text, out_path, max_tokens in pending_tasks
+        ]
+        for future in as_completed(futures):
+            future.result()
+            written += 1
 
     return {
         "total_tasks": len(tasks),
         "responses_written": written,
         "responses_skipped": skipped,
+        "workers": max_workers,
     }
+
+
+def _fill_one_stepwise_response(
+    *,
+    config: OpenClawGatewayConfig,
+    step_id: str,
+    img_path: str,
+    prompt_text: str,
+    out_path: str,
+    max_tokens: int,
+) -> None:
+    text = gateway_chat_vision(
+        config=config,
+        prompt=prompt_text,
+        image_path=img_path,
+        max_tokens=max_tokens,
+    )
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(text)
+    print(f"[ok] {step_id} -> {os.path.basename(out_path)}")
