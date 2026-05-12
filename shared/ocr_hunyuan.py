@@ -38,7 +38,13 @@ def _strip_trailing_ellipsis(text: str) -> str:
     return out
 
 
+def _has_trailing_ellipsis(text: str) -> bool:
+    return text.rstrip().endswith("...")
+
+
 def _safe_truncated_prefix_match(text: str, target: str) -> bool:
+    if not _has_trailing_ellipsis(text):
+        return False
     prefix = _strip_trailing_ellipsis(text)
     if len(prefix) < MIN_TRUNCATED_PREFIX_LEN:
         return False

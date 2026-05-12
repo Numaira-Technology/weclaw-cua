@@ -27,6 +27,17 @@ def test_match_target_rejects_unsafe_short_truncated_prefix() -> None:
     assert engine.match_target([candidate], "NY Cua Full Name", min_sim=0.95) is None
 
 
+def test_match_target_rejects_untruncated_prefix_name() -> None:
+    engine = HunyuanOcrEngine()
+    candidate = _line("Operations")
+
+    assert engine.match_target(
+        [candidate],
+        "Operations Team Daily Standup",
+        min_sim=0.95,
+    ) is None
+
+
 def test_match_target_accepts_truncated_config_name_against_full_ocr_text() -> None:
     engine = HunyuanOcrEngine()
     candidate = _line("Operations Team Daily Standup")
