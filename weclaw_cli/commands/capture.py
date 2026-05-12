@@ -94,6 +94,7 @@ def capture(
             work_dir = os.path.join(app["output_dir"], "work")
         os.makedirs(work_dir, exist_ok=True)
         backend = StepwiseBackend(work_dir)
+        backend.set_metadata({"recent_window_hours": config.recent_window_hours})
 
         run_pipeline_a_stepwise(config, backend)
 

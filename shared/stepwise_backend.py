@@ -39,10 +39,12 @@ class StepwiseBackend:
         self._lock = threading.Lock()
         self._manifest_path = os.path.join(work_dir, "manifest.json")
         self._tasks: list[dict] = []
+        self._metadata: dict = {}
         if os.path.isfile(self._manifest_path):
             with open(self._manifest_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self._tasks = data.get("tasks", [])
+            self._metadata = data.get("metadata", {})
             self._counter = len(self._tasks)
 
     def _next_step_id(self) -> str:
@@ -109,6 +111,10 @@ class StepwiseBackend:
     def get_pending_tasks(self) -> list[dict]:
         return [t for t in self._tasks if not t["completed"]]
 
+    def set_metadata(self, metadata: dict) -> None:
+        self._metadata.update(metadata)
+        self._write_manifest()
+
     def mark_completed(self, step_id: str) -> None:
         for t in self._tasks:
             if t["step_id"] == step_id:
@@ -124,4 +130,9 @@ class StepwiseBackend:
 
     def _write_manifest(self) -> None:
         with open(self._manifest_path, "w", encoding="utf-8") as f:
-            json.dump({"tasks": self._tasks}, f, ensure_ascii=False, indent=2)
+            json.dump(
+                {"metadata": self._metadata, "tasks": self._tasks},
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
