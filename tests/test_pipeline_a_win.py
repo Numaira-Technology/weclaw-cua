@@ -27,6 +27,7 @@ class FakeSidebarDriver:
 class FakeConfig:
     output_dir: str
     chat_max_scrolls: int = 0
+    recent_window_hours: int = 0
     sidebar_max_scrolls: int = 1
 
 
@@ -73,6 +74,7 @@ class FakeFastCaptureDriver:
         self,
         chat_name: str,
         max_scrolls: int | None = None,
+        recent_window_hours: int = 0,
         skip_navigation_vlm: bool = False,
     ) -> list[ChatMessage]:
         self.message_calls.append((chat_name, skip_navigation_vlm))
@@ -89,7 +91,12 @@ class FakeFastCaptureDriver:
         self.capture_calls.append((chat_name, skip_navigation_vlm))
         return SimpleNamespace(chat_name=chat_name)
 
-    def extract_chat_messages_from_capture(self, captured: object) -> list[ChatMessage]:
+    def extract_chat_messages_from_capture(
+        self,
+        captured: object,
+        *,
+        recent_window_hours: int = 0,
+    ) -> list[ChatMessage]:
         chat_name = str(getattr(captured, "chat_name"))
         self.extract_calls.append(chat_name)
         return [ChatMessage(sender="Alice", content=f"hello {chat_name}", time=None, type="text")]

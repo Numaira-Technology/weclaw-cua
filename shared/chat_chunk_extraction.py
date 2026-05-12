@@ -5,7 +5,6 @@ from __future__ import annotations
 from shared.datatypes import CapturedChatImages, ChatMessage
 from shared.message_dedup import dedupe_chat_messages
 from shared.message_time_window import (
-    RECENT_WINDOW_HOURS,
     chunk_reaches_recent_cutoff,
     filter_messages_to_recent_window,
 )
@@ -16,6 +15,8 @@ from shared.vision_response_json import parse_json_object_from_model_text
 def extract_messages_from_captured_chat(
     captured: CapturedChatImages,
     vision_ai,
+    *,
+    recent_window_hours: int = 0,
 ) -> list[ChatMessage]:
     """Run VLM extraction over already captured/stiched chat chunks."""
     all_messages: list[ChatMessage] = []
@@ -66,17 +67,17 @@ def extract_messages_from_captured_chat(
 
         filtered_chunk = filter_messages_to_recent_window(
             chunk_messages,
-            hours=RECENT_WINDOW_HOURS,
+            hours=recent_window_hours,
         )
         print(f"[+] Extracted {len(chunk_messages)} messages from chunk {display_index}.")
         if filtered_chunk:
             chunk_results.append((chunk.chunk_index, filtered_chunk))
         if chunk_reaches_recent_cutoff(
             chunk_messages,
-            hours=RECENT_WINDOW_HOURS,
+            hours=recent_window_hours,
         ):
             print(
-                f"[*] Chunk {display_index} reached the {RECENT_WINDOW_HOURS}-hour cutoff. "
+                f"[*] Chunk {display_index} reached the {recent_window_hours}-hour cutoff. "
                 "Skipping older chunks."
             )
             break

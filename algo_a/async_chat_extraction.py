@@ -16,6 +16,7 @@ class PendingChatWrite:
     output_index: int
     chat_name: str
     captured: Any
+    recent_window_hours: int = 0
 
 
 @dataclass
@@ -136,7 +137,10 @@ class AsyncChatExtractionQueue:
 
     def _run_job(self, job: PendingChatWrite) -> ChatWriteResult:
         try:
-            messages = self.driver.extract_chat_messages_from_capture(job.captured)
+            messages = self.driver.extract_chat_messages_from_capture(
+                job.captured,
+                recent_window_hours=job.recent_window_hours,
+            )
             if not messages:
                 return ChatWriteResult(
                     output_index=job.output_index,

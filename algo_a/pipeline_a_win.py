@@ -377,6 +377,7 @@ def _extract_save_current_chat(
     messages = driver.get_chat_messages(
         chat_name,
         max_scrolls=config.chat_max_scrolls,
+        recent_window_hours=getattr(config, "recent_window_hours", 0),
         skip_navigation_vlm=True,
     )
     if not messages:
@@ -422,6 +423,7 @@ def _capture_or_queue_current_chat(
         messages = driver.get_chat_messages(
             chat_name,
             max_scrolls=config.chat_max_scrolls,
+            recent_window_hours=getattr(config, "recent_window_hours", 0),
             skip_navigation_vlm=skip_navigation_vlm,
         )
         if not messages:
@@ -457,6 +459,7 @@ def _capture_or_queue_current_chat(
                 output_index=output_index,
                 chat_name=persist,
                 captured=captured,
+                recent_window_hours=getattr(config, "recent_window_hours", 0),
             )
         )
     )

@@ -35,6 +35,8 @@ from ..output.formatter import output
               help="Override max downward sidebar scrolls per scan")
 @click.option("--chat-max-scrolls", default=None, type=int,
               help="Override max upward chat-panel scrolls per chat")
+@click.option("--recent-window-hours", default=None, type=int,
+              help="Keep only messages within this many hours (0 = no limit)")
 @click.pass_context
 def run(
     ctx,
@@ -46,6 +48,7 @@ def run(
     unread_mode,
     sidebar_max_scrolls,
     chat_max_scrolls,
+    recent_window_hours,
 ):
     """Run full pipeline: capture selected chats + generate report.
 
@@ -81,6 +84,7 @@ def run(
         unread_mode=unread_mode,
         sidebar_max_scrolls=sidebar_max_scrolls,
         chat_max_scrolls=chat_max_scrolls,
+        recent_window_hours=recent_window_hours,
     )
     root = app["root"]
     out_dir = app["output_dir"]
@@ -101,6 +105,7 @@ def run(
             unread_mode=unread_mode,
             sidebar_max_scrolls=sidebar_max_scrolls,
             chat_max_scrolls=chat_max_scrolls,
+            recent_window_hours=recent_window_hours,
         )
         return
 

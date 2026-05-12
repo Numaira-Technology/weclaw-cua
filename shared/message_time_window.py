@@ -1,12 +1,5 @@
 """Recent-message time window helpers for chat extraction.
 
-Usage:
-    from shared.message_time_window import (
-        RECENT_WINDOW_HOURS,
-        chunk_reaches_recent_cutoff,
-        filter_messages_to_recent_window,
-    )
-
 Input spec:
     - Message times are free-form strings from vision extraction, such as:
       "23:15", "昨天 21:05", "星期四 09:10", "2026年4月9日 18:30".
@@ -24,8 +17,6 @@ import re
 from datetime import datetime, timedelta
 
 from shared.datatypes import ChatMessage
-
-RECENT_WINDOW_HOURS = 0
 _FUTURE_TOLERANCE = timedelta(minutes=5)
 _WEEKDAY_INDEX = {
     "星期一": 0,
@@ -172,7 +163,7 @@ def _message_effective_time(
 def filter_messages_to_recent_window(
     messages: list[ChatMessage],
     *,
-    hours: int = RECENT_WINDOW_HOURS,
+    hours: int = 0,
     now: datetime | None = None,
 ) -> list[ChatMessage]:
     if hours <= 0:
@@ -192,7 +183,7 @@ def filter_messages_to_recent_window(
 def chunk_reaches_recent_cutoff(
     messages: list[ChatMessage],
     *,
-    hours: int = RECENT_WINDOW_HOURS,
+    hours: int = 0,
     now: datetime | None = None,
 ) -> bool:
     if hours <= 0:

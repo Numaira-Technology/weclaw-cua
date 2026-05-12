@@ -35,6 +35,8 @@ from ..output.formatter import output
               help="Override max downward sidebar scrolls per scan")
 @click.option("--chat-max-scrolls", default=None, type=int,
               help="Override max upward chat-panel scrolls per chat")
+@click.option("--recent-window-hours", default=None, type=int,
+              help="Keep only messages within this many hours (0 = no limit)")
 @click.pass_context
 def capture(
     ctx,
@@ -45,6 +47,7 @@ def capture(
     unread_mode,
     sidebar_max_scrolls,
     chat_max_scrolls,
+    recent_window_hours,
 ):
     """Capture selected WeChat messages via vision.
 
@@ -77,6 +80,7 @@ def capture(
         unread_mode=unread_mode,
         sidebar_max_scrolls=sidebar_max_scrolls,
         chat_max_scrolls=chat_max_scrolls,
+        recent_window_hours=recent_window_hours,
     )
 
     if app["root"] not in sys.path:
@@ -90,6 +94,7 @@ def capture(
             work_dir = os.path.join(app["output_dir"], "work")
         os.makedirs(work_dir, exist_ok=True)
         backend = StepwiseBackend(work_dir)
+        backend.set_metadata({"recent_window_hours": config.recent_window_hours})
 
         run_pipeline_a_stepwise(config, backend)
 

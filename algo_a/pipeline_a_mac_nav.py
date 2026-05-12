@@ -98,6 +98,7 @@ def _capture_or_queue_chat(
             title,
             max_messages=read_cap,
             max_scrolls=config.chat_max_scrolls,
+            recent_window_hours=getattr(config, "recent_window_hours", 0),
         )
         if not messages:
             print(f"[WARN] No messages were extracted from {title!r}.")
@@ -127,6 +128,7 @@ def _capture_or_queue_chat(
                 output_index=output_index,
                 chat_name=label_for_jobs,
                 captured=captured,
+                recent_window_hours=getattr(config, "recent_window_hours", 0),
             )
         )
     )

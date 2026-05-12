@@ -16,7 +16,38 @@ import click
 from ..output.formatter import output
 
 
-def finalize_work_dir(work_dir: str, out_dir: str) -> dict:
+def _recent_window_from_manifest(manifest: dict, fallback_hours: int = 0) -> int:
+    metadata = manifest.get("metadata", {})
+    raw = metadata.get("recent_window_hours", fallback_hours)
+    assert type(raw) is int, "recent_window_hours in manifest metadata must be an integer"
+    assert raw >= 0, "recent_window_hours in manifest metadata must be >= 0"
+    return raw
+
+
+def _filter_finalized_messages_to_recent_window(
+    messages: list[dict],
+    *,
+    hours: int,
+) -> list[dict]:
+    if hours <= 0:
+        return list(messages)
+    from shared.datatypes import ChatMessage
+    from shared.message_time_window import filter_messages_to_recent_window
+
+    typed_messages = [
+        ChatMessage(
+            sender=msg.get("sender"),
+            content=str(msg.get("content", "")),
+            time=msg.get("time"),
+            type=str(msg.get("type", "unsupported")),
+        )
+        for msg in messages
+    ]
+    kept = {id(msg) for msg in filter_messages_to_recent_window(typed_messages, hours=hours)}
+    return [raw for raw, typed in zip(messages, typed_messages) if id(typed) in kept]
+
+
+def finalize_work_dir(work_dir: str, out_dir: str, recent_window_hours: int = 0) -> dict:
     assert os.path.isdir(work_dir), f"Work directory not found: {work_dir}"
     manifest_path = os.path.join(work_dir, "manifest.json")
     assert os.path.isfile(manifest_path), f"manifest.json not found in {work_dir}"
@@ -26,6 +57,10 @@ def finalize_work_dir(work_dir: str, out_dir: str) -> dict:
 
     tasks = manifest.get("tasks", [])
     assert tasks, "No tasks in manifest."
+    recent_window_hours = _recent_window_from_manifest(
+        manifest,
+        fallback_hours=recent_window_hours,
+    )
 
     from shared.vision_response_json import parse_json_object_from_model_text
     from shared.message_schema import VALID_MESSAGE_TYPES
@@ -77,6 +112,12 @@ def finalize_work_dir(work_dir: str, out_dir: str) -> dict:
 
         task["completed"] = True
 
+    unfiltered_message_count = len(all_messages)
+    all_messages = _filter_finalized_messages_to_recent_window(
+        all_messages,
+        hours=recent_window_hours,
+    )
+
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
@@ -86,6 +127,8 @@ def finalize_work_dir(work_dir: str, out_dir: str) -> dict:
         "completed": len(tasks) - len(missing),
         "missing_responses": missing,
         "messages_extracted": len(all_messages),
+        "messages_before_recent_window": unfiltered_message_count,
+        "recent_window_hours": recent_window_hours,
     }
     if all_messages:
         output_path = os.path.join(out_dir, "finalized_messages.json")
@@ -125,7 +168,11 @@ def finalize(ctx, work_dir, fmt):
         sys.path.insert(0, app["root"])
 
     try:
-        result = finalize_work_dir(work_dir=work_dir, out_dir=app["output_dir"])
+        result = finalize_work_dir(
+            work_dir=work_dir,
+            out_dir=app["output_dir"],
+            recent_window_hours=app["config"].recent_window_hours,
+        )
     except AssertionError as e:
         click.echo(str(e), err=True)
         ctx.exit(1)

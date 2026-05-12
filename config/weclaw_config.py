@@ -18,6 +18,7 @@ config.json schema:
         "chat_type": "group",
         "sidebar_max_scrolls": 16,
         "chat_max_scrolls": 10,
+        "recent_window_hours": 0,
         "report_custom_prompt": "Summarize key decisions and action items.",
         "llm_provider": "openrouter",
         "openrouter_api_key": "",
@@ -35,6 +36,7 @@ config.json schema:
     chat_type: "group", "private", or "all".
     sidebar_max_scrolls: maximum number of downward sidebar scrolls per scan.
     chat_max_scrolls: maximum number of upward chat-panel scrolls per chat.
+    recent_window_hours: keep only messages within this many hours (0 = no limit).
     llm_provider: "openrouter", "openai", "deepseek", "kimi", "glm", or "qwen".
       "moonshot" aliases to "kimi"; "zhipu" and "z-ai" alias to "glm".
     openrouter_api_key: optional. Only needed for built-in OpenRouter mode.
@@ -67,6 +69,7 @@ class WeclawConfig:
     chat_type: str = "group"
     sidebar_max_scrolls: int = 16
     chat_max_scrolls: int = 10
+    recent_window_hours: int = 0
     llm_provider: str = "openrouter"
     openai_api_key: str = ""
     deepseek_api_key: str = ""
@@ -82,6 +85,7 @@ class WeclawConfig:
         self.chat_type = normalize_chat_type(self.chat_type)
         assert self.sidebar_max_scrolls >= 0, "sidebar_max_scrolls must be >= 0"
         assert self.chat_max_scrolls >= 0, "chat_max_scrolls must be >= 0"
+        assert self.recent_window_hours >= 0, "recent_window_hours must be >= 0"
         base_url, api_key, wire_model = resolve_llm_routing(
             self.llm_provider,
             self.llm_model,
@@ -137,8 +141,10 @@ def load_config(config_path: str) -> WeclawConfig:
     assert isinstance(ur, bool), "sidebar_unread_only must be boolean"
     sidebar_max_scrolls = raw.get("sidebar_max_scrolls", 16)
     chat_max_scrolls = raw.get("chat_max_scrolls", 10)
+    recent_window_hours = raw.get("recent_window_hours", 0)
     assert type(sidebar_max_scrolls) is int, "sidebar_max_scrolls must be an integer"
     assert type(chat_max_scrolls) is int, "chat_max_scrolls must be an integer"
+    assert type(recent_window_hours) is int, "recent_window_hours must be an integer"
     llm_provider = _normalize_llm_provider(raw.get("llm_provider"))
     api_keys = collect_provider_api_keys(raw)
     llm_model = str(raw.get("llm_model", "openai/gpt-4o") or "").strip()
@@ -158,6 +164,7 @@ def load_config(config_path: str) -> WeclawConfig:
         chat_type=normalize_chat_type(raw.get("chat_type", "group")),
         sidebar_max_scrolls=sidebar_max_scrolls,
         chat_max_scrolls=chat_max_scrolls,
+        recent_window_hours=recent_window_hours,
         llm_provider=llm_provider,
         openai_api_key=api_keys["openai"],
         deepseek_api_key=api_keys["deepseek"],

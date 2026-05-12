@@ -43,3 +43,4 @@ report.md
 *.bak
 debug_*.png
 debug_outputs/
+.claude/settings.local.json

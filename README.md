@@ -185,6 +185,7 @@ Edit `config/config.json`:
   "chat_type": "group",
   "sidebar_max_scrolls": 16,
   "chat_max_scrolls": 10,
+  "recent_window_hours": 0,
   "report_custom_prompt": "Summarize key decisions and action items from the captured chat messages.",
   "llm_provider": "openrouter",
   "openrouter_api_key": "",
@@ -200,7 +201,7 @@ Edit `config/config.json`:
 
 Set `chat_type` to `group`, `private`, or `all`. Set `sidebar_unread_only` to `true` for unread-badge chats only, or `false` to process read and unread chats that match the other selectors. `groups_to_monitor: ["*"]` or `[]` means wildcard scan for all chats allowed by `chat_type`; otherwise list exact sidebar chat names.
 
-Set `sidebar_max_scrolls` to control how many times the sidebar may scroll downward during a scan. WeClaw scrolls back upward with `sidebar_max_scrolls + 2` wheel steps before each full scan, so the return-to-top distance is always greater than the downward scan distance. Set `chat_max_scrolls` to control how many times the active chat panel may scroll upward while collecting history.
+Set `sidebar_max_scrolls` to control how many times the sidebar may scroll downward during a scan. WeClaw scrolls back upward with `sidebar_max_scrolls + 2` wheel steps before each full scan, so the return-to-top distance is always greater than the downward scan distance. Set `chat_max_scrolls` to control how many times the active chat panel may scroll upward while collecting history. Set `recent_window_hours` to a positive number to keep only messages from the last N hours; `0` disables the time filter.
 
 Set `llm_provider` to `openrouter`, `openai`, `deepseek`, `kimi`, `glm`, or `qwen`. Fill the matching API key only when using built-in LLM mode. When `llm_provider` is `openrouter`, all model slugs route through OpenRouter. Leave keys empty for OpenClaw gateway mode or stepwise mode.
 
@@ -616,6 +617,7 @@ Capture commands write one JSON file per chat under `output_dir`. Each file is a
   "chat_type": "group",
   "sidebar_max_scrolls": 16,
   "chat_max_scrolls": 10,
+  "recent_window_hours": 0,
   "report_custom_prompt": "Summarize key decisions and action items from the captured chat messages.",
   "llm_provider": "openrouter",
   "openrouter_api_key": "",
@@ -637,6 +639,7 @@ Capture commands write one JSON file per chat under `output_dir`. Each file is a
 | `chat_type` | `group`, `private`, or `all`; applies to wildcard scans and named-chat matches |
 | `sidebar_max_scrolls` | Maximum downward sidebar scrolls per scan. Returning to top uses `sidebar_max_scrolls + 2` upward scrolls so it is always greater than the scan limit. |
 | `chat_max_scrolls` | Maximum upward scrolls inside a chat panel while capturing history |
+| `recent_window_hours` | Keep only messages from the last N hours; `0` disables the time filter |
 | `report_custom_prompt` | Custom instructions appended to the LLM report prompt |
 | `llm_provider` | Built-in LLM provider: `openrouter`, `openai`, `deepseek`, `kimi`, `glm`, or `qwen`; `moonshot` aliases to `kimi`, and `zhipu`/`z-ai` alias to `glm` |
 | `openrouter_api_key` | OpenRouter API key (or use `OPENROUTER_API_KEY` env var) |
@@ -649,7 +652,7 @@ Capture options can also be overridden per command:
 
 ```bash
 weclaw-cua capture --chat-type private --unread-mode unread
-weclaw-cua run --chat-type all --unread-mode all --sidebar-max-scrolls 30 --chat-max-scrolls 20
+weclaw-cua run --chat-type all --unread-mode all --sidebar-max-scrolls 30 --chat-max-scrolls 20 --recent-window-hours 24
 weclaw-cua unread --chat-type group --sidebar-max-scrolls 25
 ```
 

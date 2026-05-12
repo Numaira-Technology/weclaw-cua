@@ -18,13 +18,14 @@ This document describes command behavior, capture-selection controls, and output
 - `sidebar_unread_only`: `true` processes only rows with unread badges; `false` processes both read and unread rows.
 - `sidebar_max_scrolls`: maximum downward sidebar scrolls during each scan.
 - `chat_max_scrolls`: maximum upward chat-panel scrolls while collecting one chat.
+- `recent_window_hours`: keep only messages from the last N hours; `0` disables the time filter.
 
  `run` and `capture` can override those values for a single invocation:
 
 ```bash
 weclaw-cua capture --chat-type private --unread-mode unread
 weclaw-cua run --chat-type all --unread-mode all
-weclaw-cua run --sidebar-max-scrolls 30 --chat-max-scrolls 20
+weclaw-cua run --sidebar-max-scrolls 30 --chat-max-scrolls 20 --recent-window-hours 24
 ```
 
  `unread` supports `--chat-type` and `--sidebar-max-scrolls`.
@@ -83,6 +84,7 @@ Captures selected WeChat chats and writes message JSON files. Direct mode calls 
 - `--unread-mode unread|all`.
 - `--sidebar-max-scrolls N`.
 - `--chat-max-scrolls N`.
+- `--recent-window-hours N`.
 
 Capture-selection options override only the current command invocation and do not rewrite `config.json`.
 
@@ -123,6 +125,7 @@ JSON output in stepwise mode:
  - `--unread-mode unread|all`.
  - `--sidebar-max-scrolls N`.
  - `--chat-max-scrolls N`.
+ - `--recent-window-hours N`.
 
 Capture-selection options override only the current command invocation and do not rewrite `config.json`.
 

@@ -63,6 +63,7 @@ class MacDriverMessages:
         chat_name: str,
         max_messages: int | None = None,
         max_scrolls: int | None = None,
+        recent_window_hours: int = 0,
         skip_navigation_vlm: bool = False,
     ) -> list[ChatMessage]:
         captured = self.capture_chat_messages(
@@ -73,7 +74,10 @@ class MacDriverMessages:
         )
         if not captured.chunks:
             return []
-        return self.extract_chat_messages_from_capture(captured)
+        return self.extract_chat_messages_from_capture(
+            captured,
+            recent_window_hours=recent_window_hours,
+        )
 
     def capture_chat_messages(
         self,
@@ -142,10 +146,16 @@ class MacDriverMessages:
     def extract_chat_messages_from_capture(
         self,
         captured: CapturedChatImages,
+        *,
+        recent_window_hours: int = 0,
     ) -> list[ChatMessage]:
         """Run VLM extraction for a captured chat payload."""
         print(f"[*] Starting queued VLM message extraction for '{captured.chat_name}'...")
-        return extract_messages_from_captured_chat(captured, self.vision_ai)
+        return extract_messages_from_captured_chat(
+            captured,
+            self.vision_ai,
+            recent_window_hours=recent_window_hours,
+        )
 
     def _activate_chat_panel_by_center(self) -> None:
         print("[*] Activating chat panel at deterministic center.")
