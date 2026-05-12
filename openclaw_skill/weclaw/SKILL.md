@@ -1,6 +1,6 @@
 ---
 name: weclaw
-description: Sync unread WeChat desktop chats to JSON on the host, generate an optional LLM report, and answer questions from the captured messages.
+description: Sync selected WeChat desktop chats to JSON on the host, generate an optional LLM report, and answer questions from the captured messages.
 metadata:
   {
     "openclaw":
@@ -65,7 +65,7 @@ With a non-default config path:
 ./run.sh /path/to/other-config.json
 ```
 
-Stdout is the generated **report text** (or `No unread messages found.`). Structured chat exports are JSON files under `output_dir` from config (default `output/`).
+Stdout is the generated **report text** (or `No matching messages found.`). Structured chat exports are JSON files under `output_dir` from config (default `output/`).
 
 ## Machine-readable status
 
@@ -82,9 +82,10 @@ Use this file in automation to decide whether to notify the user or attach paths
 
 When the user asks about WeChat content **after** a successful run:
 
-1. Read `last_run.json` to get `message_json_paths`.
-2. Read those JSON files (and any earlier exports in the same `output_dir` if the user asks about history).
-3. Answer from file contents plus the user’s question. Prefer quoting chat facts; do not invent messages.
+1. Run `weclaw-cua ask "<user question>"` from `WECLAW_ROOT`. This reads `last_run.json`, ranks nearby message snippets across the captured JSON files, and returns cited context.
+2. Answer only from the returned snippets. Prefer quoting chat facts with chat/sender/time; do not invent messages.
+3. If the user explicitly asks about older history, rerun with `--all-history` and optional `--chat "Name"` filters.
+4. If ranked snippets are insufficient, say what is missing and use `weclaw-cua search`, `weclaw-cua history`, or direct JSON reads as a follow-up.
 
 If `message_json_paths` is empty, say that there were no captured chats this run and offer to run `./run.sh` again.
 

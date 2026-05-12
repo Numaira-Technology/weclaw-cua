@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weclaw-cua"
-version = "0.1.5"
+version = "0.2.0"
 description = "WeClaw-CUA — vision-based WeChat message capture and report CLI for LLMs"
 readme = "README.md"
 license = "Apache-2.0"
@@ -28,6 +28,7 @@ dependencies = [
     "numpy",
     "opencv-python",
     "Pillow",
+    "screenshot-stitcher",
     "pyautogui",
     "pywin32; sys_platform == 'win32'",
 ]
@@ -48,7 +49,9 @@ hunyuan-ocr = [
     "torchvision",
     "huggingface_hub",
     "accelerate",
-    "transformers @ git+https://github.com/huggingface/transformers@82a06db03535c49aa987719ed0746a76093b1ec4",
+    # HunyuanOCR currently requires a Transformers commit that PyPI package
+    # metadata cannot express. Install it manually when using this extra:
+    # pip install "git+https://github.com/huggingface/transformers@82a06db03535c49aa987719ed0746a76093b1ec4"
 ]
 macos = [
     "pyobjc-core",

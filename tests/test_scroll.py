@@ -1,6 +1,10 @@
 import os
 import sys
+import unittest
 import time
+
+if sys.platform != "win32":
+    raise unittest.SkipTest("Windows-only interactive UI test")
 
 # Add project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))

@@ -33,6 +33,7 @@ from PIL import Image
 
 from platform_mac.sidebar_detector import Rect, detect_sidebar_region, TITLEBAR_HEIGHT_RATIO
 from platform_mac.image_stitcher import estimate_pair_overlap, stitch_screenshots
+from shared.vision_image_codec import log_vision_timing
 
 
 # ── 配置 ──────────────────────────────────────────────────
@@ -74,11 +75,26 @@ def _crop_chat_content(window_img: Image.Image,
     跳过顶部标题栏和底部输入框/工具栏，只保留消息气泡区域。
     sidebar_x2: 如果提供，直接用此值作为 sidebar 右边界（保证多帧一致）。
     """
+    started = time.perf_counter()
     w, h = window_img.size
     left = sidebar_x2 if sidebar_x2 is not None else detect_sidebar_region(window_img).x2
     top = int(h * (TITLEBAR_HEIGHT_RATIO + header_skip))
     bottom = int(h * (1.0 - footer_skip))
-    return window_img.crop((left, top, w, bottom))
+    cropped = window_img.crop((left, top, w, bottom))
+    log_vision_timing(
+        "capture_chat",
+        "crop",
+        source_width=w,
+        source_height=h,
+        x1=left,
+        y1=top,
+        x2=w,
+        y2=bottom,
+        width=cropped.width,
+        height=cropped.height,
+        crop_ms=round((time.perf_counter() - started) * 1000, 1),
+    )
+    return cropped
 
 
 # ── 停止条件判断 ──────────────────────────────────────────
@@ -313,7 +329,17 @@ def capture_and_stitch(
         settings=settings,
     )
 
+    stitch_started = time.perf_counter()
     result = stitch_screenshots(screenshots, output_path=output_path)
+    long_image = result["long_image"]
+    log_vision_timing(
+        "capture_chat",
+        "stitch",
+        frames=len(screenshots),
+        width=long_image.width,
+        height=long_image.height,
+        stitch_ms=round((time.perf_counter() - stitch_started) * 1000, 1),
+    )
     result["screenshots"] = screenshots
     result["pass_count"] = len(screenshots)
     return result

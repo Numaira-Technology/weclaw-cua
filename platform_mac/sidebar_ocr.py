@@ -25,9 +25,9 @@ from typing import Any
 
 from PIL import Image
 
-from platform_mac.macos_window import window_image_px_to_screen_pt
 from shared.datatypes import SidebarRow
 from shared.ocr_hunyuan_parser import OcrLine, normalize_text, parse_hunyuan_lines
+from platform_mac.macos_window import window_image_px_to_screen_pt
 
 _SIDEBAR_WIDTH_RATIO = 0.3
 _TEXT_LEFT_RATIO = 0.34
@@ -38,8 +38,8 @@ _UPSCALE = 1
 _DEBUG_DIR = Path("debug_outputs/sidebar_ocr")
 
 
-def _resample_filter() -> Image.Resampling:
-    return Image.Resampling.LANCZOS
+def _resample_filter() -> int:
+    return getattr(Image.Resampling, "LANCZOS", Image.BICUBIC)
 
 
 def _debug_prefix() -> Path:

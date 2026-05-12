@@ -45,15 +45,24 @@ def init(config_dir, force):
         if os.path.exists(example_path):
             shutil.copy2(example_path, config_path)
             click.echo(f"[+] Created config: {config_path}")
-            click.echo("    Edit this file to set your openrouter_api_key and groups_to_monitor.")
+            click.echo("    Edit this file to set your LLM API key and groups_to_monitor.")
         else:
             os.makedirs(config_dir, exist_ok=True)
             template = {
                 "wechat_app_name": "WeChat",
                 "groups_to_monitor": ["*"],
                 "sidebar_unread_only": True,
+                "chat_type": "group",
+                "sidebar_max_scrolls": 16,
+                "chat_max_scrolls": 10,
                 "report_custom_prompt": "Summarize key decisions and action items from the chat messages.",
+                "llm_provider": "openrouter",
                 "openrouter_api_key": "",
+                "openai_api_key": "",
+                "deepseek_api_key": "",
+                "kimi_api_key": "",
+                "glm_api_key": "",
+                "qwen_api_key": "",
                 "llm_model": "openai/gpt-4o",
                 "output_dir": "output",
             }
@@ -85,6 +94,8 @@ def init(config_dir, force):
     click.echo(f"\n[+] Setup complete!")
     click.echo("\nNext steps:")
     click.echo(f"  1. Edit {config_path}")
-    click.echo("     - Set openrouter_api_key (or export OPENROUTER_API_KEY)")
+    click.echo("     - Set llm_provider, llm_model, and the matching API key")
+    click.echo("     - Providers: openrouter, openai, deepseek, kimi, glm, qwen")
+    click.echo("     - OpenRouter always routes through OpenRouter for any model slug")
     click.echo("     - Set groups_to_monitor")
     click.echo("  2. Run: weclaw run")

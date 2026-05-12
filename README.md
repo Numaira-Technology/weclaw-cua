@@ -46,7 +46,7 @@
 | **OpenClaw gateway** | Reuse your local OpenClaw gateway — no separate OpenRouter key |
 | **AI-first** | JSON output by default, designed for LLM agent tool calls |
 | **Fully local** | All UI automation runs on your machine; data never leaves your device |
-| **13 commands** | init, run, capture, finalize, report, build-report-prompt, sessions, history, search, export, stats, unread, new-messages |
+| **14 commands** | init, run, capture, finalize, report, build-report-prompt, sessions, history, search, ask, export, stats, unread, new-messages |
 
 ---
 
@@ -55,13 +55,57 @@
 Unlike tools that decrypt WeChat's local SQLite databases, WeClaw-CUA uses a **pure vision approach**:
 
 1. Locates the WeChat desktop window via OS-level APIs
-2. Scans the sidebar for unread chats using vision AI
+2. Scans the sidebar for chats selected by config or CLI options
 3. Clicks into each chat, scrolls through messages, captures screenshots
 4. Stitches screenshots into long images (OpenCV-based template matching)
 5. Sends stitched images to a vision LLM for structured message extraction
 6. Post-processes and deduplicates extracted messages into clean JSON
 
 This means WeClaw-CUA works with **any WeChat version** and requires **no key extraction or database access**.
+
+### Capture-all fast path
+
+When `groups_to_monitor` is `["*"]` or `[]`, `chat_type` is `all`, and
+`sidebar_unread_only` is `false` (or `--chat-type all --unread-mode all` is
+passed), WeClaw uses a faster visual workflow. In this mode it does not need to
+classify sidebar rows as group/private or unread/read. It treats every visible
+chat row equally, clicks through the sidebar from top to bottom, and reserves
+vision-LLM calls for the actual message extraction step.
+
+```mermaid
+flowchart TD
+    startNode["weclaw capture/run"] --> configCheck["Check config: wildcard, chat_type=all, unread=false"]
+    configCheck --> fastPath["Capture-all fast path"]
+    fastPath --> topScroll["Scroll sidebar to top once"]
+    topScroll --> sidebarOcr["OCR sidebar rows and click boxes"]
+    sidebarOcr --> rowLoop["Click each visible row top-to-bottom"]
+    rowLoop --> headerOcr["OCR main chat header for full chat title"]
+    headerOcr --> captureFrames["Activate chat panel, scroll, capture frames"]
+    captureFrames --> stitchFrames["Stitch message screenshots"]
+    stitchFrames --> messageVlm["Vision LLM extracts messages"]
+    messageVlm --> saveJson["Save deduped JSON"]
+    saveJson --> nextRow{"More rows in viewport?"}
+    nextRow -->|Yes| rowLoop
+    nextRow -->|No| scrollDown["Scroll sidebar down"]
+    scrollDown --> repeated{"Repeated viewport or max scrolls?"}
+    repeated -->|No| sidebarOcr
+    repeated -->|Yes| finishNode["Finished"]
+```
+
+The fast path removes these navigation-time vision-LLM calls:
+
+- Sidebar classification VLM: row names and click boxes come from OCR
+  (RapidOCR on Windows, native Vision OCR on macOS).
+- Per-chat name re-location: capture-all sweeps visible rows instead of
+  repeatedly searching from the top for a configured name.
+- Post-click current-chat verification VLM: the clicked chat title is read from
+  the main chat header with OCR.
+- Safe-click VLM and new-message-button VLM: the fast path uses deterministic
+  chat-panel activation and skips the optional new-message-button probe.
+
+The normal sidebar classification path is still used for named chats,
+group-only/private-only wildcard scans, and unread-only scans, because those
+modes need row semantics such as chat type or unread badge state.
 
 ---
 
@@ -77,7 +121,7 @@ source .venv/bin/activate        # macOS / Linux
 
 # 2. Install
 pip install "weclaw-cua[macos,llm]"   # macOS
-pip install "weclaw-cua[llm]"         # Windows
+pip install "weclaw-cua[llm,win-ocr]" # Windows
 pip install weclaw-cua                # core only (stepwise, no LLM deps)
 
 # 3. Verify
@@ -98,7 +142,7 @@ python3 -m venv .venv
 ./.venv/bin/pip install -e ".[macos,llm]"
 
 # Windows
-.venv\Scripts\pip install -e ".[llm]"
+.venv\Scripts\pip install -e ".[llm,win-ocr]"
 ```
 
 </details>
@@ -138,35 +182,60 @@ Edit `config/config.json`:
   "wechat_app_name": "WeChat",
   "groups_to_monitor": ["*"],
   "sidebar_unread_only": true,
-  "report_custom_prompt": "Summarize key decisions and action items.",
+  "chat_type": "group",
+  "sidebar_max_scrolls": 16,
+  "chat_max_scrolls": 10,
+  "report_custom_prompt": "Summarize key decisions and action items from the captured chat messages.",
+  "llm_provider": "openrouter",
   "openrouter_api_key": "",
+  "openai_api_key": "",
+  "deepseek_api_key": "",
+  "kimi_api_key": "",
+  "glm_api_key": "",
+  "qwen_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }
 ```
 
-Fill `openrouter_api_key` only when using built-in OpenRouter mode. Leave it empty for OpenClaw gateway mode or stepwise mode.
+Set `chat_type` to `group`, `private`, or `all`. Set `sidebar_unread_only` to `true` for unread-badge chats only, or `false` to process read and unread chats that match the other selectors. `groups_to_monitor: ["*"]` or `[]` means wildcard scan for all chats allowed by `chat_type`; otherwise list exact sidebar chat names.
 
-You can also set the OpenRouter API key via environment variable:
+Set `sidebar_max_scrolls` to control how many times the sidebar may scroll downward during a scan. WeClaw scrolls back upward with `sidebar_max_scrolls + 2` wheel steps before each full scan, so the return-to-top distance is always greater than the downward scan distance. Set `chat_max_scrolls` to control how many times the active chat panel may scroll upward while collecting history.
+
+Set `llm_provider` to `openrouter`, `openai`, `deepseek`, `kimi`, `glm`, or `qwen`. Fill the matching API key only when using built-in LLM mode. When `llm_provider` is `openrouter`, all model slugs route through OpenRouter. Leave keys empty for OpenClaw gateway mode or stepwise mode.
+
+You can also set API keys via environment variables:
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-v1-your-key"          # macOS
+export OPENAI_API_KEY="sk-your-openai-key"             # macOS
+export DEEPSEEK_API_KEY="sk-your-deepseek-key"         # macOS
+export KIMI_API_KEY="sk-your-kimi-key"                 # macOS
+export GLM_API_KEY="sk-your-glm-key"                   # macOS
+export QWEN_API_KEY="sk-your-qwen-key"                 # macOS
 ```
 
 ```powershell
 $env:OPENROUTER_API_KEY = "sk-or-v1-your-key"          # Windows PowerShell
+$env:OPENAI_API_KEY = "sk-your-openai-key"             # Windows PowerShell
+$env:DEEPSEEK_API_KEY = "sk-your-deepseek-key"         # Windows PowerShell
+$env:KIMI_API_KEY = "sk-your-kimi-key"                 # Windows PowerShell
+$env:GLM_API_KEY = "sk-your-glm-key"                   # Windows PowerShell
+$env:QWEN_API_KEY = "sk-your-qwen-key"                 # Windows PowerShell
 ```
 
 ### Step 3 &mdash; Run
 
 ```bash
 weclaw-cua run --openclaw-gateway   # recommended: via local OpenClaw gateway
-weclaw-cua run                      # built-in OpenRouter mode
+weclaw-cua run                      # built-in LLM mode
+weclaw-cua run --chat-type all --unread-mode all  # triggers capture-all fast path
 weclaw-cua capture                  # capture only
 weclaw-cua report                   # report from existing captures
 weclaw-cua sessions                 # list captured chats
 weclaw-cua history "Group A" --limit 20
 weclaw-cua search "deadline" --chat "Team"
+weclaw-cua ask "Who needs a reply?"
 ```
 
 ---
@@ -310,6 +379,7 @@ Query commands (work on captured data, no LLM needed):
 - `weclaw-cua sessions` — list captured chats
 - `weclaw-cua history "NAME" --limit 20 --format text` — view messages
 - `weclaw-cua search "KEYWORD" --chat "CHAT_NAME"` — search messages
+- `weclaw-cua ask "QUESTION"` — ranked snippets for answering questions from captured messages
 - `weclaw-cua stats "CHAT" --format text` — statistics
 - `weclaw-cua export "CHAT" --format markdown` — export chat
 - `weclaw-cua new-messages` — incremental new messages
@@ -321,23 +391,26 @@ Query commands (work on captured data, no LLM needed):
 
 ## Command Reference
 
+See [`docs/cli-reference.md`](docs/cli-reference.md) for every command's options and JSON/text output shape.
+
 | Command | Description |
 |:--------|:------------|
 | `init` | First-time setup: create config, verify permissions |
-| `run` | Full pipeline: capture + generate report |
-| `capture` | Vision-capture unread messages |
+| `run` | Full pipeline: capture selected chats + generate report |
+| `capture` | Vision-capture selected chats |
 | `finalize` | Process agent-provided LLM responses into JSON (`--work-dir` required) |
 | `report` | Generate LLM report from existing captured JSON |
 | `build-report-prompt` | Output the report prompt (for agent to call own LLM) |
 | `sessions` | List captured chat sessions |
 | `history` | View messages from a specific session |
 | `search` | Search across captured messages |
+| `ask` | Retrieve ranked cited snippets for chat-log Q&A |
 | `export` | Export a session to markdown or plain text |
 | `stats` | Message statistics for a session |
 | `unread` | Scan sidebar for unread chats via vision AI |
 | `new-messages` | Incremental new messages since last check |
 
-All commands output JSON by default. Pass `--format text` for human-readable output.
+Most commands output JSON by default. Pass `--format text` where available for human-readable output.
 
 <details>
 <summary><strong>Per-command examples</strong></summary>
@@ -354,10 +427,14 @@ weclaw-cua init --config-dir /path     # custom config directory
 
 ```bash
 weclaw-cua run --openclaw-gateway      # recommended: via local OpenClaw gateway
-weclaw-cua run                         # built-in OpenRouter mode
+weclaw-cua run                         # built-in LLM mode
 weclaw-cua run --no-llm                # stepwise: capture only, agent handles LLM
 weclaw-cua run --format text           # human-readable output
+weclaw-cua run --chat-type all --unread-mode all
+weclaw-cua run --sidebar-max-scrolls 30 --chat-max-scrolls 20
 ```
+
+Capture-selection overrides: `--chat-type group|private|all`, `--unread-mode unread|all`, `--sidebar-max-scrolls N`, `--chat-max-scrolls N`.
 
 ### `capture`
 
@@ -366,7 +443,10 @@ weclaw-cua capture                     # capture with built-in LLM
 weclaw-cua capture --no-llm            # stepwise: output images + prompts only
 weclaw-cua capture --no-llm --work-dir ./weclaw_work
 weclaw-cua capture --format text
+weclaw-cua capture --chat-type private --unread-mode unread
 ```
+
+Capture-selection overrides are the same as `run`.
 
 ### `finalize`
 
@@ -420,6 +500,18 @@ weclaw-cua search "report" --type text
 
 Options: `--chat` (repeatable), `--limit`, `--offset`, `--type`, `--format`
 
+### `ask`
+
+```bash
+weclaw-cua ask "When is tomorrow's meeting?"
+weclaw-cua ask "Who needs a reply?" --all-history
+weclaw-cua ask "deadline" --chat "Team" --format text
+```
+
+Returns ranked message windows for an agent to answer from, using `last_run.json` by default and `--all-history` when older exports are needed.
+
+Options: `--chat` (repeatable), `--limit`, `--window`, `--all-history`, `--type`, `--format`
+
 ### `export`
 
 ```bash
@@ -443,7 +535,10 @@ weclaw-cua stats "Alice" --format text
 weclaw-cua unread
 weclaw-cua unread --limit 10
 weclaw-cua unread --format text
+weclaw-cua unread --chat-type private --sidebar-max-scrolls 30
 ```
+
+Options: `--limit`, `--format`, `--chat-type`, `--sidebar-max-scrolls`.
 
 ### `new-messages`
 
@@ -485,7 +580,27 @@ The `--type` option (on `history` and `search`):
 
 - **Python** >= 3.10
 - **WeChat Desktop** — any version (vision-based, no version lock-in)
-- **OpenRouter API key** — required for built-in LLM mode; not needed for stepwise or OpenClaw gateway mode
+- **LLM API key** — OpenRouter, OpenAI, DeepSeek, Kimi, GLM, or Qwen for built-in LLM mode; not needed for stepwise or OpenClaw gateway mode
+
+---
+
+## Output Data Format
+
+Capture commands write one JSON file per chat under `output_dir`. Each file is a JSON array of message objects:
+
+```json
+[
+  {
+    "chat_name": "Team Chat",
+    "sender": "Alice",
+    "time": "10:15",
+    "content": "Please review the proposal.",
+    "type": "text"
+  }
+]
+```
+
+`sender` can be empty for system messages, and `time` can be `null` or empty when WeChat does not show a timestamp. See [`docs/cli-reference.md`](docs/cli-reference.md) for command result schemas.
 
 ---
 
@@ -498,8 +613,17 @@ The `--type` option (on `history` and `search`):
   "wechat_app_name": "WeChat",
   "groups_to_monitor": ["*"],
   "sidebar_unread_only": true,
-  "report_custom_prompt": "Summarize key decisions and action items.",
+  "chat_type": "group",
+  "sidebar_max_scrolls": 16,
+  "chat_max_scrolls": 10,
+  "report_custom_prompt": "Summarize key decisions and action items from the captured chat messages.",
+  "llm_provider": "openrouter",
   "openrouter_api_key": "",
+  "openai_api_key": "",
+  "deepseek_api_key": "",
+  "kimi_api_key": "",
+  "glm_api_key": "",
+  "qwen_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }
@@ -508,12 +632,26 @@ The `--type` option (on `history` and `search`):
 | Field | Description |
 |:------|:------------|
 | `wechat_app_name` | Window title for WeChat — usually `"WeChat"` for English locale or `"微信"` for Chinese locale |
-| `groups_to_monitor` | `["*"]` = all chats (both group chats and direct messages), or list specific chat names |
-| `sidebar_unread_only` | `true` = only process chats with unread badges |
+| `groups_to_monitor` | `["*"]` or `[]` = all chats allowed by `chat_type`, or list specific chat names |
+| `sidebar_unread_only` | `true` = only process chats with unread badges; `false` = include read and unread selected chats |
+| `chat_type` | `group`, `private`, or `all`; applies to wildcard scans and named-chat matches |
+| `sidebar_max_scrolls` | Maximum downward sidebar scrolls per scan. Returning to top uses `sidebar_max_scrolls + 2` upward scrolls so it is always greater than the scan limit. |
+| `chat_max_scrolls` | Maximum upward scrolls inside a chat panel while capturing history |
 | `report_custom_prompt` | Custom instructions appended to the LLM report prompt |
-| `openrouter_api_key` | API key (or use `OPENROUTER_API_KEY` env var) |
-| `llm_model` | LLM model identifier for report generation |
+| `llm_provider` | Built-in LLM provider: `openrouter`, `openai`, `deepseek`, `kimi`, `glm`, or `qwen`; `moonshot` aliases to `kimi`, and `zhipu`/`z-ai` alias to `glm` |
+| `openrouter_api_key` | OpenRouter API key (or use `OPENROUTER_API_KEY` env var) |
+| `openai_api_key` | OpenAI API key (or use `OPENAI_API_KEY` env var) |
+| `deepseek_api_key`, `kimi_api_key`, `glm_api_key`, `qwen_api_key` | Native provider API keys; matching env vars take precedence |
+| `llm_model` | LLM model identifier. OpenRouter sends the full slug unchanged; native providers strip a `provider/` prefix before calling the provider. |
 | `output_dir` | Directory for output JSON files |
+
+Capture options can also be overridden per command:
+
+```bash
+weclaw-cua capture --chat-type private --unread-mode unread
+weclaw-cua run --chat-type all --unread-mode all --sidebar-max-scrolls 30 --chat-max-scrolls 20
+weclaw-cua unread --chat-type group --sidebar-max-scrolls 25
+```
 
 ---
 

@@ -5,7 +5,7 @@ Usage:
     report = run_pipeline_b(config, ["output/Group A.json"])
 
 Input spec:
-    - config: WeclawConfig with report_custom_prompt, llm_model, openrouter_api_key.
+    - config: WeclawConfig with report prompt and resolved LLM routing fields.
     - message_json_paths: list of JSON file paths produced by algo_a.
 
 Output spec:
@@ -14,7 +14,7 @@ Output spec:
 Pipeline steps:
     1. load_messages(message_json_paths)
     2. build_report_prompt(messages, config.report_custom_prompt)
-    3. generate_report(prompt, config.llm_model, config.openrouter_api_key)
+    3. generate_report using config's resolved provider routing.
 """
 
 from config.weclaw_config import WeclawConfig
@@ -30,5 +30,12 @@ def run_pipeline_b(config: WeclawConfig, message_json_paths: list[str]) -> str:
 
     messages = load_messages(message_json_paths)
     prompt = build_report_prompt(messages, config.report_custom_prompt)
-    report = generate_report(prompt, config.llm_model, config.openrouter_api_key)
+    report = generate_report(
+        prompt,
+        config.llm_model,
+        config.llm_api_key,
+        config.llm_provider,
+        config.llm_base_url,
+        config.llm_wire_model,
+    )
     return report

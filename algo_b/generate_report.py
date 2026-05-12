@@ -6,8 +6,11 @@ Usage:
 
 Input spec:
     - prompt: the full prompt string from build_report_prompt.
-    - model: OpenRouter model identifier.
-    - api_key: OpenRouter API key.
+    - model: provider model identifier.
+    - api_key: provider API key.
+    - provider: configured LLM provider.
+    - base_url: resolved OpenAI-compatible API base URL.
+    - wire_model: model name sent to the selected provider.
 
 Output spec:
     - Returns the generated report as a plain text string.
@@ -16,9 +19,23 @@ Output spec:
 from shared.llm_client import call_llm
 
 
-def generate_report(prompt: str, model: str, api_key: str) -> str:
+def generate_report(
+    prompt: str,
+    model: str,
+    api_key: str,
+    provider: str = "openrouter",
+    base_url: str = "",
+    wire_model: str = "",
+) -> str:
     """Send the prompt to the LLM and return the report text."""
     assert prompt
     assert model
     assert api_key
-    return call_llm(prompt=prompt, model=model, api_key=api_key)
+    return call_llm(
+        prompt=prompt,
+        model=model,
+        api_key=api_key,
+        provider=provider,
+        base_url=base_url,
+        wire_model=wire_model,
+    )

@@ -86,11 +86,12 @@ def filter_chats_by_groups_to_monitor(
     ]
 
 
-def list_unread_chats(driver) -> List[ChatInfo]:
+def list_unread_chats(driver, max_scrolls: int = MAX_SCROLL_ITERATIONS) -> List[ChatInfo]:
     """返回 sidebar 中所有带未读标记的会话（自动滚动 + 去重）。
 
     driver: MacDriver 实例。
     """
+    assert max_scrolls >= 0
     driver.activate_wechat()
     time.sleep(0.3)
 
@@ -98,7 +99,7 @@ def list_unread_chats(driver) -> List[ChatInfo]:
     all_chats: List[ChatInfo] = []
     prev_sidebar_img = None
 
-    for iteration in range(MAX_SCROLL_ITERATIONS):
+    for iteration in range(max_scrolls + 1):
         img, wb = driver.capture_wechat_window_with_bounds()
         win_rect = Rect(wb.x, wb.y, wb.width, wb.height)
 
@@ -128,9 +129,11 @@ def list_unread_chats(driver) -> List[ChatInfo]:
         if iteration > 0 and new_found == 0:
             break
 
+        if iteration >= max_scrolls:
+            break
         driver.scroll_sidebar(SCROLL_DELTA)
         time.sleep(SETTLE_DELAY)
 
-    driver.scroll_sidebar_to_top()
+    driver.scroll_sidebar_to_top(max_scrolls + 2)
     time.sleep(SETTLE_DELAY)
     return all_chats

@@ -13,8 +13,9 @@ Input spec:
     - Messages are expected in visible chat order from older to newer.
 
 Output spec:
-    - `filter_messages_to_recent_window` keeps only messages within the recent window.
-    - `chunk_reaches_recent_cutoff` returns True when a chunk already reaches the cutoff.
+    - `filter_messages_to_recent_window` keeps only messages within the recent window when hours > 0.
+    - `hours <= 0` disables filtering and cutoff (keeps all messages; never treats a chunk as "reached cutoff").
+    - `chunk_reaches_recent_cutoff` returns True when a chunk already reaches the cutoff (hours > 0 only).
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from datetime import datetime, timedelta
 
 from shared.datatypes import ChatMessage
 
-RECENT_WINDOW_HOURS = 24
+RECENT_WINDOW_HOURS = 0
 _FUTURE_TOLERANCE = timedelta(minutes=5)
 _WEEKDAY_INDEX = {
     "星期一": 0,
@@ -174,6 +175,8 @@ def filter_messages_to_recent_window(
     hours: int = RECENT_WINDOW_HOURS,
     now: datetime | None = None,
 ) -> list[ChatMessage]:
+    if hours <= 0:
+        return list(messages)
     if now is None:
         now = datetime.now().astimezone().replace(tzinfo=None)
     cutoff = now - timedelta(hours=hours)
@@ -192,6 +195,8 @@ def chunk_reaches_recent_cutoff(
     hours: int = RECENT_WINDOW_HOURS,
     now: datetime | None = None,
 ) -> bool:
+    if hours <= 0:
+        return False
     if now is None:
         now = datetime.now().astimezone().replace(tzinfo=None)
     cutoff = now - timedelta(hours=hours)

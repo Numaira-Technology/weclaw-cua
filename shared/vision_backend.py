@@ -7,7 +7,7 @@ Usage:
     response = backend.query(prompt, image, max_tokens=2048)
 
 Two implementations:
-    - OpenRouterBackend: calls OpenRouter API directly (legacy, requires API key).
+    - Built-in backend: calls the configured OpenAI-compatible LLM.
     - StepwiseBackend: writes image+prompt to work_dir, reads response from agent.
 """
 

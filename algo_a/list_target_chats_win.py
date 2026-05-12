@@ -22,7 +22,6 @@ if project_root not in sys.path:
 
 from shared.platform_api import PlatformDriver
 
-MAX_SCROLL_ITERATIONS = 10
 MIN_TRUNCATED_PREFIX_LEN = 4
 
 
@@ -75,11 +74,24 @@ def _sidebar_compact_compare(s: str) -> str:
     return t
 
 
+def _chat_identity_key(text: str) -> str:
+    clean = _normalize_chat_label(text)
+    chars = []
+    for ch in clean:
+        category = unicodedata.category(ch)
+        if category[0] in ("P", "S", "Z"):
+            continue
+        chars.append(ch.casefold())
+    return "".join(chars)
+
+
 def _strip_trailing_ellipsis(text: str) -> str:
     t = text.rstrip()
-    while t.endswith("..."):
-        t = t[:-3].rstrip()
-    return t
+    while True:
+        stripped = t.rstrip(".。．…⋯").rstrip()
+        if stripped == t:
+            return t
+        t = stripped
 
 
 def _safe_truncated_prefix_match(ui_name: str, filter_name: str) -> bool:
@@ -97,7 +109,16 @@ def _safe_truncated_prefix_match(ui_name: str, filter_name: str) -> bool:
         return False
     if len(compact_prefix) >= len(compact_filter):
         return False
-    return compact_filter.startswith(compact_prefix)
+    if compact_filter.startswith(compact_prefix):
+        return True
+
+    identity_prefix = _chat_identity_key(prefix)
+    identity_filter = _chat_identity_key(filter_name)
+    if len(identity_prefix) < MIN_TRUNCATED_PREFIX_LEN:
+        return False
+    if len(identity_prefix) >= len(identity_filter):
+        return False
+    return identity_filter.startswith(identity_prefix)
 
 
 def _sidebar_names_match(ui_name: str, filter_name: str) -> bool:
@@ -139,23 +160,30 @@ def list_target_chats(
     *,
     all_groups: bool = False,
     unread_only: bool = False,
+    chat_type: str = "group",
+    max_scrolls: int = 10,
 ) -> list[ChatInfo]:
     assert window is not None
     assert not (name_filter and all_groups)
+    assert chat_type in ("group", "private", "all")
+    assert max_scrolls >= 0
 
     found_chats: dict[str, ChatInfo] = {}
     all_seen_chat_names = set()
 
     if name_filter:
         ur = " + unread badge" if unread_only else ""
-        print(f"[*] Sidebar scan (match name{ur}), re-locating: {name_filter!r}")
+        print(
+            f"[*] Sidebar scan (match name{ur}, chat_type={chat_type!r}), "
+            f"re-locating: {name_filter!r}"
+        )
     elif all_groups:
         ur = " + unread badge" if unread_only else ""
-        print(f"[*] Sidebar scan: every group chat (is_group{ur}).")
+        print(f"[*] Sidebar scan: configured wildcard chat_type={chat_type!r}{ur}.")
     else:
         print("[*] Sidebar scan: unread group chats only (is_group + unread).")
 
-    for i in range(MAX_SCROLL_ITERATIONS):
+    for i in range(max_scrolls + 1):
         visible_chats = _collect_visible_chats(driver, window)
 
         if not visible_chats:
@@ -172,7 +200,11 @@ def list_target_chats(
                 if unread_only:
                     want_row = want_row and chat.is_unread
             elif all_groups:
-                want_row = chat.is_group
+                want_row = (
+                    chat_type == "all"
+                    or (chat_type == "group" and chat.is_group)
+                    or (chat_type == "private" and not chat.is_group)
+                )
                 if unread_only:
                     want_row = want_row and chat.is_unread
             else:
@@ -201,7 +233,11 @@ def list_target_chats(
             print("[*] Located filtered chat. Stopping scan.")
             break
 
-        print(f"[*] Scrolling sidebar down... (iteration {i + 1}/{MAX_SCROLL_ITERATIONS})")
+        if i >= max_scrolls:
+            print(f"[*] Reached sidebar max scrolls ({max_scrolls}). Stopping scan.")
+            break
+
+        print(f"[*] Scrolling sidebar down... (iteration {i + 1}/{max_scrolls})")
         driver.scroll_sidebar(window, "down")
         time.sleep(1)
 

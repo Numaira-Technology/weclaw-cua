@@ -3,33 +3,30 @@ Windows-specific implementation of the PlatformDriver protocol using AI Vision.
 """
 import json
 import os
+import re
 import time
 from typing import Any
 
 import pyautogui  # type: ignore[import-untyped]
 import win32gui  # type: ignore[import-untyped]
 
-from shared.datatypes import ChatMessage, SidebarRow
+from shared.chat_chunk_extraction import extract_messages_from_captured_chat
+from shared.datatypes import CapturedChatImages, ChatImageChunk, ChatMessage, SidebarRow
 from shared.sidebar_ui_chrome import is_sidebar_ui_chrome_label
 from shared.platform_api import PlatformDriver
 from shared.sidebar_classification import (
     parse_threads_json,
     threads_to_sidebar_rows,
 )
-from shared.message_time_window import (
-    RECENT_WINDOW_HOURS,
-    chunk_reaches_recent_cutoff,
-    filter_messages_to_recent_window,
-)
 from shared.vision_backend import VisionBackend, create_vision_backend
 from shared.vision_prompts import (
-    CHAT_PANEL_PROMPT,
     CHAT_PANEL_SAFE_CLICK_PROMPT,
-    HIGHLIGHTED_CHAT_MATCH_PROMPT_TEMPLATE,
     CURRENT_CHAT_Y_PROMPT,
     NEW_MESSAGES_BUTTON_PROMPT,
+    SIDEBAR_CHAT_NAMES_PROMPT,
     SIDEBAR_PROMPT,
 )
+from shared.vision_image_codec import log_vision_timing
 from platform_win.find_wechat_window import find_wechat_window as find_window
 from platform_win.sidebar_ocr_debug import (
     make_row_debug_entry,
@@ -39,10 +36,30 @@ from platform_win.sidebar_ocr_debug import (
     write_sidebar_debug,
 )
 from platform_win.vision import _force_foreground_window, capture_window
-from shared.message_dedup import dedupe_chat_messages
 from shared.ocr_paddle import get_ocr_engine
 from shared.vision_response_json import parse_json_object_from_model_text
-from utils.image_stitcher import save_stitched_debug, stitch_screenshots
+from utils.chat_stitch_debug import (
+    new_chat_stitch_session_basename,
+    save_chat_frame_before_stitch,
+    save_chat_stitch_for_vlm,
+)
+from utils.image_stitcher import CropRegion, stitch_screenshots
+
+
+def _clean_header_title(text: str) -> str:
+    out = re.sub(r"\s+", " ", str(text or "")).strip()
+    out = re.sub(r"[（(]\d+[）)]$", "", out).strip()
+    return out.strip(" \t、，。：；\"'")
+
+
+def _is_plausible_header_title(text: str) -> bool:
+    title = str(text or "").strip()
+    if len(title) < 2:
+        return False
+    if title.isdigit():
+        return False
+    junk = sum(1 for ch in title if ch in "+0123456789⑦⑧⑨⑩①②③④⑤⑥⑪⑫⑬⑭⑮ \t·.。:：")
+    return junk < len(title) * 0.5
 
 
 class WinDriver(PlatformDriver):
@@ -91,6 +108,162 @@ class WinDriver(PlatformDriver):
         print(f"[+] Precise coordinates for '{chat_name}' found via OCR: ({abs_x}, {abs_y})")
         return (abs_x, abs_y)
 
+    def _ocr_sidebar_rows_from_image(
+        self,
+        sidebar_image,
+        window_left: int,
+        window_top: int,
+        sidebar_width: int,
+        vlm_threads: list[dict] | None = None,
+    ) -> tuple[list[SidebarRow], list[Any], list[dict[str, Any]]]:
+        ocr_engine = get_ocr_engine()
+        raw_lines = ocr_engine.recognize(sidebar_image)
+        img_height = sidebar_image.height
+        threads = vlm_threads or []
+
+        def _vlm_y_px(thread: dict) -> int:
+            y_norm = float(thread.get("y", 0))
+            return int(y_norm / 1000.0 * img_height)
+
+        vlm_by_name: dict[str, dict] = {t.get("name", ""): t for t in threads}
+
+        def _best_vlm_thread(ocr_text: str, ocr_cy: int) -> dict:
+            if ocr_text in vlm_by_name:
+                return vlm_by_name[ocr_text]
+            if threads:
+                return min(threads, key=lambda t: abs(_vlm_y_px(t) - ocr_cy))
+            return {}
+
+        rows: list[SidebarRow] = []
+        row_debug_entries: list[dict[str, Any]] = []
+        for ocr_line in raw_lines:
+            if is_sidebar_ui_chrome_label(ocr_line.text):
+                continue
+            best_thread = _best_vlm_thread(ocr_line.text, ocr_line.center_y)
+            is_group = bool(best_thread.get("is_group", False)) if best_thread else False
+            unread = bool(best_thread.get("unread", False)) if best_thread else False
+            unread_badge_raw = best_thread.get("unread_badge") if best_thread else None
+            badge = str(unread_badge_raw).strip() if unread and unread_badge_raw else None
+            if unread and not badge:
+                badge = "1"
+            _, oy1, _, oy2 = ocr_line.bbox
+            row_half = max((oy2 - oy1) // 2, 10)
+            cy = (oy1 + oy2) // 2
+            y1 = max(0, cy - row_half)
+            y2 = min(img_height, cy + row_half)
+            row = SidebarRow(
+                name=ocr_line.text,
+                last_message=None,
+                badge_text=badge,
+                bbox=(
+                    window_left,
+                    window_top + y1,
+                    window_left + sidebar_width,
+                    window_top + y2,
+                ),
+                is_group=is_group,
+            )
+            rows.append(row)
+            row_debug_entries.append(make_row_debug_entry(ocr_line, row, best_thread))
+        return rows, raw_lines, row_debug_entries
+
+    def get_fast_sidebar_rows(self, window: Any) -> list[SidebarRow]:
+        """Return visible sidebar rows using RapidOCR only."""
+        hwnd = window
+        full_screenshot = capture_window(hwnd)
+        if not full_screenshot:
+            print("[WARN] Failed to capture window for fast sidebar row detection.")
+            return []
+        window_left, window_top, _, _ = win32gui.GetWindowRect(hwnd)
+        sidebar_width = int(full_screenshot.width * 0.3)
+        sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
+        rows, raw_lines, row_debug_entries = self._ocr_sidebar_rows_from_image(
+            sidebar_image,
+            window_left,
+            window_top,
+            sidebar_width,
+        )
+        debug_prefix = new_sidebar_debug_prefix()
+        save_sidebar_crop(debug_prefix, sidebar_image)
+        print_ocr_lines("Fast OCR raw lines", raw_lines)
+        print_ocr_lines("Fast OCR rows (no merge)", raw_lines)
+        write_sidebar_debug(debug_prefix, raw_lines, [], row_debug_entries)
+        print(f"[+] Fast OCR identified {len(rows)} sidebar rows.")
+        return rows
+
+    def capture_sidebar_chat_names(
+        self,
+        window: Any,
+        max_scrolls: int,
+    ) -> list[str]:
+        """Capture a stitched sidebar strip and return chat names from first-line text."""
+        assert max_scrolls >= 0
+        hwnd = window
+        screenshots = []
+        for idx in range(max_scrolls + 1):
+            full_screenshot = capture_window(hwnd)
+            if full_screenshot:
+                sidebar_width = int(full_screenshot.width * 0.3)
+                screenshots.append(
+                    full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
+                )
+            if idx >= max_scrolls:
+                break
+            self.scroll_sidebar(window, "down")
+            time.sleep(0.4)
+
+        if not screenshots:
+            print("[WARN] No sidebar screenshots were captured for chat-name whitelist.")
+            return []
+
+        first_width, first_height = screenshots[0].size
+        stitch_started = time.perf_counter()
+        stitched_image = stitch_screenshots(
+            images=screenshots,
+            scroll_region=CropRegion(0, 0, first_width, first_height),
+            match_top_trim=0,
+            match_bottom_trim=0,
+        )
+        if stitched_image is None:
+            print("[WARN] Failed to stitch sidebar screenshots for chat-name whitelist.")
+            return []
+
+        log_vision_timing(
+            "win_sidebar_names",
+            "stitched",
+            input_frames=len(screenshots),
+            width=stitched_image.width,
+            height=stitched_image.height,
+            stitch_ms=round((time.perf_counter() - stitch_started) * 1000, 1),
+        )
+
+        debug_prefix = new_sidebar_debug_prefix()
+        save_sidebar_crop(debug_prefix, stitched_image)
+        response_str = self.vision_ai.query(
+            SIDEBAR_CHAT_NAMES_PROMPT,
+            stitched_image,
+            max_tokens=4096,
+        )
+        if not response_str:
+            print("[WARN] No VLM response for stitched sidebar chat-name whitelist.")
+            return []
+
+        data = parse_json_object_from_model_text(response_str)
+        raw_names = data.get("names", [])
+        if not isinstance(raw_names, list):
+            raise TypeError("sidebar chat-name response must contain a names list")
+
+        names: list[str] = []
+        seen: set[str] = set()
+        for raw_name in raw_names:
+            name = str(raw_name or "").strip()
+            if not name or is_sidebar_ui_chrome_label(name) or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+        print(f"[+] Stitched sidebar whitelist identified {len(names)} chat name(s).")
+        return names
+
     def get_sidebar_rows(self, window: Any) -> list[SidebarRow]:
         """Gets all visible rows in the sidebar using RapidOCR (names) + VLM (semantics)."""
         hwnd = window
@@ -107,20 +280,22 @@ class WinDriver(PlatformDriver):
 
         img_width, img_height = sidebar_image.size
 
-        ocr_engine = get_ocr_engine()
-        raw_lines = ocr_engine.recognize(sidebar_image)
-        merged_lines = raw_lines
         debug_prefix = new_sidebar_debug_prefix()
+        rows, raw_lines, row_debug_entries = self._ocr_sidebar_rows_from_image(
+            sidebar_image,
+            window_left,
+            window_top,
+            sidebar_width,
+        )
         save_sidebar_crop(debug_prefix, sidebar_image)
         print_ocr_lines("OCR raw lines", raw_lines)
-        print_ocr_lines("OCR rows (no merge)", merged_lines)
+        print_ocr_lines("OCR rows (no merge)", raw_lines)
 
-        if not merged_lines:
+        if not raw_lines:
             print("[WARN] RapidOCR returned no text; falling back to VLM-only mode.")
-            merged_lines = []
 
         # Build OCR hint list for VLM to reduce hallucination
-        ocr_name_hints = [ln.text for ln in merged_lines]
+        ocr_name_hints = [ln.text for ln in raw_lines]
 
         # --- Step 2: VLM — is_group / unread / y_norm per row ---
         hint_clause = ""
@@ -133,10 +308,10 @@ class WinDriver(PlatformDriver):
 
         augmented_prompt = SIDEBAR_PROMPT + hint_clause
 
-        print(f"[DEBUG] OCR merged lines: {len(merged_lines)} rows, sending as hints to VLM.")
+        print(f"[DEBUG] OCR lines: {len(raw_lines)} rows, sending as hints to VLM.")
 
         print("[*] Querying Vision AI to analyze sidebar...")
-        response_str = self.vision_ai.query(augmented_prompt, sidebar_image)
+        response_str = self.vision_ai.query(augmented_prompt, sidebar_image, max_tokens=1024)
 
         vlm_threads: list[dict] = []
         if response_str:
@@ -150,62 +325,14 @@ class WinDriver(PlatformDriver):
         # --- Step 3: Merge OCR rows with VLM semantics by name (primary) then y ---
         # VLM is instructed to use exact OCR names, so name-match is reliable.
         # Fall back to nearest-y only for rows the VLM named slightly differently.
-        def _vlm_y_px(thread: dict) -> int:
-            y_norm = float(thread.get("y", 0))
-            return int(y_norm / 1000.0 * img_height)
-
-        vlm_by_name: dict[str, dict] = {t.get("name", ""): t for t in vlm_threads}
-
-        def _best_vlm_thread(ocr_text: str, ocr_cy: int) -> dict:
-            # 1. Exact name match
-            if ocr_text in vlm_by_name:
-                return vlm_by_name[ocr_text]
-            # 2. Nearest-y fallback
-            if vlm_threads:
-                return min(vlm_threads, key=lambda t: abs(_vlm_y_px(t) - ocr_cy))
-            return {}
-
-        rows: list[SidebarRow] = []
-        row_debug_entries: list[dict[str, Any]] = []
-
-        if merged_lines:
-            for ocr_line in merged_lines:
-                if is_sidebar_ui_chrome_label(ocr_line.text):
-                    continue
-                ocr_cy = ocr_line.center_y
-                best_thread = _best_vlm_thread(ocr_line.text, ocr_cy)
-
-                is_group = bool(best_thread.get("is_group", False)) if best_thread else False
-                unread = bool(best_thread.get("unread", False)) if best_thread else False
-                unread_badge_raw = best_thread.get("unread_badge") if best_thread else None
-
-                if unread:
-                    badge = str(unread_badge_raw).strip() if unread_badge_raw else "1"
-                else:
-                    badge = None
-
-                # Pixel bbox of this OCR row → absolute screen coords
-                ox1, oy1, ox2, oy2 = ocr_line.bbox
-                # Expand row height to be at least 20px tall (for click accuracy)
-                row_half = max((oy2 - oy1) // 2, 10)
-                cy = (oy1 + oy2) // 2
-                y1 = max(0, cy - row_half)
-                y2 = min(img_height, cy + row_half)
-                box = (
-                    window_left,
-                    window_top + y1,
-                    window_left + sidebar_width,
-                    window_top + y2,
-                )
-                row = SidebarRow(
-                    name=ocr_line.text,
-                    last_message=None,
-                    badge_text=badge,
-                    bbox=box,
-                    is_group=is_group,
-                )
-                rows.append(row)
-                row_debug_entries.append(make_row_debug_entry(ocr_line, row, best_thread))
+        if raw_lines:
+            rows, _, row_debug_entries = self._ocr_sidebar_rows_from_image(
+                sidebar_image,
+                window_left,
+                window_top,
+                sidebar_width,
+                vlm_threads,
+            )
         else:
             rows = threads_to_sidebar_rows(
                 vlm_threads, img_width, img_height, window_left, window_top
@@ -213,7 +340,7 @@ class WinDriver(PlatformDriver):
             for row in rows:
                 row_debug_entries.append(make_row_debug_entry(None, row, None))
 
-        write_sidebar_debug(debug_prefix, raw_lines, merged_lines, vlm_threads, row_debug_entries)
+        write_sidebar_debug(debug_prefix, raw_lines, vlm_threads, row_debug_entries)
         print(f"[+] AI identified {len(rows)} sidebar rows.")
         return rows
 
@@ -268,7 +395,11 @@ class WinDriver(PlatformDriver):
         raw_bursts = os.environ.get("WECLAW_WIN_CHAT_SCROLL_BURSTS", "").strip()
         bursts = int(raw_bursts) if raw_bursts else 4
         if bursts <= 0:
-            bursts = 1
+            bursts = 4
+        raw_settle = os.environ.get("WECLAW_WIN_CHAT_SCROLL_SETTLE_SEC", "").strip()
+        settle_sec = float(raw_settle) if raw_settle else 0.04
+        if settle_sec < 0:
+            settle_sec = 0.04
         if direction == "up":
             clicks = scroll_amount
         elif direction == "down":
@@ -286,27 +417,54 @@ class WinDriver(PlatformDriver):
         pyautogui.moveTo(message_panel_x, message_panel_y, duration=0.1)
         for _ in range(bursts):
             pyautogui.scroll(clicks)
-            time.sleep(0.04)
-        raw_settle = os.environ.get("WECLAW_WIN_CHAT_SCROLL_SETTLE_SEC", "").strip()
-        settle_sec = float(raw_settle) if raw_settle else 1.0
-        if settle_sec < 0.2:
-            settle_sec = 0.2
-        time.sleep(settle_sec)
+            if settle_sec > 0:
+                time.sleep(settle_sec)
+        time.sleep(1.0)
 
-    def get_chat_messages(self, chat_name: str) -> list[ChatMessage]:
+    def get_chat_messages(
+        self,
+        chat_name: str,
+        max_scrolls: int | None = None,
+        skip_navigation_vlm: bool = False,
+    ) -> list[ChatMessage]:
         """
         Orchestrates the process of scrolling, capturing, stitching, and extracting
         chat messages from the current chat.
         This version scrolls UP, captures, and then reverses the sequence for stitching.
         """
-        print(f"[*] Starting message extraction for '{chat_name}'...")
+        captured = self.capture_chat_messages(
+            chat_name,
+            max_scrolls=max_scrolls,
+            skip_navigation_vlm=skip_navigation_vlm,
+        )
+        if not captured.chunks:
+            return []
+        return self.extract_chat_messages_from_capture(captured)
 
-        self._activate_chat_panel_safely()
+    def capture_chat_messages(
+        self,
+        chat_name: str,
+        max_messages: int | None = None,
+        max_scrolls: int | None = None,
+        skip_navigation_vlm: bool = False,
+    ) -> CapturedChatImages:
+        """Capture, reverse, chunk, and stitch chat screenshots without VLM extraction."""
+        del max_messages
+        print(f"[*] Starting message capture for '{chat_name}'...")
 
-        self.click_new_messages_button()
+        if skip_navigation_vlm:
+            self._activate_chat_panel_by_center()
+        else:
+            self._activate_chat_panel_safely()
+            self.click_new_messages_button()
 
+        scroll_count = 10 if max_scrolls is None else max_scrolls
+        assert scroll_count >= 0
         screenshots = []
-        for i in range(10):
+        current_screenshot = capture_window(self.hwnd)
+        if current_screenshot:
+            screenshots.append(current_screenshot)
+        for i in range(scroll_count):
             self.scroll_chat_panel(direction="up")
             screenshot = capture_window(self.hwnd)
             if screenshot:
@@ -314,92 +472,81 @@ class WinDriver(PlatformDriver):
 
         if not screenshots:
             print("[WARN] No screenshots were captured.")
-            return []
+            return CapturedChatImages(chat_name=chat_name, chunks=[])
+
+        stitch_session = new_chat_stitch_session_basename()
+        for i, frame in enumerate(screenshots):
+            save_chat_frame_before_stitch(stitch_session, chat_name, i, frame)
 
         print("[*] Reversing screenshot order for processing...")
         screenshots.reverse()
 
-        all_messages = []
-        chunk_size = 5
+        chunk_size = 25
         screenshot_chunks = [screenshots[i:i + chunk_size] for i in range(0, len(screenshots), chunk_size)]
-        chunk_results = []
+        image_chunks: list[ChatImageChunk] = []
 
         print(f"[*] Processing {len(screenshots)} screenshots in {len(screenshot_chunks)} chunks of size {chunk_size}.")
 
-        for idx in range(len(screenshot_chunks) - 1, -1, -1):
-            chunk = screenshot_chunks[idx]
+        for idx, chunk in enumerate(screenshot_chunks):
             print(f"--- Processing chunk {idx+1}/{len(screenshot_chunks)} ---")
             if not chunk:
                 continue
 
+            stitch_started = time.perf_counter()
             stitched_image = stitch_screenshots(images=chunk, scroll_region=None)
 
             if not stitched_image:
                 print(f"[ERROR] Failed to stitch chunk {idx+1}.")
                 continue
+            log_vision_timing(
+                "win_chat_chunk",
+                "stitched",
+                chat=chat_name,
+                chunk_index=idx + 1,
+                chunk_total=len(screenshot_chunks),
+                input_frames=len(chunk),
+                width=stitched_image.width,
+                height=stitched_image.height,
+                stitch_ms=round((time.perf_counter() - stitch_started) * 1000, 1),
+            )
 
-            debug_dir = os.environ.get("WECLAW_DEBUG_STITCH_DIR", "").strip()
-            if debug_dir:
-                save_stitched_debug(stitched_image, debug_dir, chat_name, idx)
-
-            try:
-                response_str = self.vision_ai.query(
-                    CHAT_PANEL_PROMPT, stitched_image, max_tokens=16384
+            save_chat_stitch_for_vlm(stitch_session, chat_name, idx, stitched_image)
+            image_chunks.append(
+                ChatImageChunk(
+                    chunk_index=idx,
+                    chunk_total=len(screenshot_chunks),
+                    image=stitched_image,
                 )
-            except Exception as e:
-                print(f"[ERROR] Vision AI query for chunk {idx+1} failed: {e}")
-                continue
+            )
 
-            if not response_str:
-                print(f"[ERROR] No response from AI for message extraction on chunk {idx+1}.")
-                continue
+        return CapturedChatImages(chat_name=chat_name, chunks=image_chunks)
 
-            try:
-                data = parse_json_object_from_model_text(response_str)
-                messages_data = data.get("messages", [])
-                chunk_messages = []
+    def extract_chat_messages_from_capture(
+        self,
+        captured: CapturedChatImages,
+    ) -> list[ChatMessage]:
+        """Run VLM extraction for a captured chat payload."""
+        print(f"[*] Starting queued VLM message extraction for '{captured.chat_name}'...")
+        return extract_messages_from_captured_chat(captured, self.vision_ai)
 
-                for j, msg_data in enumerate(messages_data):
-                    if "content" not in msg_data:
-                        print(f"[WARN] Chunk {idx+1}, Msg {j+1}: Skipping message due to missing 'content': {msg_data}")
-                        continue
-
-                    try:
-                        chunk_messages.append(ChatMessage(**msg_data))
-                    except TypeError as e:
-                        print(f"[WARN] Chunk {idx+1}, Msg {j+1}: Skipping message during creation: {msg_data}. Error: {e}")
-
-                if chunk_messages:
-                    filtered_chunk = filter_messages_to_recent_window(
-                        chunk_messages,
-                        hours=RECENT_WINDOW_HOURS,
-                    )
-                    print(f"[+] Extracted {len(chunk_messages)} messages from chunk {idx+1}.")
-                    if filtered_chunk:
-                        chunk_results.append((idx, filtered_chunk))
-                    if chunk_reaches_recent_cutoff(
-                        chunk_messages,
-                        hours=RECENT_WINDOW_HOURS,
-                    ):
-                        print(
-                            f"[*] Chunk {idx+1} reached the {RECENT_WINDOW_HOURS}-hour cutoff. "
-                            "Skipping older chunks."
-                        )
-                        break
-                else:
-                    print(f"[WARN] No valid messages extracted from chunk {idx+1}.")
-
-            except Exception as e:
-                print(f"[ERROR] Failed to parse messages from AI response for chunk {idx+1}: {e}")
-                print(f"Raw response was: {response_str}")
-                continue
-
-        chunk_results.sort(key=lambda item: item[0])
-        for _, chunk_messages in chunk_results:
-            all_messages.extend(chunk_messages)
-        out = dedupe_chat_messages(all_messages)
-        print(f"[*] Finished processing all chunks. Total messages: {len(out)} ({len(all_messages)} raw).")
-        return out
+    def _activate_chat_panel_by_center(self) -> None:
+        print("[*] Activating chat panel at deterministic center.")
+        _force_foreground_window(self.hwnd)
+        time.sleep(0.2)
+        full_screenshot = capture_window(self.hwnd)
+        if not full_screenshot:
+            print("[WARN] Failed to capture window for deterministic click.")
+            return
+        window_left, window_top, _, _ = win32gui.GetWindowRect(self.hwnd)
+        chat_panel_x1 = int(full_screenshot.width * 0.31)
+        chat_panel_y1 = 50
+        chat_panel_x2 = int(full_screenshot.width * 0.95)
+        chat_panel_y2 = full_screenshot.height - 50
+        click_x = window_left + (chat_panel_x1 + chat_panel_x2) // 2
+        click_y = window_top + (chat_panel_y1 + chat_panel_y2) // 2
+        pyautogui.moveTo(click_x, click_y, duration=0.1)
+        pyautogui.click()
+        time.sleep(0.3)
 
     def _activate_chat_panel_safely(self) -> None:
         """Finds a safe spot in the chat panel to click to activate the window."""
@@ -424,7 +571,7 @@ class WinDriver(PlatformDriver):
         chat_panel_image = full_screenshot.crop(chat_panel_crop_box)
 
         # Query AI for a safe spot
-        response_str = self.vision_ai.query(CHAT_PANEL_SAFE_CLICK_PROMPT, chat_panel_image)
+        response_str = self.vision_ai.query(CHAT_PANEL_SAFE_CLICK_PROMPT, chat_panel_image, max_tokens=512)
 
         safe_click_coords = None
         bbox = None
@@ -496,9 +643,8 @@ class WinDriver(PlatformDriver):
 
         ocr_engine = get_ocr_engine()
         raw_lines = ocr_engine.recognize(sidebar_image)
-        merged_lines = ocr_engine.merge_rows(raw_lines, gap_px=6)
 
-        response_str = self.vision_ai.query(CURRENT_CHAT_Y_PROMPT, sidebar_image)
+        response_str = self.vision_ai.query(CURRENT_CHAT_Y_PROMPT, sidebar_image, max_tokens=512)
 
         if not response_str:
             print("[ERROR] No response from Vision AI for current chat identification.")
@@ -528,25 +674,6 @@ class WinDriver(PlatformDriver):
             print(f"[ERROR] Failed to parse current chat response. Exception: {e}")
             print(f"Raw response was: {response_str}")
             return None
-
-    def is_expected_chat_highlighted(self, expected_name: str) -> bool:
-        expected = str(expected_name or "").strip()
-        if not expected:
-            return False
-        full_screenshot = capture_window(self.hwnd)
-        if not full_screenshot:
-            return False
-        sidebar_width = int(full_screenshot.width * 0.3)
-        sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
-        prompt = HIGHLIGHTED_CHAT_MATCH_PROMPT_TEMPLATE.format(expected_name=expected)
-        response_str = self.vision_ai.query(prompt, sidebar_image)
-        if not response_str:
-            return False
-        try:
-            data = parse_json_object_from_model_text(response_str)
-        except Exception:
-            return False
-        return bool(data.get("is_match", False))
 
     def _get_chat_panel_region(self) -> tuple[int, int, int, int]:
         """Calculates the bounding box of the chat panel region."""
@@ -583,7 +710,7 @@ class WinDriver(PlatformDriver):
         )
         chat_panel_screenshot = full_screenshot.crop(chat_panel_region)
 
-        response_str = self.vision_ai.query(NEW_MESSAGES_BUTTON_PROMPT, chat_panel_screenshot)
+        response_str = self.vision_ai.query(NEW_MESSAGES_BUTTON_PROMPT, chat_panel_screenshot, max_tokens=512)
 
         if not response_str:
             print("[DEBUG] No response from AI for new messages button check.")
@@ -621,6 +748,32 @@ class WinDriver(PlatformDriver):
             print(f"[ERROR] Failed to process AI response for new messages button: {e}")
             print(f"Raw response was: {response_str}")
             return False
+
+    def resolve_current_chat_title(self, fallback: str = "") -> str:
+        full_screenshot = capture_window(self.hwnd)
+        if not full_screenshot:
+            return fallback
+        width, height = full_screenshot.size
+        x1 = int(width * 0.31)
+        x2 = int(width * 0.95)
+        bands = (
+            (x1, int(height * 0.045), x2, int(height * 0.105)),
+            (x1, int(height * 0.060), x2, int(height * 0.130)),
+            (x1, 36, x2, 96),
+        )
+        ocr_engine = get_ocr_engine()
+        for box in bands:
+            crop = full_screenshot.crop(box)
+            lines = ocr_engine.recognize(crop)
+            candidates = [
+                _clean_header_title(line.text)
+                for line in sorted(lines, key=lambda ln: (ln.center_y, ln.center_x))
+            ]
+            for candidate in candidates:
+                if _is_plausible_header_title(candidate):
+                    print(f"[+] Header OCR resolved chat title: {candidate!r}")
+                    return candidate
+        return fallback
 
     def click_row(self, row: SidebarRow, attempt: int = 0) -> None:
         """

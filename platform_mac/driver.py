@@ -199,14 +199,15 @@ class MacDriver:
         p = self._chat_panel_point()
         self.click_point(int(p.x), int(p.y))
 
-    def scroll_sidebar_to_top(self) -> None:
+    def scroll_sidebar_to_top(self, max_scrolls: int = 15) -> None:
         """连续向上滚动 sidebar 直到回到顶部。"""
         if self._window is None:
             self.find_wechat_window()
         assert self._window is not None
+        assert max_scrolls >= 0
 
         point = self._sidebar_scroll_point()
-        for _ in range(15):
+        for _ in range(max_scrolls + 2):
             ev = Quartz.CGEventCreateScrollWheelEvent(
                 None, Quartz.kCGScrollEventUnitLine, 1, 10
             )

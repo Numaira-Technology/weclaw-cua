@@ -8,9 +8,8 @@
 
 from __future__ import annotations
 
-import base64
-import io
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -18,9 +17,11 @@ from PIL import Image
 
 from algo_a.extract_messages import DEFAULT_EXTRACT_MODEL
 from algo_a.llm_image_prep import DEFAULT_MAX_SIDE_PIXELS, downscale_max_side
+from algo_a.llm_image_prep import pil_to_vision_payload
 from algo_a.llm_openrouter_headers import ensure_openrouter_ascii_env, openrouter_completion_headers
 from shared.openrouter_api_key import resolve_openrouter_api_key
 from shared.openrouter_litellm_model import litellm_openrouter_model
+from shared.vision_image_codec import log_vision_timing
 from platform_mac.chat_panel_detector import crop_chat_viewport
 
 
@@ -124,12 +125,6 @@ def _parse_response(raw: str, chat_name: str) -> List[Message]:
     return messages
 
 
-def _image_to_b64(img: Image.Image) -> str:
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode("utf-8")
-
-
 def _extract_once(
     viewport_img: Image.Image,
     chat_name: str,
@@ -152,12 +147,20 @@ def _extract_once(
             flush=True,
             file=sys.stderr,
         )
-    print(
-        f"[read_visible] 图片 {final_sz[0]}×{final_sz[1]}px：编码 PNG 为 base64…",
-        flush=True,
-        file=sys.stderr,
+    payload = pil_to_vision_payload(scaled)
+    log_vision_timing(
+        "read_visible",
+        "encoded",
+        model=model,
+        format=payload.format_name,
+        mime=payload.mime_type,
+        width=payload.width,
+        height=payload.height,
+        bytes=payload.byte_count,
+        b64_chars=payload.base64_char_count,
+        encode_ms=round(payload.encode_seconds * 1000, 1),
+        max_side_pixels=max_side_pixels,
     )
-    image_b64 = _image_to_b64(scaled)
     if prompt is None:
         prompt = _build_prompt(chat_name)
 
@@ -169,12 +172,22 @@ def _extract_once(
     litellm_model = litellm_openrouter_model(model)
     key = resolve_openrouter_api_key()
     h = openrouter_completion_headers(litellm_model, key)
+    log_vision_timing(
+        "read_visible",
+        "request_start",
+        model=litellm_model,
+        format=payload.format_name,
+        bytes=payload.byte_count,
+        b64_chars=payload.base64_char_count,
+        timeout_s=timeout,
+    )
+    request_started = time.perf_counter()
     response = litellm.completion(
         model=litellm_model,
         messages=[{
             "role": "user",
             "content": [
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+                {"type": "image_url", "image_url": {"url": payload.data_url}},
                 {"type": "text", "text": prompt},
             ],
         }],
@@ -182,7 +195,17 @@ def _extract_once(
         api_key=key,
         headers=h,
     )
+    request_seconds = time.perf_counter() - request_started
     raw_text: str = response.choices[0].message.content or ""
+    log_vision_timing(
+        "read_visible",
+        "completed",
+        model=litellm_model,
+        format=payload.format_name,
+        bytes=payload.byte_count,
+        request_ms=round(request_seconds * 1000, 1),
+        response_chars=len(raw_text),
+    )
     messages = _parse_response(raw_text, chat_name)
     meta = {
         "raw_text": raw_text,
@@ -191,6 +214,12 @@ def _extract_once(
         "source_image_size": list(orig_sz),
         "llm_image_size": list(final_sz),
         "max_side_pixels": max_side_pixels,
+        "vision_image_format": payload.format_name,
+        "vision_image_mime": payload.mime_type,
+        "vision_image_bytes": payload.byte_count,
+        "vision_image_base64_chars": payload.base64_char_count,
+        "vision_encode_seconds": payload.encode_seconds,
+        "vision_request_seconds": request_seconds,
     }
     return messages, meta
 

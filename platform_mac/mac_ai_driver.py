@@ -4,15 +4,15 @@ import json
 import time
 from typing import Any
 
-import pyautogui  # type: ignore[import-untyped]
+import pyautogui
 
 from shared.datatypes import ChatMessage, SidebarRow
 from shared.platform_api import PlatformDriver
 from shared.sidebar_classification import parse_threads_json, threads_to_sidebar_rows
-from shared.ocr_hunyuan import get_ocr_engine
 from shared.vision_backend import VisionBackend, create_vision_backend
 from shared.vision_response_json import parse_json_object_from_model_text
 from shared.vision_prompts import COORDS_PROMPT_TEMPLATE, SIDEBAR_PROMPT
+from shared.ocr_hunyuan import get_ocr_engine
 from platform_mac.find_wechat_window import find_wechat_window as locate_wechat
 from platform_mac.grant_permissions import ensure_permissions as grant_ax
 from platform_mac.mac_driver_messages import MacDriverMessages
@@ -48,8 +48,10 @@ class MacDriver(MacDriverMessages, PlatformDriver):
         print(f"[*] Getting precise coordinates for '{chat_name}' using OCR...")
         full_screenshot, wb = capture_window_pid_and_bounds(self.pid)
         fw, fh = full_screenshot.size
+
         sidebar_width = int(full_screenshot.width * 0.3)
         sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
+
         try:
             ocr_engine = get_ocr_engine()
             raw_lines = ocr_engine.recognize(sidebar_image)
@@ -83,15 +85,18 @@ class MacDriver(MacDriverMessages, PlatformDriver):
         sidebar_width = int(full_screenshot.width * 0.3)
         sidebar_image = full_screenshot.crop((0, 0, sidebar_width, full_screenshot.height))
         img_width, img_height = sidebar_image.size
+
         try:
             ocr_engine = get_ocr_engine()
             ocr_rows = sidebar_rows_from_hunyuan(full_screenshot, wb, ocr_engine)
         except Exception as e:
             print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}); using VLM sidebar detection.")
             ocr_rows = []
+
         if ocr_rows:
             print(f"[+] OCR identified {len(ocr_rows)} plausible sidebar rows.")
             return ocr_rows
+
         response_str = self.vision_ai.query(SIDEBAR_PROMPT, sidebar_image)
         if not response_str:
             return []
@@ -114,6 +119,65 @@ class MacDriver(MacDriverMessages, PlatformDriver):
         )
         print(f"[+] VLM identified {len(sidebar_rows)} sidebar rows.")
         return sidebar_rows
+
+    def get_fast_sidebar_rows(self, window: Any) -> list[SidebarRow]:
+        """Return visible sidebar rows using native macOS Vision OCR only."""
+        del window
+        full_screenshot, wb = capture_window_pid_and_bounds(self.pid)
+        from platform_mac.sidebar_detector import Rect, scan_sidebar_once
+
+        window_rect = Rect(wb.x, wb.y, wb.width, wb.height)
+        chats = scan_sidebar_once(
+            full_screenshot,
+            only_unread=False,
+            require_name=True,
+            window_bounds=window_rect,
+        )
+        rows: list[SidebarRow] = []
+        for chat in chats:
+            row_rect = chat.row_rect
+            if row_rect is None:
+                continue
+            badge = None
+            if chat.unread_count is not None:
+                badge = "1" if chat.unread_count < 0 else str(chat.unread_count)
+            x1, y1 = window_image_px_to_screen_pt(
+                row_rect.x,
+                row_rect.y,
+                full_screenshot.width,
+                full_screenshot.height,
+                wb,
+            )
+            x2, y2 = window_image_px_to_screen_pt(
+                row_rect.x2,
+                row_rect.y2,
+                full_screenshot.width,
+                full_screenshot.height,
+                wb,
+            )
+            rows.append(
+                SidebarRow(
+                    name=chat.name,
+                    last_message=None,
+                    badge_text=badge,
+                    bbox=(x1, y1, x2, y2),
+                    is_group=True,
+                )
+            )
+        print(f"[+] Fast native OCR identified {len(rows)} sidebar rows.")
+        return rows
+
+    def resolve_current_chat_title(self, fallback: str = "") -> str:
+        full_screenshot = capture_window_pid(self.pid)
+        if not full_screenshot:
+            return fallback
+        from platform_mac.chat_panel_detector import extract_chat_header_title
+
+        title = extract_chat_header_title(full_screenshot, match_hint=fallback or None)
+        if title:
+            print(f"[+] Header OCR resolved chat title: {title!r}")
+            return title
+        return fallback
 
     def scroll_sidebar(self, window: Any, direction: str) -> None:
         del window

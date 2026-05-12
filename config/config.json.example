@@ -2,8 +2,17 @@
   "wechat_app_name": "WeChat",
   "groups_to_monitor": ["*"],
   "sidebar_unread_only": true,
+  "chat_type": "group",
+  "sidebar_max_scrolls": 16,
+  "chat_max_scrolls": 10,
   "report_custom_prompt": "Summarize key decisions and action items from the chat messages.",
+  "llm_provider": "openrouter",
   "openrouter_api_key": "",
+  "openai_api_key": "",
+  "deepseek_api_key": "",
+  "kimi_api_key": "",
+  "glm_api_key": "",
+  "qwen_api_key": "",
   "llm_model": "openai/gpt-4o",
   "output_dir": "output"
 }
