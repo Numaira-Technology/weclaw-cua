@@ -52,8 +52,11 @@ class MacDriverMessages:
                 f"[*] 点击带未读角标的侧栏行 {row.name!r} "
                 f"(badge={row.badge_text!r} → 读取最多 {cap} 条)。"
             )
-            self.click_row(row, attempt=0)
-            time.sleep(0.45)
+            if bool(getattr(row, "selected", False)):
+                print(f"[+] 侧栏行 {row.name!r} 已经是绿色选中态，跳过点击。")
+            else:
+                self.click_row(row, attempt=0)
+                time.sleep(0.45)
             return cap, row.name
         print("[WARN] 侧栏 Vision 结果中没有任何未读角标行。")
         return None, ""

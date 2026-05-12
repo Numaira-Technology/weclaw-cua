@@ -168,6 +168,14 @@ def click_into_chat(driver, chat_info: ChatInfo,
     driver.activate_wechat()
     time.sleep(0.2)
 
+    if bool(getattr(chat_info, "selected", False)):
+        return ClickResult(
+            ready=True,
+            target_name=chat_info.name,
+            detected_title=chat_info.name,
+            reason="already_selected",
+        )
+
     last_result: Optional[ClickResult] = None
 
     for retry in range(1 + max_retries):

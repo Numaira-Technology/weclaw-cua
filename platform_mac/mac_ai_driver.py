@@ -173,6 +173,7 @@ class MacDriver(MacDriverMessages, PlatformDriver):
                     badge_text=badge,
                     bbox=(x1, y1, x2, y2),
                     is_group=None,
+                    selected=bool(getattr(chat, "selected", False)),
                 )
             )
         print(f"[+] Fast native OCR identified {len(rows)} sidebar rows.")

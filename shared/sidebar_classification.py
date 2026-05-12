@@ -55,6 +55,7 @@ def threads_to_sidebar_rows(
         y_norm = float(item.get("y", 0))
         unread = bool(item.get("unread", False))
         is_group = bool(item.get("is_group", False))
+        selected = bool(item.get("selected", item.get("is_selected", False)))
         y_center = int(y_norm / 1000.0 * sidebar_image_height)
         row_half = max(int(24 / 1000.0 * sidebar_image_height), 12)
         y1 = max(0, y_center - row_half)
@@ -90,6 +91,7 @@ def threads_to_sidebar_rows(
                 badge_text=badge,
                 bbox=box,
                 is_group=is_group,
+                selected=selected,
             )
         )
     return rows
