@@ -1,8 +1,15 @@
 """macOS unread navigation pipeline.
 
-Uses the left Messages navigation icon to jump through unread chats, then
-captures each selected chat. Message VLM extraction is queued asynchronously in
-direct mode when the driver exposes capture/extract hooks.
+Uses the left Messages navigation icon to jump through unread chats, then captures
+each selected chat. Message VLM extraction is queued asynchronously when the
+driver exposes capture/extract hooks.
+
+Usage:
+    from algo_a.pipeline_a_mac_nav import run_pipeline_a_mac_nav
+    paths = run_pipeline_a_mac_nav(config)
+
+Matching ``groups_to_monitor`` uses the **sidebar row label** from Vision / fast path
+(``click_first_unread_sidebar_row``), not the header/title bar OCR.
 """
 
 from __future__ import annotations
@@ -45,6 +52,22 @@ def _allowed_chat_title(title: str, groups: list[str]) -> bool:
     return any(sidebar_name_matches_config_group(t, g) for g in allowed)
 
 
+def _matching_config_chat_name(title: str, groups: list[str]) -> str | None:
+    """If ``groups_to_monitor`` is an explicit allow-list, map resolved title onto the config string for output."""
+    if not title or not str(title).strip():
+        return None
+    if _groups_config_means_all_groups(groups):
+        return None
+    allowed = [g.strip() for g in groups if g and str(g).strip()]
+    if not allowed:
+        return None
+    t = title.strip()
+    for g in allowed:
+        if sidebar_name_matches_config_group(t, g):
+            return g
+    return None
+
+
 def _finish_async_extractions(
     extraction_queue: Any,
     async_results: list[ChatWriteResult],
@@ -66,7 +89,10 @@ def _capture_or_queue_chat(
     written_paths: list[str],
     extraction_queue: Any,
     async_results: list[ChatWriteResult],
+    persist_chat_name: str | None = None,
 ) -> bool:
+    """``title``: window/header string for extraction; ``persist_chat_name``: config label for saved JSON."""
+    label_for_jobs = persist_chat_name if persist_chat_name else title
     if extraction_queue is None:
         messages = driver.get_chat_messages(
             title,
@@ -81,6 +107,7 @@ def _capture_or_queue_chat(
             chat_name=title,
             messages=messages,
             output_index=output_index,
+            persist_chat_name=persist_chat_name,
         )
         print(f"[SUCCESS] Saved {len(messages)} messages to {output_path}")
         written_paths.append(output_path)
@@ -98,7 +125,7 @@ def _capture_or_queue_chat(
         extraction_queue.submit(
             PendingChatWrite(
                 output_index=output_index,
-                chat_name=title,
+                chat_name=label_for_jobs,
                 captured=captured,
             )
         )
@@ -129,7 +156,10 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         print("[ERROR] Pipeline failed: Could not find WeChat window.")
         return written_paths
 
-    print("[*] macOS: processing unread chats via the left Messages navigation icon.")
+    print(
+        "[*] macOS: unread via left Messages icon; sidebar row names from Vision "
+        "(groups_to_monitor matches sidebar labels, not header OCR)."
+    )
 
     if not driver.nav_messages_has_unread_badge():
         print("[+] No unread badge on the left Messages entry. Nothing to process.")
@@ -147,17 +177,14 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         jumps += 1
         driver.double_click_messages_nav()
         time.sleep(_SETTLE_AFTER_DBL)
-        read_cap = driver.click_first_unread_sidebar_row()
+        read_cap, sidebar_clicked = driver.click_first_unread_sidebar_row()
         if read_cap is None:
             print("[WARN] Could not click an unread sidebar row; skipping this round.")
             continue
 
-        title = driver.resolve_current_chat_title()
+        title = str(sidebar_clicked or "").strip()
         if not title:
-            same_title_run += 1
-            if same_title_run >= _SAME_TITLE_BREAK:
-                driver.clear_messages_nav_click_cache()
-                same_title_run = 0
+            print("[WARN] Sidebar row name empty; skipping (header OCR not used for monitoring).")
             continue
 
         if title == last_title:
@@ -181,6 +208,7 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
             continue
 
         processed_count += 1
+        persist = _matching_config_chat_name(title, config.groups_to_monitor)
         ok = _capture_or_queue_chat(
             driver=driver,
             config=config,
@@ -190,6 +218,7 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
             written_paths=written_paths,
             extraction_queue=extraction_queue,
             async_results=async_results,
+            persist_chat_name=persist,
         )
         if ok:
             saved_keys.add(save_key)

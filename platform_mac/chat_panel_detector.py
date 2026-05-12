@@ -27,6 +27,8 @@ HEADER_PANEL_WIDTH_RATIO = 0.82
 VIEWPORT_TOP_RATIO = 0.07
 VIEWPORT_BOTTOM_RATIO = 0.10
 MIN_TRUNCATED_PREFIX_LEN = 4
+# Shorter substring / prefix stems below this collide with unrelated names (see titles_match + pipeline tests).
+MIN_TITLE_LOOSE_MATCH_STEM_LEN = 3
 
 
 def capture_right_panel(window_img: Image.Image) -> Image.Image:
@@ -172,6 +174,51 @@ def list_header_ocr_lines(window_img: Image.Image) -> List[str]:
 
 
 _HEADER_FALLBACK_BANDS = 2
+_HEADER_TITLE_MAX_CHARS = 56
+
+
+def _shortest_nonjunk_header_candidate(
+    bands: List[List[str]],
+    band_limit: int,
+    max_len: int = _HEADER_TITLE_MAX_CHARS,
+) -> str:
+    best_key: tuple[int, int] | None = None
+    best_t = ""
+    limit = min(band_limit, len(bands))
+    for bi in range(limit):
+        for t in bands[bi]:
+            if _is_reaction_or_junk_title(t):
+                continue
+            s = t.strip()
+            n = len(s)
+            if n < 2 or n > max_len:
+                continue
+            key = (n, bi)
+            if best_key is None or key < best_key:
+                best_key = key
+                best_t = s
+    return best_t
+
+
+def _should_prefer_header_title_candidate(picked: str, hint: str) -> bool:
+    """侧栏 hint 与 header 最短行不一致时，仅当 picked 像真群名才采信 header。"""
+    s = picked.strip()
+    h = hint.strip()
+    if not s:
+        return False
+    if not h:
+        return True
+    if titles_match(s, h):
+        return True
+    n = len(s)
+    cjk = sum(1 for c in s if "\u4e00" <= c <= "\u9fff")
+    if cjk >= max(2, int(n * 0.82)) and n <= 40:
+        return True
+    if cjk == 0:
+        letters = sum(1 for c in s if c.isalpha())
+        if letters >= max(3, int(n * 0.75)) and 3 <= n <= 56:
+            return True
+    return False
 
 
 def extract_chat_header_title(
@@ -182,6 +229,10 @@ def extract_chat_header_title(
 
     无 hint 命中时只在最靠前若干条 header 带里取非 junk 行，避免把消息区 OCR
     （如经文/摘要误识为 （7）7-1Sa1）当作标题，导致已进入会话却校验失败。
+
+    有 hint（通常为刚点击的侧栏行名）但未命中任一 OCR 行时，在同区域多行内取最短非 junk 候选，
+    且仅当该候选像真群名（CJK 主导或纯拉丁字母主导）时才采用；否则返回空串由调用方用侧栏名，
+    避免短串中英混杂 OCR 噪声（如 咋尺VQLZ）顶替侧栏名。
     """
     bands = _header_ocr_lines_by_band(window_img)
     lines = _dedup_flatten_header_bands(bands)
@@ -192,6 +243,10 @@ def extract_chat_header_title(
         for t in lines:
             if titles_match(t, hint):
                 return t
+        picked = _shortest_nonjunk_header_candidate(bands, _HEADER_FALLBACK_BANDS)
+        if picked and _should_prefer_header_title_candidate(picked, hint):
+            return picked
+        return ""
     limit = min(_HEADER_FALLBACK_BANDS, len(bands))
     for bi in range(limit):
         for t in bands[bi]:
@@ -335,24 +390,36 @@ def titles_match(detected: str, target: str) -> bool:
     if dn == tn or dn.casefold() == tn.casefold():
         return True
 
-    # 2. 包含匹配
-    if len(tn) >= 2 and tn in dn:
+    # 2. 包含匹配（短串须够长，避免「运营」命中「运营核心群…」）
+    if len(tn) >= 2 and len(tn) < len(dn) and tn in dn and len(tn) >= MIN_TITLE_LOOSE_MATCH_STEM_LEN:
         return True
-    if len(dn) >= 2 and dn in tn:
+    if len(dn) >= 2 and len(dn) < len(tn) and dn in tn and len(dn) >= MIN_TITLE_LOOSE_MATCH_STEM_LEN:
         return True
-    if len(tn) >= 2 and tn.casefold() in dn.casefold():
+    if (
+        len(tn) >= 2
+        and len(tn) < len(dn)
+        and tn.casefold() in dn.casefold()
+        and len(tn) >= MIN_TITLE_LOOSE_MATCH_STEM_LEN
+    ):
         return True
-    if len(dn) >= 2 and dn.casefold() in tn.casefold():
+    if (
+        len(dn) >= 2
+        and len(dn) < len(tn)
+        and dn.casefold() in tn.casefold()
+        and len(dn) >= MIN_TITLE_LOOSE_MATCH_STEM_LEN
+    ):
         return True
 
     if _hyphenated_last_segment_clash(dn, tn):
         return False
 
-    # 3. 整段前缀
-    if len(tn) >= 2 and (dn.startswith(tn) or tn.startswith(dn)):
+    # 3. 整段前缀（短串须够长，否则与规则 2 同类误判）
+    if min(len(dn), len(tn)) >= MIN_TITLE_LOOSE_MATCH_STEM_LEN and (dn.startswith(tn) or tn.startswith(dn)):
         return True
     dnf, tnf = dn.casefold(), tn.casefold()
-    if len(tn) >= 2 and (dnf.startswith(tnf) or tnf.startswith(dnf)):
+    if min(len(dnf), len(tnf)) >= MIN_TITLE_LOOSE_MATCH_STEM_LEN and (
+        dnf.startswith(tnf) or tnf.startswith(dnf)
+    ):
         return True
 
     # 4. 字符级重叠（处理 emoji OCR 伪影 + 单字 OCR 错误）

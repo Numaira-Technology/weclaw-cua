@@ -46,10 +46,20 @@ def async_vlm_max_pending(worker_count: int) -> int:
     return max(30, worker_count + 1) # default queue length
 
 
-def safe_output_filename(chat_name: str, fallback: str) -> str:
-    name = str(chat_name or "").strip() or fallback
-    safe = "".join(c for c in name if c.isalnum() or c in (" ", "_")).rstrip()
-    return safe or fallback
+def sanitize_chat_json_filename(name: str, fallback: str) -> str:
+    """Stable JSON basename: keeps Unicode including emoji/CJK; only strips illegal path chars."""
+    s = str(name or "").strip()
+    if not s:
+        return fallback
+    forbidden = '\\/:*?"<>|'
+    parts: list[str] = []
+    for ch in s:
+        if ch in forbidden or ord(ch) < 32:
+            parts.append("_")
+        else:
+            parts.append(ch)
+    s = "".join(parts).rstrip(". ").strip()
+    return s if s else fallback
 
 
 def write_chat_messages_json(
@@ -58,16 +68,23 @@ def write_chat_messages_json(
     chat_name: str,
     messages: list[ChatMessage],
     output_index: int,
+    persist_chat_name: str | None = None,
 ) -> str:
+    """persist_chat_name, when set, is used for the filename and message chat_name fields (config label)."""
+    display_name = (
+        str(persist_chat_name).strip()
+        if (persist_chat_name is not None and str(persist_chat_name).strip())
+        else chat_name
+    )
     fallback = f"chat_{output_index}"
-    safe_filename = safe_output_filename(chat_name, fallback)
+    safe_filename = sanitize_chat_json_filename(display_name, fallback)
     output_path = os.path.join(output_dir, f"{safe_filename}.json")
     os.makedirs(output_dir, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         rows_out = []
         for msg in messages:
             d = asdict(msg)
-            d["chat_name"] = chat_name
+            d["chat_name"] = display_name
             d["sender"] = d["sender"] or ""
             rows_out.append(d)
         json.dump(rows_out, f, ensure_ascii=False, indent=2)

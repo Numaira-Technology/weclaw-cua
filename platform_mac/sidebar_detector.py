@@ -94,7 +94,7 @@ ROW_BADGE_Y1 = 0.55
 ROW_NAME_X0 = 0.19
 ROW_NAME_X1 = 0.72
 ROW_NAME_Y0 = 0.03
-ROW_NAME_Y1 = 0.48
+ROW_NAME_Y1 = 0.42
 
 # 预览文本在名称下方
 ROW_PREVIEW_X0 = 0.19
@@ -386,10 +386,44 @@ def _ocr_badge_number(row_img: Image.Image, badge_rect: Rect) -> int | None:
 
 # ── 6. 聊天名称提取（row-local）─────────────────────────
 
+def _strip_merged_preview_tail(name: str) -> str:
+    """去掉侧栏名称与首条预览/时间被 Vision 盒成一段时的尾部噪声。"""
+    import re
+    s = name.strip()
+    if not s:
+        return s
+    for marker in ("昨天", "今天", "前天", "刚刚"):
+        i = s.find(marker)
+        if i > 0:
+            s = s[:i].rstrip()
+            break
+    if re.search(r"分\s*钟?\s*前|小\s*时?\s*前$", s):
+        s = re.sub(r".{0,8}(分\s*钟?\s*前|小\s*时?\s*前)$", "", s).rstrip()
+    s = re.sub(
+        r"\s+(?:周|星期)[一二三四五六日天](?:[一二三四五六七八九十\d]*|[：:]\d{1,2})?\s*$",
+        "",
+        s,
+    )
+    s = re.sub(r"\s*(?:星期|周)[一二三四五六日天]\s*$", "", s)
+    s = re.sub(r"\s+\d{1,2}:\d{2}\s*$", "", s)
+    s = re.sub(r"\s+\d{4}[-/年]\d{1,2}[-/月]\d{1,2}[日号]?\s*$", "", s)
+    s = s.rstrip(" ·…")
+    while True:
+        t = re.sub(r"\s+\d{1,3}[a-zA-Z]{0,3}\s*$", "", s).strip()
+        if t == s or not t:
+            break
+        s = t
+    s = re.sub(r"\s+\b(and|And)\s+\d{1,4}[a-zA-Z]?\s*$", "", s).strip()
+    s = re.sub(r"\s+\b(and|or|the)\s*$", "", s, flags=re.I).strip()
+    s = re.sub(r"([a-z]{2,}s)se$", r"\1", s, flags=re.I)
+    return s
+
+
 def _clean_chat_name(raw: str) -> str:
     """清理 OCR chat name：去除头尾的 avatar 首字母、标点噪声。"""
     import re
     s = raw.strip()
+    s = re.sub(r"(?<=[A-Za-z0-9])〇(?=[A-Za-z0-9])", "O", s)
     s = re.sub(r'^[A-Z]\s+(?=[\u4e00-\u9fff])', '', s)
     s = re.sub(r'^([A-Z])(?=[^\x00-\x7f])', lambda m: '' if len(m.group(0)) == 1 else m.group(0), s)
     s = re.sub(r'\s+[A-Z]$', '', s)
@@ -416,9 +450,12 @@ def _name_from_ocr_results(results: List[OCRResult]) -> str:
         for r in ordered:
             if r.confidence < min_c:
                 continue
-            cleaned = _clean_chat_name(r.text)
-            if _is_valid_chat_name(cleaned):
-                return cleaned
+            base = _clean_chat_name(r.text)
+            stripped = _strip_merged_preview_tail(base)
+            cleaned = stripped if _is_valid_chat_name(stripped) else base
+            if not _is_valid_chat_name(cleaned):
+                continue
+            return cleaned
     return ""
 
 

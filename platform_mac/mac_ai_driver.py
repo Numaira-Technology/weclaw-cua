@@ -61,8 +61,13 @@ class MacDriver(MacDriverMessages, PlatformDriver):
                 print(f"[+] Precise coordinates for '{chat_name}' found via OCR: ({sx}, {sy})")
                 return (sx, sy)
             print(f"[WARN] OCR could not locate '{chat_name}'; falling back to VLM...")
+        except ModuleNotFoundError as e:
+            print(
+                f"[WARN] HunyuanOCR unavailable (missing {e.name!r}); falling back to VLM for '{chat_name}'. "
+                "Install: pip install -e \".[macos,llm,hunyuan-ocr]\" (or pip install -r requirements-macos.txt)"
+            )
         except Exception as e:
-            print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}); falling back to VLM for '{chat_name}'.")
+            print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}: {e}); falling back to VLM for '{chat_name}'.")
         prompt = COORDS_PROMPT_TEMPLATE.format(chat_name=chat_name)
         response_str = self.vision_ai.query(prompt, full_screenshot)
         if not response_str:
@@ -89,8 +94,14 @@ class MacDriver(MacDriverMessages, PlatformDriver):
         try:
             ocr_engine = get_ocr_engine()
             ocr_rows = sidebar_rows_from_hunyuan(full_screenshot, wb, ocr_engine)
+        except ModuleNotFoundError as e:
+            print(
+                f"[WARN] HunyuanOCR unavailable (missing {e.name!r}); using VLM sidebar detection. "
+                "Install: pip install -e \".[macos,llm,hunyuan-ocr]\" (or pip install -r requirements-macos.txt)"
+            )
+            ocr_rows = []
         except Exception as e:
-            print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}); using VLM sidebar detection.")
+            print(f"[WARN] HunyuanOCR unavailable ({type(e).__name__}: {e}); using VLM sidebar detection.")
             ocr_rows = []
 
         if ocr_rows:
@@ -161,7 +172,7 @@ class MacDriver(MacDriverMessages, PlatformDriver):
                     last_message=None,
                     badge_text=badge,
                     bbox=(x1, y1, x2, y2),
-                    is_group=True,
+                    is_group=None,
                 )
             )
         print(f"[+] Fast native OCR identified {len(rows)} sidebar rows.")
@@ -179,7 +190,13 @@ class MacDriver(MacDriverMessages, PlatformDriver):
             return title
         return fallback
 
-    def scroll_sidebar(self, window: Any, direction: str) -> None:
+    def scroll_sidebar(
+        self,
+        window: Any,
+        direction: str,
+        *,
+        wheel_sidebar_y_fraction: float | None = None,
+    ) -> None:
         del window
         assert self.pid
         assert direction in ("up", "down")
@@ -188,7 +205,12 @@ class MacDriver(MacDriverMessages, PlatformDriver):
         clicks = scroll_amount if direction == "up" else -scroll_amount
         left, top, right, bottom = main_window_bounds(self.pid)
         sidebar_x = left + int((right - left) * 0.15)
-        sidebar_y = top + int((bottom - top) * 0.5)
+        if wheel_sidebar_y_fraction is not None:
+            frac_y = float(wheel_sidebar_y_fraction)
+        else:
+            # Up-scroll should track the pinned top of the list; center misses first rows.
+            frac_y = 0.26 if direction == "up" else 0.5
+        sidebar_y = top + max(1, min(int((bottom - top) * frac_y), (bottom - top) - 1))
         print(f"[*] Scrolling sidebar {direction}...", end=" ")
         pyautogui.moveTo(sidebar_x, sidebar_y, duration=0.1)
         pyautogui.scroll(clicks)
@@ -207,10 +229,20 @@ class MacDriver(MacDriverMessages, PlatformDriver):
     def click_row(self, row: SidebarRow, attempt: int = 0) -> None:
         if not isinstance(row, SidebarRow):
             return
+        assert self.pid, "find_wechat_window must run before click_row"
+        activate_pid(self.pid)
+        time.sleep(0.12)
         x1, y1, x2, y2 = row.bbox
         if x2 > x1 and y2 > y1:
             center_x = (x1 + x2) // 2
             center_y = (y1 + y2) // 2 - 10 * attempt
+            try:
+                left, top, right, bottom = main_window_bounds(self.pid)
+                win_h = max(1, bottom - top)
+                if y1 <= top + max(48, int(win_h * 0.18)):
+                    center_y = min(y2 - 3, center_y + 10 + min(attempt, 2) * 4)
+            except Exception:
+                pass
             print(
                 f"[*] Click row '{row.name}' via sidebar row bbox attempt {attempt + 1} "
                 f"at ({center_x}, {center_y})"

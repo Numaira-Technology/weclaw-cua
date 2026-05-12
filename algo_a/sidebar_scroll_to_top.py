@@ -13,6 +13,9 @@ def scroll_sidebar_to_top(
 ) -> None:
     print("[*] Scrolling sidebar to the top...")
     assert max_down_scrolls >= 0
+    scroll_up = getattr(driver, "scroll_sidebar", None)
+    if scroll_up is None:
+        return
     for _ in range(max_down_scrolls + 2):
-        driver.scroll_sidebar(window, "up")
+        scroll_up(window, "up")
         time.sleep(0.1)

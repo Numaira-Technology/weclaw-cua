@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 
 @dataclass
@@ -10,7 +10,8 @@ class SidebarRow:
     last_message: str | None
     badge_text: str | None
     bbox: tuple[int, int, int, int]
-    is_group: bool = False
+    # None = unknown (e.g. macOS Vision OCR fast path); filtering should not drop the row.
+    is_group: Optional[bool] = None
 
 
 @dataclass
