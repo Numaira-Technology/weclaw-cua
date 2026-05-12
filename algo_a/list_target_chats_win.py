@@ -33,7 +33,7 @@ class ChatInfo:
     name: str
     ui_element: Any
     is_unread: bool
-    is_group: bool
+    is_group: bool | None
 
 
 def _normalize_chat_label(text: str) -> str:
@@ -157,15 +157,27 @@ def _collect_visible_chats(driver: PlatformDriver, window: Any) -> list[ChatInfo
     rows = driver.get_sidebar_rows(window)
     results = []
     for row in rows:
+        raw_is_group = getattr(row, "is_group", None)
         results.append(
             ChatInfo(
                 name=row.name,
                 ui_element=row,
                 is_unread=_badge_means_unread(row.badge_text),
-                is_group=bool(getattr(row, "is_group", False)),
+                is_group=None if raw_is_group is None else bool(raw_is_group),
             )
         )
     return results
+
+
+def _chat_type_allows_unknown_group(is_group: bool | None, chat_type: str) -> bool:
+    assert chat_type in ("group", "private", "all")
+    if is_group is None:
+        return True
+    return (
+        chat_type == "all"
+        or (chat_type == "group" and is_group)
+        or (chat_type == "private" and not is_group)
+    )
 
 
 def list_target_chats(
@@ -215,15 +227,14 @@ def list_target_chats(
                 if unread_only:
                     want_row = want_row and chat.is_unread
             elif all_groups:
-                want_row = (
-                    chat_type == "all"
-                    or (chat_type == "group" and chat.is_group)
-                    or (chat_type == "private" and not chat.is_group)
-                )
+                want_row = _chat_type_allows_unknown_group(chat.is_group, chat_type)
                 if unread_only:
                     want_row = want_row and chat.is_unread
             else:
-                want_row = chat.is_unread and chat.is_group
+                want_row = chat.is_unread and _chat_type_allows_unknown_group(
+                    chat.is_group,
+                    "group",
+                )
 
             print(
                 f"  - Seen: {chat.name!r} (Norm: {clean!r}, Is group: {chat.is_group}, "
