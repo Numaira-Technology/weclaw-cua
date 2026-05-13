@@ -10,7 +10,6 @@ recursive-include platform_win *.py
 recursive-include shared *.py
 recursive-include utils *.py
 recursive-include weclaw_cli *.py
-recursive-include weclaw_cli bin/*
 
 prune tests
 prune scripts
