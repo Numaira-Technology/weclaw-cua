@@ -18,6 +18,7 @@ from shared.sidebar_classification import (
     parse_threads_json,
     threads_to_sidebar_rows,
 )
+from shared.sidebar_selection import row_has_selected_green_background
 from shared.vision_backend import VisionBackend, create_vision_backend
 from shared.vision_prompts import (
     CHAT_PANEL_SAFE_CLICK_PROMPT,
@@ -151,6 +152,11 @@ class WinDriver(PlatformDriver):
             cy = (oy1 + oy2) // 2
             y1 = max(0, cy - row_half)
             y2 = min(img_height, cy + row_half)
+            selected = bool(best_thread.get("selected", best_thread.get("is_selected", False)))
+            if not selected:
+                selected = row_has_selected_green_background(
+                    sidebar_image.crop((0, y1, sidebar_width, y2)),
+                )
             row = SidebarRow(
                 name=ocr_line.text,
                 last_message=None,
@@ -162,6 +168,7 @@ class WinDriver(PlatformDriver):
                     window_top + y2,
                 ),
                 is_group=is_group,
+                selected=selected,
             )
             rows.append(row)
             row_debug_entries.append(make_row_debug_entry(ocr_line, row, best_thread))
@@ -303,7 +310,7 @@ class WinDriver(PlatformDriver):
             names_csv = ", ".join(f'"{n}"' for n in ocr_name_hints)
             hint_clause = (
                 f"\nThe OCR engine has confirmed these chat names visible top-to-bottom: [{names_csv}]. "
-                "Use EXACTLY these names in your JSON; only determine is_group and unread for each."
+                "Use EXACTLY these names in your JSON; only determine is_group, unread, and selected for each."
             )
 
         augmented_prompt = SIDEBAR_PROMPT + hint_clause

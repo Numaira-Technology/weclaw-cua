@@ -34,6 +34,7 @@ class ChatInfo:
     ui_element: Any
     is_unread: bool
     is_group: bool | None
+    selected: bool = False
 
 
 def _normalize_chat_label(text: str) -> str:
@@ -164,6 +165,7 @@ def _collect_visible_chats(driver: PlatformDriver, window: Any) -> list[ChatInfo
                 ui_element=row,
                 is_unread=_badge_means_unread(row.badge_text),
                 is_group=None if raw_is_group is None else bool(raw_is_group),
+                selected=bool(getattr(row, "selected", False)),
             )
         )
     return results
@@ -238,7 +240,7 @@ def list_target_chats(
 
             print(
                 f"  - Seen: {chat.name!r} (Norm: {clean!r}, Is group: {chat.is_group}, "
-                f"Is Unread: {chat.is_unread}, Select: {want_row})"
+                f"Is Unread: {chat.is_unread}, Current: {chat.selected}, Select: {want_row})"
             )
 
             if want_row:

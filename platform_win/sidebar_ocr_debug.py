@@ -65,6 +65,7 @@ def _row_dict(row: Any) -> dict[str, Any]:
         "name": str(getattr(row, "name", "")),
         "badge_text": getattr(row, "badge_text", None),
         "is_group": bool(getattr(row, "is_group", False)),
+        "selected": bool(getattr(row, "selected", False)),
         "bbox": list(getattr(row, "bbox", ())),
     }
 
@@ -88,7 +89,8 @@ def write_sidebar_debug(
         print(
             f"  VLM #{idx:02d} name={thread.get('name')!r} "
             f"unread={thread.get('unread')!r} unread_badge={thread.get('unread_badge')!r} "
-            f"is_group={thread.get('is_group')!r} y={thread.get('y')!r}"
+            f"is_group={thread.get('is_group')!r} selected={thread.get('selected')!r} "
+            f"y={thread.get('y')!r}"
         )
     print(f"[DEBUG] Final sidebar rows: {len(row_debug_entries)}")
     for idx, entry in enumerate(row_debug_entries):
@@ -96,7 +98,8 @@ def write_sidebar_debug(
         vlm_thread = entry.get("vlm_thread") or {}
         print(
             f"  #{idx:02d} name={row.get('name')!r} badge={row.get('badge_text')!r} "
-            f"is_group={row.get('is_group')!r} bbox={tuple(row.get('bbox') or [])} "
+            f"is_group={row.get('is_group')!r} selected={row.get('selected')!r} "
+            f"bbox={tuple(row.get('bbox') or [])} "
             f"vlm_name={vlm_thread.get('name')!r}"
         )
 

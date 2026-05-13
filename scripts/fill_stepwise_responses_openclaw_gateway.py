@@ -4,6 +4,7 @@
 Usage:
   python scripts/fill_stepwise_responses_openclaw_gateway.py output/work
   python scripts/fill_stepwise_responses_openclaw_gateway.py output/work --skip-existing
+  python scripts/fill_stepwise_responses_openclaw_gateway.py output/work --workers 4
 
 Input spec:
   - work_dir: directory containing manifest.json, step_*.png, step_*.prompt.txt
@@ -28,6 +29,12 @@ def main() -> None:
         action="store_true",
         help="Skip tasks whose response file already exists and is non-empty",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="Concurrent gateway VLM requests (default: WECLAW_ASYNC_VLM_WORKERS or 2)",
+    )
     args = parser.parse_args()
 
     from shared.openclaw_gateway import OpenClawGatewayConfig, fill_stepwise_responses
@@ -38,6 +45,7 @@ def main() -> None:
         config=cfg,
         skip_existing=args.skip_existing,
         force=args.force,
+        workers=args.workers,
     )
     print(result)
 

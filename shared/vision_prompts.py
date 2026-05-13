@@ -13,9 +13,10 @@ SIDEBAR_PROMPT = (
     "3. 如果无法确定，优先判断为群聊（宁可误判为群聊，不要漏掉真实的群聊）。"
     "记录每个会话的未读状态（是否有红色未读消息标记）。"
     "若有数字角标（1、2、…、99+），把角标上的原文写入 unread_badge 字符串；若只有小红点无数字，unread_badge 填 \"1\"；无未读时 unread 为 false，省略 unread_badge 或填 null。"
+    "同时判断当前已经打开/选中的会话：如果某一行聊天背景或选中态显示为微信绿色，则该行 selected 为 true；如果没有任何会话被打开/选中，则所有行 selected 都为 false。"
     "对于每个会话，估算其头像中心点的Y坐标（使用 0-1000 归一化值，0=图片顶部边缘，1000=图片底部边缘）。"
     "直接输出JSON格式结果。"
-    'JSON格式：{"threads": [{"name": "会话名称", "y": 120, "is_group": true/false, "unread": true/false, "unread_badge": "3"}, ...]}'
+    'JSON格式：{"threads": [{"name": "会话名称", "y": 120, "is_group": true/false, "unread": true/false, "unread_badge": "3", "selected": true/false}, ...]}'
     "只输出JSON，不要输出其他文字。"
 )
 
@@ -63,7 +64,7 @@ If no such button is visible, return {"bbox": null}.
 
 CURRENT_CHAT_PROMPT = """
 You are a UI analysis assistant. Analyze the provided screenshot of a chat application's sidebar.
-One of the chat items in the sidebar is highlighted (has a different background color), indicating it is currently selected.
+One of the chat items in the sidebar may be highlighted green, indicating it is currently selected/open.
 Your task is to identify the name of this single highlighted chat item.
 Return a single JSON object with one key, "chat_name". If no item is highlighted, return null.
 
@@ -75,7 +76,7 @@ Example:
 
 CURRENT_CHAT_Y_PROMPT = """
 You are a UI analysis assistant. Analyze the provided screenshot of a chat application's sidebar.
-One of the chat items in the sidebar is highlighted (has a different background color), indicating it is currently selected.
+One of the chat items in the sidebar may be highlighted green, indicating it is currently selected/open.
 Your task is to return ONLY the normalized Y coordinate (0-1000) of the CENTER of the highlighted chat item's row,
 where 0 = top edge of the image and 1000 = bottom edge of the image.
 Return a single JSON object with one key, "y". If no item is highlighted, set "y" to null.
@@ -99,6 +100,13 @@ For each message, you must extract the following information:
 - Messages from others are on the left, with the sender's name above the message bubble.
 - Messages from "You" (the user) are on the right, and do not have a visible sender name. You should explicitly set the sender to "You".
 - System messages (like timestamps, "You recalled a message", etc.) are centered and have no sender. The sender should be `null` and the type should be 'system'.
+- For group chats, the `sender` must be one of these sources only:
+  visible nickname text above/near a left-side bubble, the same nickname inferred from a contiguous same-avatar left-side message group, or "You" for right-side green bubbles.
+- Never use mention text such as "@AARON", "@Pauline", or "@Frank" as the sender. Mentions belong in `content`.
+- Never set `sender` to `null` for a normal text/image/file message. If a normal message is cut off at the top/bottom and its sender cannot be read or inferred from the same visible avatar group, omit that message.
+- User avatars/profile photos beside bubbles are not messages and must not add `[Image]` to `content`.
+- Centered timestamp separators such as "16:15", "Yesterday 22:08", or "昨天 22:08" are not messages. Do not include them in `messages`; use them only as the `time` for following messages.
+- Centered call/status notices such as "Pauline发起了语音通话" are system messages with `sender: null`.
 
 Respond with a JSON object containing a single key "messages", which is a list of message objects.
 Each message object must have the keys "sender", "content", "time", and "type".

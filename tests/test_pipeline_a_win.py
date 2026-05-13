@@ -140,6 +140,23 @@ class FakeNamedFastDriver(FakeFastCaptureDriver):
         return titles.get(fallback, fallback)
 
 
+class FakeSelectedNamedFastDriver(FakeNamedFastDriver):
+    def __init__(self) -> None:
+        super().__init__()
+        self.viewports = [
+            [
+                SidebarRow(
+                    "运营核心群",
+                    None,
+                    None,
+                    (0, 0, 100, 40),
+                    False,
+                    selected=True,
+                ),
+            ],
+        ]
+
+
 class FakeFilteredNamedFastDriver(FakeNamedFastDriver):
     def __init__(self) -> None:
         super().__init__()
@@ -354,6 +371,32 @@ def test_named_chats_use_ocr_fast_path_without_navigation_vlm(tmp_path, monkeypa
     ]
     assert driver.extract_calls == ["运营核心群", "NY Cua Full Name"]
     assert driver.scrolls == ["up", "up", "up", "down"]
+
+
+def test_named_fast_path_skips_sidebar_click_when_row_already_selected(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_WORKERS", "1")
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_MAX_PENDING", "2")
+    driver = FakeSelectedNamedFastDriver()
+    config = SimpleNamespace(
+        wechat_app_name="微信",
+        groups_to_monitor=["运营核心群"],
+        sidebar_unread_only=False,
+        chat_type="all",
+        sidebar_max_scrolls=0,
+        chat_max_scrolls=0,
+        output_dir=str(tmp_path),
+    )
+    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+
+    paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
+
+    assert len(paths) == 1
+    assert driver.clicked == []
+    assert driver.capture_calls == [("运营核心群", True)]
+    assert driver.extract_calls == ["运营核心群"]
 
 
 def test_named_chats_semantic_path_respects_unread_and_chat_type_filters(

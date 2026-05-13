@@ -27,6 +27,7 @@ from PIL import Image
 
 from shared.datatypes import SidebarRow
 from shared.ocr_hunyuan_parser import OcrLine, normalize_text, parse_hunyuan_lines
+from shared.sidebar_selection import row_has_selected_green_background
 from platform_mac.macos_window import window_image_px_to_screen_pt
 
 _SIDEBAR_WIDTH_RATIO = 0.3
@@ -117,6 +118,9 @@ def _rows_from_lines(
                 badge_text=None,
                 bbox=(sx1, sy1, sx2, sy2),
                 is_group=None,
+                selected=row_has_selected_green_background(
+                    full_screenshot.crop((0, y1, sidebar_width, y2)),
+                ),
             )
         )
     return rows

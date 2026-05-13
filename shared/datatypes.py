@@ -12,6 +12,7 @@ class SidebarRow:
     bbox: tuple[int, int, int, int]
     # None = unknown (e.g. macOS Vision OCR fast path); filtering should not drop the row.
     is_group: Optional[bool] = None
+    selected: bool = False
 
 
 @dataclass

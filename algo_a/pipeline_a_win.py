@@ -226,6 +226,10 @@ def _driver_prefers_fast_sidebar_rows(driver: Any) -> bool:
     return callable(getattr(driver, "get_fast_sidebar_rows", None))
 
 
+def _row_is_selected(row: Any) -> bool:
+    return bool(getattr(row, "selected", False) or getattr(row, "is_selected", False))
+
+
 def _focused_matching_pending_cfg(
     driver: Any,
     window: Any,
@@ -480,26 +484,34 @@ def _click_verify_extract_save(
 ) -> bool:
     chat_name = str(getattr(row, "name", "") or "").strip()
     click_successful = False
-    for attempt in range(3):
+    already_selected = _row_is_selected(row)
+    if already_selected:
         print(
-            f"[*] Attempting to click '{chat_name}' (lookup={matched_cfg!r}, "
-            f"Attempt {attempt + 1}/3)"
+            f"[+] Sidebar row {chat_name!r} is already selected/open; "
+            "capturing without sidebar click."
         )
-        driver.click_row(row, attempt=attempt)
-        time.sleep(2)
-
-        current_chat_name = driver.get_current_chat_name()
-        if _is_chat_name_match(current_chat_name, matched_cfg):
+        click_successful = True
+    else:
+        for attempt in range(3):
             print(
-                f"[+] Successfully clicked and verified chat: "
-                f"current={current_chat_name!r}, target={matched_cfg!r}"
+                f"[*] Attempting to click '{chat_name}' (lookup={matched_cfg!r}, "
+                f"Attempt {attempt + 1}/3)"
             )
-            click_successful = True
-            break
-        print(
-            f"[WARN] Click verification failed. Expected {matched_cfg!r}, "
-            f"but current chat is {current_chat_name!r}. Retrying..."
-        )
+            driver.click_row(row, attempt=attempt)
+            time.sleep(2)
+
+            current_chat_name = driver.get_current_chat_name()
+            if _is_chat_name_match(current_chat_name, matched_cfg):
+                print(
+                    f"[+] Successfully clicked and verified chat: "
+                    f"current={current_chat_name!r}, target={matched_cfg!r}"
+                )
+                click_successful = True
+                break
+            print(
+                f"[WARN] Click verification failed. Expected {matched_cfg!r}, "
+                f"but current chat is {current_chat_name!r}. Retrying..."
+            )
 
     if not click_successful:
         print(
@@ -513,7 +525,7 @@ def _click_verify_extract_save(
         chat_name,
         written_paths,
         output_index=output_index,
-        skip_navigation_vlm=False,
+        skip_navigation_vlm=already_selected,
         extraction_queue=extraction_queue,
         async_results=async_results,
         persist_chat_name=matched_cfg,
@@ -543,25 +555,33 @@ def _click_extract_save_fast(
 
     click_ok = False
     verified_title: str | None = None
-    for attempt in range(3):
-        driver.click_row(row, attempt=attempt)
-        time.sleep(1.6)
-        title = _resolve_current_chat_title(driver, sidebar_name or matched_cfg)
-        if _title_matches_target(title):
-            verified_title = title
-            click_ok = True
-            break
-        getter = getattr(driver, "get_current_chat_name", None)
-        if callable(getter):
-            alt = getter()
-            if _title_matches_target(alt):
-                verified_title = str(alt).strip()
+    if _row_is_selected(row):
+        verified_title = _resolve_current_chat_title(driver, sidebar_name or matched_cfg)
+        print(
+            f"[+] Sidebar row {sidebar_name!r} is already selected/open; "
+            "capturing without sidebar click."
+        )
+        click_ok = True
+    else:
+        for attempt in range(3):
+            driver.click_row(row, attempt=attempt)
+            time.sleep(1.6)
+            title = _resolve_current_chat_title(driver, sidebar_name or matched_cfg)
+            if _title_matches_target(title):
+                verified_title = title
                 click_ok = True
                 break
-        print(
-            f"[WARN] Fast click verify failed (attempt {attempt + 1}/3). "
-            f"header={title!r}, target={matched_cfg!r}"
-        )
+            getter = getattr(driver, "get_current_chat_name", None)
+            if callable(getter):
+                alt = getter()
+                if _title_matches_target(alt):
+                    verified_title = str(alt).strip()
+                    click_ok = True
+                    break
+            print(
+                f"[WARN] Fast click verify failed (attempt {attempt + 1}/3). "
+                f"header={title!r}, target={matched_cfg!r}"
+            )
 
     if not click_ok:
         print(
@@ -615,7 +635,7 @@ def _find_first_visible_config_match(
         ui_name = str(getattr(row, "name", "") or "").strip()
         print(
             f"[DEBUG] Filter row #{idx:02d}: name={ui_name!r} badge={badge!r} "
-            f"is_group={is_group!r} bbox={bbox!r}"
+            f"is_group={is_group!r} selected={_row_is_selected(row)!r} bbox={bbox!r}"
         )
         if not ui_name:
             print(f"[DEBUG] Filter row #{idx:02d}: reject empty_name")
@@ -690,8 +710,14 @@ def _run_capture_all_fast_path(
             if sidebar_key in processed_keys:
                 print(f"[*] Skipping already processed sidebar row: {sidebar_name!r}")
                 continue
-            driver.click_row(row, attempt=0)
-            time.sleep(0.8)
+            if _row_is_selected(row):
+                print(
+                    f"[+] Sidebar row {sidebar_name!r} is already selected/open; "
+                    "capturing without sidebar click."
+                )
+            else:
+                driver.click_row(row, attempt=0)
+                time.sleep(0.8)
             chat_name = _resolve_current_chat_title(driver, sidebar_name)
             chat_key = _normalized_chat_key(chat_name) or sidebar_key
             if chat_key in processed_keys:

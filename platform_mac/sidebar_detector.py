@@ -19,6 +19,7 @@ import numpy as np
 from PIL import Image
 
 from platform_mac.ocr import OCRResult, ocr_image, prepare_image_for_vision_ocr
+from shared.sidebar_selection import row_has_selected_green_background
 from shared.sidebar_ui_chrome import is_sidebar_ui_chrome_label
 
 
@@ -69,6 +70,7 @@ class ChatInfo:
     row_rect: Optional[Rect] = None     # 行在窗口截图中的绝对像素坐标
     window_rect: Optional[Rect] = None  # 微信窗口在屏幕上的逻辑坐标
     name_ocr_raw: str = ""               # 名称子区域 OCR 原文（调试用，含置信度）
+    selected: bool = False
 
 
 # ── 布局常量（Retina 2x，可调） ──────────────────────────
@@ -561,6 +563,7 @@ def scan_sidebar_once(window_img: Image.Image,
             row_rect=abs_row,
             window_rect=window_bounds,
             name_ocr_raw=ocr_raw,
+            selected=row_has_selected_green_background(row_img),
         ))
     return results
 
