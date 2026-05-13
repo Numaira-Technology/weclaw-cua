@@ -27,6 +27,7 @@ _TIME_SEPARATOR_RE = re.compile(
     + r")$",
     re.IGNORECASE,
 )
+_NO_SENDER_MESSAGE_TYPES = {"system", "recalled"}
 
 
 def _looks_like_time_separator(value: object) -> bool:
@@ -57,7 +58,7 @@ def _normalize_message_data(
     if sender in {"", "null", "None"}:
         sender = None
 
-    if msg_type == "system":
+    if msg_type in _NO_SENDER_MESSAGE_TYPES:
         return ChatMessage(sender=None, content=content, time=time_value, type=msg_type), current_time
 
     if sender is None:

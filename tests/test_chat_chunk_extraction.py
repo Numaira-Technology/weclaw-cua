@@ -56,3 +56,24 @@ def test_extract_messages_keeps_centered_system_notice_without_sender() -> None:
         (None, "语音通话已经结束", "Yesterday 22:08", "system"),
         ("Pauline", "@AARON", "Yesterday 22:08", "text"),
     ]
+
+
+def test_extract_messages_keeps_centered_recalled_notice_without_sender() -> None:
+    captured = CapturedChatImages(
+        chat_name="SDG",
+        chunks=[ChatImageChunk(chunk_index=0, chunk_total=1, image=object())],
+    )
+    backend = FakeVisionBackend({
+        "messages": [
+            {"sender": None, "content": "Yesterday 22:08", "time": "Yesterday 22:08", "type": "system"},
+            {"sender": None, "content": "You recalled a message", "time": None, "type": "recalled"},
+            {"sender": "Pauline", "content": "@AARON", "time": None, "type": "text"},
+        ],
+    })
+
+    messages = extract_messages_from_captured_chat(captured, backend)
+
+    assert [(m.sender, m.content, m.time, m.type) for m in messages] == [
+        (None, "You recalled a message", "Yesterday 22:08", "recalled"),
+        ("Pauline", "@AARON", "Yesterday 22:08", "text"),
+    ]
