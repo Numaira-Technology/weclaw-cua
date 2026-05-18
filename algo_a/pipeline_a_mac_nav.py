@@ -1,8 +1,7 @@
 """macOS unread navigation pipeline.
 
-Uses the left Messages navigation icon to jump through unread chats, then captures
-each selected chat. Message VLM extraction is queued asynchronously when the
-driver exposes capture/extract hooks.
+Uses the left Messages navigation icon to jump through unread chats, then sends
+each selected chat through the async capture/VLM/JSON pipeline.
 
 Usage:
     from algo_a.pipeline_a_mac_nav import run_pipeline_a_mac_nav
@@ -20,10 +19,8 @@ from typing import Any
 
 from algo_a.async_chat_extraction import (
     ChatWriteResult,
-    PendingChatWrite,
     make_async_queue,
     record_chat_write_results,
-    write_chat_messages_json,
 )
 from algo_a.list_target_chats_win import _normalize_chat_label
 from config.weclaw_config import WeclawConfig
@@ -73,8 +70,6 @@ def _finish_async_extractions(
     async_results: list[ChatWriteResult],
     written_paths: list[str],
 ) -> None:
-    if extraction_queue is None:
-        return
     async_results.extend(extraction_queue.drain())
     record_chat_write_results(async_results, written_paths)
 
@@ -92,47 +87,15 @@ def _capture_or_queue_chat(
     persist_chat_name: str | None = None,
 ) -> bool:
     """``title``: window/header string for extraction; ``persist_chat_name``: config label for saved JSON."""
-    label_for_jobs = persist_chat_name if persist_chat_name else title
-    if extraction_queue is None:
-        messages = driver.get_chat_messages(
-            title,
-            max_messages=read_cap,
-            max_scrolls=config.chat_max_scrolls,
-            recent_window_hours=getattr(config, "recent_window_hours", 0),
-        )
-        if not messages:
-            print(f"[WARN] No messages were extracted from {title!r}.")
-            return False
-        output_path = write_chat_messages_json(
-            output_dir=config.output_dir,
-            chat_name=title,
-            messages=messages,
-            output_index=output_index,
-            persist_chat_name=persist_chat_name,
-        )
-        print(f"[SUCCESS] Saved {len(messages)} messages to {output_path}")
-        written_paths.append(output_path)
-        return True
-
-    captured = driver.capture_chat_messages(
-        title,
+    assert extraction_queue is not None
+    return extraction_queue.capture_and_submit(
+        chat_name=title,
+        output_index=output_index,
         max_messages=read_cap,
         max_scrolls=config.chat_max_scrolls,
+        recent_window_hours=getattr(config, "recent_window_hours", 0),
+        persist_chat_name=persist_chat_name,
     )
-    if getattr(captured, "chunks", None) == []:
-        print(f"[WARN] No screenshots were captured for {title!r}.")
-        return False
-    async_results.extend(
-        extraction_queue.submit(
-            PendingChatWrite(
-                output_index=output_index,
-                chat_name=label_for_jobs,
-                captured=captured,
-                recent_window_hours=getattr(config, "recent_window_hours", 0),
-            )
-        )
-    )
-    return True
 
 
 def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[str]:

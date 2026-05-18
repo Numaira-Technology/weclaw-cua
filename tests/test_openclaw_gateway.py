@@ -18,6 +18,7 @@ import os
 import time
 
 from shared.openclaw_gateway import OpenClawGatewayConfig
+from shared.openclaw_gateway import _async_vlm_worker_count
 from shared.openclaw_gateway import fill_stepwise_responses
 
 
@@ -122,3 +123,25 @@ def test_fill_stepwise_responses_skips_existing_without_workers(tmp_path, monkey
         "responses_skipped": 2,
         "workers": 0,
     }
+
+
+def test_openclaw_gateway_worker_count_rejects_zero(monkeypatch) -> None:
+    monkeypatch.delenv("WECLAW_ASYNC_VLM_WORKERS", raising=False)
+
+    try:
+        _async_vlm_worker_count(0)
+    except AssertionError as e:
+        assert "workers must be >= 1" in str(e)
+    else:
+        raise AssertionError("expected workers=0 to fail")
+
+
+def test_openclaw_gateway_env_worker_count_rejects_zero(monkeypatch) -> None:
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_WORKERS", "0")
+
+    try:
+        _async_vlm_worker_count(None)
+    except AssertionError as e:
+        assert "WECLAW_ASYNC_VLM_WORKERS must be >= 1" in str(e)
+    else:
+        raise AssertionError("expected WECLAW_ASYNC_VLM_WORKERS=0 to fail")
