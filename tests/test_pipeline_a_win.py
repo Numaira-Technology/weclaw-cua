@@ -176,7 +176,8 @@ class FakeFilteredNamedFastDriver(FakeNamedFastDriver):
         return self.viewports[self.viewport_idx]
 
     def get_fast_sidebar_rows(self, window: object) -> list[SidebarRow]:
-        raise AssertionError("semantic named filters must not use OCR-only rows")
+        assert window is not None
+        return self.viewports[self.viewport_idx]
 
 
 class FakeSemanticFailureNamedDriver(FakeFilteredNamedFastDriver):
@@ -201,6 +202,32 @@ class FakeSemanticFailureNamedDriver(FakeFilteredNamedFastDriver):
         if chat_name == "Failed Group":
             return SimpleNamespace(chat_name=chat_name, chunks=[])
         return SimpleNamespace(chat_name=chat_name)
+
+
+class FakeWildcardReorderDriver(FakeFastCaptureDriver):
+    def __init__(self) -> None:
+        super().__init__()
+        self.semantic_calls = 0
+
+    def find_wechat_window(self, app_name: str) -> object:
+        assert app_name == "微信"
+        return object()
+
+    def get_sidebar_rows(self, window: object) -> list[SidebarRow]:
+        assert window is not None
+        self.semantic_calls += 1
+        if "Chat A" not in [name for name, _ in self.capture_calls]:
+            return [
+                SidebarRow("Chat A", None, "1", (0, 0, 100, 40), True),
+                SidebarRow("Chat B", None, "1", (0, 40, 100, 80), True),
+            ]
+        return [
+            SidebarRow("Chat B", None, "1", (0, 0, 100, 40), True),
+            SidebarRow("Chat A", None, "1", (0, 40, 100, 80), True),
+        ]
+
+    def resolve_current_chat_title(self, fallback: str = "") -> str:
+        return fallback
 
 
 class FakeMacChatInfo:
@@ -259,7 +286,7 @@ def test_sidebar_scan_keeps_unknown_group_rows_group_eligible() -> None:
     )
 
     chats = list_target_chats(
-        driver,
+        cast(Any, driver),
         window=object(),
         all_groups=True,
         chat_type="group",
@@ -277,7 +304,7 @@ def test_unread_group_scan_keeps_unknown_group_rows_group_eligible() -> None:
         ]
     )
 
-    chats = list_target_chats(driver, window=object(), max_scrolls=0)
+    chats = list_target_chats(cast(Any, driver), window=object(), max_scrolls=0)
 
     assert [chat.name for chat in chats] == ["Unknown Unread"]
 
@@ -315,14 +342,14 @@ def test_named_chats_already_focused_captures_without_sidebar_click(tmp_path, mo
     )
     monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
 
-    paths = pipeline_a_win._run_sidebar_scan_pipeline(config)
+    paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
 
     assert len(paths) == 2
     assert "NY Cua..." not in driver.clicked
     assert driver.clicked == ["运营核心群"]
 
 
-def test_named_chats_focused_but_unread_filter_blocks_read_group_when_unread_only(
+def test_named_chats_focused_respects_unread_filter(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -340,7 +367,7 @@ def test_named_chats_focused_but_unread_filter_blocks_read_group_when_unread_onl
     )
     monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
 
-    paths = pipeline_a_win._run_sidebar_scan_pipeline(config)
+    paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
 
     assert len(paths) == 0
     assert driver.clicked == []
@@ -399,7 +426,7 @@ def test_named_fast_path_skips_sidebar_click_when_row_already_selected(
     assert driver.extract_calls == ["运营核心群"]
 
 
-def test_named_chats_semantic_path_respects_unread_and_chat_type_filters(
+def test_named_chats_filtered_path_respects_unread_and_chat_type_filters(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -452,6 +479,33 @@ def test_named_chats_semantic_path_continues_after_failed_capture(
         ("Unread Group", True),
     ]
     assert driver.extract_calls == ["Unread Group"]
+
+
+def test_wildcard_filtered_dynamic_sweep_skips_reordered_duplicate(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_WORKERS", "1")
+    monkeypatch.setenv("WECLAW_ASYNC_VLM_MAX_PENDING", "2")
+    driver = FakeWildcardReorderDriver()
+    config = SimpleNamespace(
+        wechat_app_name="微信",
+        groups_to_monitor=[],
+        sidebar_unread_only=True,
+        chat_type="group",
+        sidebar_max_scrolls=0,
+        chat_max_scrolls=0,
+        output_dir=str(tmp_path),
+    )
+    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+
+    paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
+
+    assert len(paths) == 2
+    assert driver.clicked == ["Chat A", "Chat B"]
+    assert driver.capture_calls == [("Chat A", True), ("Chat B", True)]
+    assert driver.extract_calls == ["Chat A", "Chat B"]
+    assert driver.semantic_calls >= 2
 
 
 def test_initial_sidebar_whitelist_rejects_message_summary() -> None:

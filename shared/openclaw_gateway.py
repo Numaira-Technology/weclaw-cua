@@ -109,13 +109,12 @@ def _extra_headers(config: OpenClawGatewayConfig) -> dict[str, str] | None:
 
 def _async_vlm_worker_count(workers: int | None) -> int:
     if workers is not None:
-        assert workers >= 0, "workers must be >= 0"
-        if workers > 0:
-            return workers
+        assert workers >= 1, "workers must be >= 1"
+        return workers
     raw = os.environ.get("WECLAW_ASYNC_VLM_WORKERS", "").strip()
     if raw:
         value = int(raw)
-        assert value >= 0, "WECLAW_ASYNC_VLM_WORKERS must be >= 0"
+        assert value >= 1, "WECLAW_ASYNC_VLM_WORKERS must be >= 1"
         return value
     return 2
 
@@ -322,25 +321,6 @@ def fill_stepwise_responses(
             "responses_skipped": skipped,
             "workers": 0,
         }
-    if worker_count <= 0:
-        written = 0
-        for step_id, img_path, prompt_text, out_path, max_tokens in pending_tasks:
-            _fill_one_stepwise_response(
-                config=config,
-                step_id=step_id,
-                img_path=img_path,
-                prompt_text=prompt_text,
-                out_path=out_path,
-                max_tokens=max_tokens,
-            )
-            written += 1
-        return {
-            "total_tasks": len(tasks),
-            "responses_written": written,
-            "responses_skipped": skipped,
-            "workers": worker_count,
-        }
-
     max_workers = min(worker_count, len(pending_tasks))
     written = 0
     with ThreadPoolExecutor(

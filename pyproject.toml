@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "weclaw-cua"
-version = "0.2.1"
+version = "0.2.2"
 description = "WeClaw-CUA — vision-based WeChat message capture and report CLI for LLMs"
 readme = "README.md"
 license = "Apache-2.0"

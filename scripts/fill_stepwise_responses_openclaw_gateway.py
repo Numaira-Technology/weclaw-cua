@@ -32,7 +32,7 @@ def main() -> None:
     parser.add_argument(
         "--workers",
         type=int,
-        default=0,
+        default=None,
         help="Concurrent gateway VLM requests (default: WECLAW_ASYNC_VLM_WORKERS or 2)",
     )
     args = parser.parse_args()
