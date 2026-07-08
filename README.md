@@ -19,6 +19,7 @@
 <summary><strong>Table of Contents</strong></summary>
 
 - [Highlights](#highlights)
+- [Project Status](#project-status)
 - [How It Works](#how-it-works)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
@@ -47,6 +48,12 @@
 | **AI-first** | JSON output by default, designed for LLM agent tool calls |
 | **Fully local** | All UI automation runs on your machine; data never leaves your device |
 | **14 commands** | init, run, capture, finalize, report, build-report-prompt, sessions, history, search, ask, export, stats, unread, new-messages |
+
+---
+
+## Project Status
+
+This repository is actively maintained. The README was refreshed on July 8, 2026 to keep the project status current and make it easier for contributors to verify that the project is still active.
 
 ---
 
