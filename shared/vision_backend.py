@@ -32,7 +32,10 @@ def create_vision_backend(mode: str = "openrouter", **kwargs) -> VisionBackend:
     """
     if mode == "openrouter":
         from shared.vision_ai import VisionAI
-        return VisionAI()
+        return VisionAI(
+            config=kwargs.get("config"),
+            config_path=kwargs.get("config_path", "config/config.json"),
+        )
     if mode == "stepwise":
         from shared.stepwise_backend import StepwiseBackend
         work_dir = kwargs.get("work_dir")

@@ -10,6 +10,7 @@ from threading import Lock
 from typing import Any
 
 from shared.datatypes import ChatMessage
+from shared.capture_result import record_capture_failure
 
 
 @dataclass
@@ -170,6 +171,15 @@ class AsyncChatExtractionQueue:
         )
         if getattr(captured, "chunks", None) == []:
             print(f"[WARN] No screenshots were captured for {chat_name!r}.")
+            with self._lock:
+                self._completed.append(
+                    ChatWriteResult(
+                        output_index=output_index,
+                        chat_name=chat_name,
+                        success=False,
+                        error="no_screenshots_captured",
+                    )
+                )
             return False
         persist = (
             str(persist_chat_name).strip()
@@ -301,9 +311,15 @@ def record_chat_write_results(
     written_paths: list[str],
 ) -> None:
     for result in sorted(results, key=lambda item: item.output_index):
-        if result.success:
+        if result.success and result.json_path:
             written_paths.append(result.json_path)
-        else:
+        elif not result.success:
+            record_capture_failure(
+                written_paths,
+                result.chat_name,
+                result.error or "unknown error",
+                stage="extraction",
+            )
             print(
                 f"[WARN] Async extraction failed for {result.chat_name!r}: "
                 f"{result.error or 'unknown error'}"

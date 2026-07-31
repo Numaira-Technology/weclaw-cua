@@ -26,18 +26,19 @@ from algo_a.list_target_chats_win import (
 )
 from algo_a.sidebar_scroll_to_top import scroll_sidebar_to_top
 from config.weclaw_config import WeclawConfig
+from shared.capture_result import CaptureRunResult, record_capture_failure
 
 
-def _create_driver(vision_backend=None):
+def _create_driver(vision_backend=None, config=None):
     """Auto-detect the platform and return the appropriate PlatformDriver."""
     if sys.platform == "win32":
         from platform_win.driver import WinDriver
 
-        return WinDriver(vision_backend=vision_backend)
+        return WinDriver(vision_backend=vision_backend, config=config)
     if sys.platform == "darwin":
         from platform_mac.mac_ai_driver import MacDriver
 
-        return MacDriver(vision_backend=vision_backend)
+        return MacDriver(vision_backend=vision_backend, config=config)
     raise NotImplementedError(f"Platform {sys.platform} is not supported yet.")
 
 
@@ -232,7 +233,7 @@ def _title_matches_target(title: str | None, target: str) -> bool:
 
 
 def _finish_async_extractions(
-    extraction_queue: AsyncChatExtractionQueue,
+    extraction_queue: Any,
     async_results: list[ChatWriteResult],
     written_paths: list[str],
 ) -> None:
@@ -324,13 +325,19 @@ def _click_verify_extract_save(
             )
 
     if not click_successful:
+        record_capture_failure(
+            written_paths,
+            matched_cfg or chat_name,
+            "click_verification_failed",
+            stage="navigation",
+        )
         print(
             f"[ERROR] Failed to click on chat '{chat_name}' after 3 attempts."
         )
         return False
 
     capture_name = verified_title or _resolve_current_chat_title(driver, chat_name or matched_cfg)
-    _capture_or_queue_current_chat(
+    return _capture_or_queue_current_chat(
         driver,
         config,
         capture_name,
@@ -341,7 +348,6 @@ def _click_verify_extract_save(
         async_results=async_results,
         persist_chat_name=matched_cfg,
     )
-    return True
 
 
 def _click_extract_save_fast(
@@ -390,6 +396,12 @@ def _click_extract_save_fast(
             )
 
     if not click_ok:
+        record_capture_failure(
+            written_paths,
+            matched_cfg,
+            "click_verification_failed",
+            stage="navigation",
+        )
         print(
             f"[ERROR] Could not open chat {matched_cfg!r} after 3 clicks — "
             "check Accessibility for Terminal/Python, WeChat in foreground, "
@@ -586,7 +598,10 @@ def _capture_focused_named_if_present(
         persist_chat_name=matched,
     )
     if not ok:
-        return pending, 0
+        print(
+            f"[WARN] Focused chat {matched!r} was found but capture failed; "
+            "recording the capture failure."
+        )
     return [name for name in pending if name != matched], 1
 
 
@@ -666,7 +681,11 @@ def _run_named_ocr_dynamic_sweep(
                     )
                 else:
                     attempted.add(matched_cfg)
-                    print(f"[WARN] Failed OCR named capture for {matched_cfg!r}. Continuing scan.")
+                    pending = [name for name in pending if name != matched_cfg]
+                    print(
+                        f"[WARN] Found {matched_cfg!r}, but its capture failed; "
+                        "recording the capture failure and continuing."
+                    )
                 if not pending:
                     break
 
@@ -692,6 +711,8 @@ def _run_named_filtered_dynamic_sweep(
     written_paths: list[str],
     extraction_queue: AsyncChatExtractionQueue,
     async_results: list[ChatWriteResult],
+    *,
+    prefer_fast_sidebar: bool = False,
 ) -> list[str]:
     sidebar_scrolls = config.sidebar_max_scrolls
     processed_count = 0
@@ -715,6 +736,7 @@ def _run_named_filtered_dynamic_sweep(
                     pending_candidates,
                     unread_only=config.sidebar_unread_only,
                     chat_type=config.chat_type,
+                    prefer_fast_sidebar=prefer_fast_sidebar,
                 )
                 if hit is None:
                     break
@@ -745,7 +767,11 @@ def _run_named_filtered_dynamic_sweep(
                     )
                 else:
                     attempted.add(matched_cfg)
-                    print(f"[WARN] Failed filtered named capture for {matched_cfg!r}. Continuing scan.")
+                    pending = [name for name in pending if name != matched_cfg]
+                    print(
+                        f"[WARN] Found {matched_cfg!r}, but its capture failed; "
+                        "recording the capture failure and continuing."
+                    )
                 if not pending:
                     break
 
@@ -770,6 +796,8 @@ def _run_wildcard_filtered_dynamic_sweep(
     written_paths: list[str],
     extraction_queue: AsyncChatExtractionQueue,
     async_results: list[ChatWriteResult],
+    *,
+    prefer_fast_sidebar: bool = False,
 ) -> None:
     sidebar_scrolls = config.sidebar_max_scrolls
     processed_labels: list[str] = []
@@ -783,7 +811,12 @@ def _run_wildcard_filtered_dynamic_sweep(
         seen_viewports: set[tuple[tuple[str, int], ...]] = set()
         for scan_idx in range(sidebar_scrolls + 1):
             while True:
-                rows = driver.get_sidebar_rows(window)
+                if prefer_fast_sidebar and callable(
+                    getattr(driver, "get_fast_sidebar_rows", None)
+                ):
+                    rows = driver.get_fast_sidebar_rows(window)
+                else:
+                    rows = driver.get_sidebar_rows(window)
                 rows = [row for row in rows if str(getattr(row, "name", "") or "").strip()]
                 if not rows:
                     print("[WARN] Semantic wildcard scan returned no rows for current viewport.")
@@ -845,8 +878,10 @@ def _run_capture_all_fast_path(
     window: Any,
     config: WeclawConfig,
     written_paths: list[str],
+    extraction_queue_factory=None,
 ) -> list[str]:
-    extraction_queue = make_async_queue(driver, config.output_dir)
+    queue_factory = extraction_queue_factory or make_async_queue
+    extraction_queue = queue_factory(driver, config.output_dir)
     async_results: list[ChatWriteResult] = []
     sidebar_scrolls = config.sidebar_max_scrolls
     scroll_sidebar_to_top(driver, window, max_down_scrolls=sidebar_scrolls)
@@ -932,7 +967,13 @@ def _run_capture_all_fast_path(
     return written_paths
 
 
-def run_pipeline_a(config: WeclawConfig, vision_backend=None) -> list[str]:
+def run_pipeline_a(
+    config: WeclawConfig,
+    vision_backend=None,
+    *,
+    extraction_queue_factory=None,
+    prefer_ocr_navigation: bool = False,
+) -> CaptureRunResult:
     """Run the full message collection pipeline. Return paths to written JSON files."""
     assert config is not None
 
@@ -943,22 +984,42 @@ def run_pipeline_a(config: WeclawConfig, vision_backend=None) -> list[str]:
     ):
         from algo_a.pipeline_a_mac_nav import run_pipeline_a_mac_nav
 
-        return run_pipeline_a_mac_nav(config, vision_backend=vision_backend)
+        return run_pipeline_a_mac_nav(
+            config,
+            vision_backend=vision_backend,
+            extraction_queue_factory=extraction_queue_factory,
+        )
 
-    return _run_sidebar_scan_pipeline(config, vision_backend=vision_backend)
+    return _run_sidebar_scan_pipeline(
+        config,
+        vision_backend=vision_backend,
+        extraction_queue_factory=extraction_queue_factory,
+        prefer_ocr_navigation=prefer_ocr_navigation,
+    )
 
 
-def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> list[str]:
+def _run_sidebar_scan_pipeline(
+    config: WeclawConfig,
+    vision_backend=None,
+    *,
+    extraction_queue_factory=None,
+    prefer_ocr_navigation: bool = False,
+) -> CaptureRunResult:
     """Run the sidebar scan implementation used by Windows and macOS fallback."""
 
     os.makedirs(config.output_dir, exist_ok=True)
-    written_paths: list[str] = []
+    written_paths = CaptureRunResult()
 
-    driver = _create_driver(vision_backend=vision_backend)
-    if sys.platform == "darwin" and hasattr(driver, "ensure_permissions"):
+    driver = _create_driver(vision_backend=vision_backend, config=config)
+    if hasattr(driver, "ensure_permissions"):
         driver.ensure_permissions()
     window = driver.find_wechat_window(config.wechat_app_name)
     if not window:
+        written_paths.add_failure(
+            config.wechat_app_name,
+            "wechat_window_not_found",
+            stage="navigation",
+        )
         print("[ERROR] Pipeline failed: Could not find WeChat window.")
         return written_paths
 
@@ -967,9 +1028,16 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
     chat_type = config.chat_type
     if _fast_capture_enabled(config):
         print("[*] Mode: true capture-all fast path (OCR sidebar sweep).")
-        return _run_capture_all_fast_path(driver, window, config, written_paths)
+        return _run_capture_all_fast_path(
+            driver,
+            window,
+            config,
+            written_paths,
+            extraction_queue_factory=extraction_queue_factory,
+        )
 
-    extraction_queue = make_async_queue(driver, config.output_dir)
+    queue_factory = extraction_queue_factory or make_async_queue
+    extraction_queue = queue_factory(driver, config.output_dir)
     async_results: list[ChatWriteResult] = []
 
     if _groups_config_means_all_groups(config.groups_to_monitor):
@@ -983,6 +1051,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
             written_paths,
             extraction_queue,
             async_results,
+            prefer_fast_sidebar=prefer_ocr_navigation,
         )
         print("\n[SUCCESS] Pipeline finished processing wildcard targets.")
         _finish_async_extractions(extraction_queue, async_results, written_paths)
@@ -1009,6 +1078,7 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
             written_paths,
             extraction_queue,
             async_results,
+            prefer_fast_sidebar=prefer_ocr_navigation,
         )
     else:
         print("[*] Named filters inactive; using OCR-only sidebar rows.")
@@ -1022,6 +1092,12 @@ def _run_sidebar_scan_pipeline(config: WeclawConfig, vision_backend=None) -> lis
             async_results,
         )
     if pending:
+        for unresolved_name in pending:
+            written_paths.add_failure(
+                unresolved_name,
+                "chat_not_found_or_verified",
+                stage="navigation",
+            )
         print(f"[WARN] Unresolved config names (not found/verified): {pending!r}")
         print(
             "[HINT] Paste exact sidebar strings from the logs, or set "

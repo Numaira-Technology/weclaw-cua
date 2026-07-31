@@ -5,5 +5,5 @@ from .vision import capture_window
 __all__ = ["WinDriver", "create_driver", "find_wechat_window", "capture_window"]
 
 
-def create_driver():
-    return WinDriver()
+def create_driver(*, config=None, vision_backend=None):
+    return WinDriver(vision_backend=vision_backend, config=config)

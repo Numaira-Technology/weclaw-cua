@@ -28,14 +28,14 @@ from algo_a.list_unread_chats import filter_chats_by_groups_to_monitor, list_unr
 from config.weclaw_config import WeclawConfig
 
 
-def _create_driver():
+def _create_driver(config: WeclawConfig):
     """Auto-detect the platform and return the appropriate PlatformDriver."""
     if sys.platform == "darwin":
         from platform_mac import create_driver
-        return create_driver()
+        return create_driver(config=config)
     elif sys.platform == "win32":
         from platform_win import create_driver
-        return create_driver()
+        return create_driver(config=config)
     else:
         assert False, f"unsupported platform: {sys.platform}"
 
@@ -49,7 +49,7 @@ def run_pipeline_a(config: WeclawConfig) -> list[str]:
     from algo_a.read_messages_from_uitree import read_messages_from_uitree
     from algo_a.write_messages_json import write_messages_json
 
-    driver = _create_driver()
+    driver = _create_driver(config)
     driver.ensure_permissions()
     window = driver.find_wechat_window(config.wechat_app_name)
     unread_chats = list_unread_chats(driver)

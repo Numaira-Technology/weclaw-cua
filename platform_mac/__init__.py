@@ -35,8 +35,8 @@ def __getattr__(name: str):
     if name == "create_driver":
         from platform_mac.mac_ai_driver import MacDriver
 
-        def create_driver():
-            return MacDriver()
+        def create_driver(*, config=None, vision_backend=None):
+            return MacDriver(vision_backend=vision_backend, config=config)
 
         return create_driver
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

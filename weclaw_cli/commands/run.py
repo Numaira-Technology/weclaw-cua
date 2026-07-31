@@ -15,6 +15,17 @@ import click
 from ..output.formatter import output
 
 
+def _capture_failure_summary(failures: list[dict]) -> str | None:
+    if not failures:
+        return None
+    rendered = [
+        f"{item.get('chat_name', 'unknown')}:{item.get('stage', 'capture')}="
+        f"{item.get('error', 'unknown error')}"
+        for item in failures
+    ]
+    return "capture failures: " + "; ".join(rendered)
+
+
 @click.command()
 @click.option("--no-llm", is_flag=True, default=False,
               help="Stepwise mode: output images+prompts for agent, skip report")
@@ -75,6 +86,8 @@ def run(
     import sys
 
     from ..context import apply_capture_overrides, load_app_context
+    from ..progress import progress_to_stderr
+    from shared.capture_result import capture_failures, capture_status
 
     app = load_app_context(ctx)
     config = app["config"]
@@ -123,15 +136,29 @@ def run(
         err = None
         report_text = None
         json_paths = []
+        failures: list[dict] = []
+        status = "ok"
         try:
             gateway = OpenClawGatewayConfig.from_env_or_local()
             vision_backend = OpenClawVisionBackend(gateway)
-            json_paths = run_pipeline_a(config, vision_backend=vision_backend)
+            with progress_to_stderr():
+                capture_result = run_pipeline_a(
+                    config,
+                    vision_backend=vision_backend,
+                )
+            json_paths = list(capture_result)
+            failures = capture_failures(capture_result)
+            status = capture_status(capture_result)
             abs_json = [os.path.abspath(p) for p in json_paths]
             if abs_json:
                 custom_prompt = config.report_custom_prompt or "Summarize key decisions and action items."
                 prompt_text = build_prompt_from_json_paths(abs_json, custom_prompt)
-                report_text = gateway_chat_text(gateway, prompt_text, max_tokens=8192)
+                with progress_to_stderr():
+                    report_text = gateway_chat_text(
+                        gateway,
+                        prompt_text,
+                        max_tokens=8192,
+                    )
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             payload = build_last_run_payload(
@@ -139,30 +166,33 @@ def run(
                 config_path=app["config_path"],
                 weclaw_root=root,
                 output_dir=out_dir,
-                message_json_paths=[],
+                message_json_paths=json_paths,
                 report_generated=False,
                 error=err,
             )
             write_last_run(out_dir, payload)
             raise
 
+        err = _capture_failure_summary(failures)
         payload = build_last_run_payload(
-            ok=True,
+            ok=not failures,
             config_path=app["config_path"],
             weclaw_root=root,
             output_dir=out_dir,
             message_json_paths=json_paths,
             report_generated=report_text is not None,
-            error=None,
+            error=err,
         )
         write_last_run(out_dir, payload)
 
         if fmt == "json":
             result = {
-                "ok": True,
+                "ok": not failures,
+                "status": status,
                 "backend": "openclaw-gateway",
                 "chats_captured": len(json_paths),
                 "report_generated": report_text is not None,
+                "failures": failures,
             }
             if json_paths:
                 result["files"] = json_paths
@@ -174,6 +204,8 @@ def run(
                 output(report_text, "text")
             else:
                 output("No matching messages found.", "text")
+        if failures:
+            ctx.exit(1)
         return
 
     from algo_a import run_pipeline_a
@@ -183,11 +215,18 @@ def run(
     err = None
     json_paths = []
     report_text = None
+    failures: list[dict] = []
+    status = "ok"
     try:
-        json_paths = run_pipeline_a(config)
+        with progress_to_stderr():
+            capture_result = run_pipeline_a(config)
+        json_paths = list(capture_result)
+        failures = capture_failures(capture_result)
+        status = capture_status(capture_result)
         abs_json = [os.path.abspath(p) for p in json_paths]
         if abs_json:
-            report_text = run_pipeline_b(config, abs_json)
+            with progress_to_stderr():
+                report_text = run_pipeline_b(config, abs_json)
     except Exception as e:
         err = f"{type(e).__name__}: {e}"
         payload = build_last_run_payload(
@@ -195,30 +234,33 @@ def run(
             config_path=app["config_path"],
             weclaw_root=root,
             output_dir=out_dir,
-            message_json_paths=[],
+            message_json_paths=json_paths,
             report_generated=False,
             error=err,
         )
         write_last_run(out_dir, payload)
         raise
 
+    err = _capture_failure_summary(failures)
     payload = build_last_run_payload(
-        ok=True,
+        ok=not failures,
         config_path=app["config_path"],
         weclaw_root=root,
         output_dir=out_dir,
         message_json_paths=json_paths,
         report_generated=report_text is not None,
-        error=None,
+        error=err,
     )
     write_last_run(out_dir, payload)
 
     if fmt == "json":
         result = {
-            "ok": True,
+            "ok": not failures,
+            "status": status,
             "chats_captured": len(json_paths),
             "files": json_paths,
             "report_generated": report_text is not None,
+            "failures": failures,
         }
         if report_text:
             result["report"] = report_text
@@ -228,6 +270,8 @@ def run(
             output(report_text, "text")
         else:
             output("No matching messages found.", "text")
+    if failures:
+        ctx.exit(1)
 
 
 from .capture import capture as capture_cmd
