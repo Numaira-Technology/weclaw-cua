@@ -7,6 +7,7 @@ import re
 import time
 from typing import Any
 
+import numpy as np
 import pyautogui  # type: ignore[import-untyped]
 import win32gui  # type: ignore[import-untyped]
 
@@ -63,10 +64,37 @@ def _is_plausible_header_title(text: str) -> bool:
     return junk < len(title) * 0.5
 
 
+def _row_has_red_unread_badge(row_image) -> bool:
+    """Detect numbered and muted red unread badges without a vision-model call."""
+    arr = np.array(row_image.convert("RGB")).astype(np.int16)
+    if arr.size == 0:
+        return False
+    height, width, _ = arr.shape
+    badge_region = arr[
+        : max(1, int(height * 0.8)),
+        int(width * 0.04) : max(int(width * 0.04) + 1, int(width * 0.55)),
+        :,
+    ]
+    red = badge_region[:, :, 0]
+    green = badge_region[:, :, 1]
+    blue = badge_region[:, :, 2]
+    mask = (
+        (red >= 175)
+        & (red - green >= 50)
+        & (red - blue >= 50)
+        & (green <= 150)
+        & (blue <= 150)
+    )
+    return int(mask.sum()) >= 12
+
+
 class WinDriver(PlatformDriver):
-    def __init__(self, vision_backend: VisionBackend | None = None):
+    def __init__(self, vision_backend: VisionBackend | None = None, config=None):
         self.hwnd: int = 0
-        self.vision_ai: VisionBackend = vision_backend or create_vision_backend("openrouter")
+        self.vision_ai: VisionBackend = vision_backend or create_vision_backend(
+            "openrouter",
+            config=config,
+        )
 
     def find_wechat_window(self, app_name: str = "微信") -> int:
         """Finds the WeChat window and stores its handle."""
@@ -141,21 +169,30 @@ class WinDriver(PlatformDriver):
             if is_sidebar_ui_chrome_label(ocr_line.text):
                 continue
             best_thread = _best_vlm_thread(ocr_line.text, ocr_line.center_y)
-            is_group = bool(best_thread.get("is_group", False)) if best_thread else False
-            unread = bool(best_thread.get("unread", False)) if best_thread else False
-            unread_badge_raw = best_thread.get("unread_badge") if best_thread else None
-            badge = str(unread_badge_raw).strip() if unread and unread_badge_raw else None
-            if unread and not badge:
-                badge = "1"
             _, oy1, _, oy2 = ocr_line.bbox
-            row_half = max((oy2 - oy1) // 2, 10)
+            row_half = max((oy2 - oy1) // 2, 24)
             cy = (oy1 + oy2) // 2
             y1 = max(0, cy - row_half)
             y2 = min(img_height, cy + row_half)
+            row_image = sidebar_image.crop((0, y1, sidebar_width, y2))
+            if best_thread:
+                is_group = bool(best_thread.get("is_group", False))
+                unread = bool(best_thread.get("unread", False))
+                unread_badge_raw = best_thread.get("unread_badge")
+                badge = (
+                    str(unread_badge_raw).strip()
+                    if unread and unread_badge_raw
+                    else None
+                )
+                if unread and not badge:
+                    badge = "1"
+            else:
+                is_group = None
+                badge = "" if _row_has_red_unread_badge(row_image) else None
             selected = bool(best_thread.get("selected", best_thread.get("is_selected", False)))
             if not selected:
                 selected = row_has_selected_green_background(
-                    sidebar_image.crop((0, y1, sidebar_width, y2)),
+                    row_image,
                 )
             row = SidebarRow(
                 name=ocr_line.text,
@@ -352,7 +389,9 @@ class WinDriver(PlatformDriver):
         return rows
 
     def ensure_permissions(self) -> None:
-        raise NotImplementedError
+        from platform_win.grant_permissions import check_prerequisites
+
+        check_prerequisites()
 
     def scroll_sidebar(self, window: Any, direction: str) -> None:
         """Scrolls the sidebar up or down by simulating mouse wheel movement."""

@@ -28,9 +28,12 @@ from platform_mac.sidebar_ocr import sidebar_rows_from_hunyuan
 
 
 class MacDriver(MacDriverMessages, PlatformDriver):
-    def __init__(self, vision_backend: VisionBackend | None = None) -> None:
+    def __init__(self, vision_backend: VisionBackend | None = None, config=None) -> None:
         self.pid: int = 0
-        self.vision_ai: VisionBackend = vision_backend or create_vision_backend("openrouter")
+        self.vision_ai: VisionBackend = vision_backend or create_vision_backend(
+            "openrouter",
+            config=config,
+        )
         self._nav_messages_screen_pt: tuple[int, int] | None = None
 
     def ensure_permissions(self) -> None:

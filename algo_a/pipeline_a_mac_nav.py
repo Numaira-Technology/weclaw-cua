@@ -25,6 +25,7 @@ from algo_a.async_chat_extraction import (
 from algo_a.list_target_chats_win import _normalize_chat_label
 from config.weclaw_config import WeclawConfig
 from platform_mac.chat_panel_detector import sidebar_name_matches_config_group
+from shared.capture_result import CaptureRunResult
 
 _MAX_JUMPS = 200
 _SAME_TITLE_BREAK = 5
@@ -98,7 +99,12 @@ def _capture_or_queue_chat(
     )
 
 
-def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[str]:
+def run_pipeline_a_mac_nav(
+    config: WeclawConfig,
+    vision_backend=None,
+    *,
+    extraction_queue_factory=None,
+) -> CaptureRunResult:
     assert config.sidebar_unread_only
     if config.chat_type != "group":
         print(
@@ -107,17 +113,26 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         )
         from algo_a.pipeline_a_win import _run_sidebar_scan_pipeline
 
-        return _run_sidebar_scan_pipeline(config, vision_backend=vision_backend)
+        return _run_sidebar_scan_pipeline(
+            config,
+            vision_backend=vision_backend,
+            extraction_queue_factory=extraction_queue_factory,
+        )
 
     os.makedirs(config.output_dir, exist_ok=True)
-    written_paths: list[str] = []
+    written_paths = CaptureRunResult()
 
     from platform_mac.mac_ai_driver import MacDriver
 
-    driver = MacDriver(vision_backend=vision_backend)
+    driver = MacDriver(vision_backend=vision_backend, config=config)
     driver.ensure_permissions()
     window = driver.find_wechat_window(config.wechat_app_name)
     if not window:
+        written_paths.add_failure(
+            config.wechat_app_name,
+            "wechat_window_not_found",
+            stage="navigation",
+        )
         print("[ERROR] Pipeline failed: Could not find WeChat window.")
         return written_paths
 
@@ -130,7 +145,8 @@ def run_pipeline_a_mac_nav(config: WeclawConfig, vision_backend=None) -> list[st
         print("[+] No unread badge on the left Messages entry. Nothing to process.")
         return written_paths
 
-    extraction_queue = make_async_queue(driver, config.output_dir)
+    queue_factory = extraction_queue_factory or make_async_queue
+    extraction_queue = queue_factory(driver, config.output_dir)
     async_results: list[ChatWriteResult] = []
     jumps = 0
     same_title_run = 0

@@ -86,10 +86,11 @@ def load_app_context(ctx) -> dict:
     out_dir = config.output_dir
     if not os.path.isabs(out_dir):
         out_dir = os.path.normpath(os.path.join(root, out_dir))
+    config.output_dir = os.path.abspath(out_dir)
 
     return {
         "config": config,
         "config_path": config_path,
         "root": root,
-        "output_dir": out_dir,
+        "output_dir": config.output_dir,
     }

@@ -38,6 +38,7 @@ def main() -> None:
     from algo_a import run_pipeline_a
     from algo_b import run_pipeline_b
     from config import load_config
+    from shared.capture_result import capture_failures
     from shared.run_manifest import build_last_run_payload, write_last_run
 
     config_path = os.environ.get("WECLAW_CONFIG_PATH", "").strip()
@@ -46,12 +47,15 @@ def main() -> None:
     out_dir = config.output_dir
     if not os.path.isabs(out_dir):
         out_dir = os.path.normpath(os.path.join(root, out_dir))
+    config.output_dir = os.path.abspath(out_dir)
 
     err: str | None = None
     json_paths: list[str] = []
     report_generated = False
     try:
-        json_paths = run_pipeline_a(config)
+        capture_result = run_pipeline_a(config)
+        json_paths = list(capture_result)
+        failures = capture_failures(capture_result)
         abs_json = [os.path.abspath(p) for p in json_paths]
         if abs_json:
             report = run_pipeline_b(config, abs_json)
@@ -59,6 +63,12 @@ def main() -> None:
             print(report)
         else:
             print("No unread messages found.")
+        if failures:
+            details = "; ".join(
+                f"{item['chat_name']}:{item['stage']}={item['error']}"
+                for item in failures
+            )
+            raise RuntimeError(f"Capture completed with failures: {details}")
     except Exception as e:
         err = f"{type(e).__name__}: {e}"
         payload = build_last_run_payload(
@@ -66,8 +76,8 @@ def main() -> None:
             config_path=config_path,
             weclaw_root=root,
             output_dir=out_dir,
-            message_json_paths=[],
-            report_generated=False,
+            message_json_paths=json_paths,
+            report_generated=report_generated,
             error=err,
         )
         write_last_run(out_dir, payload)

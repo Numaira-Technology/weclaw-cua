@@ -37,6 +37,7 @@ def unread(ctx, limit, fmt, chat_type, sidebar_max_scrolls):
     import sys
 
     from ..context import apply_capture_overrides, load_app_context
+    from ..progress import progress_to_stderr
 
     app = load_app_context(ctx)
     config = app["config"]
@@ -50,34 +51,35 @@ def unread(ctx, limit, fmt, chat_type, sidebar_max_scrolls):
         sys.path.insert(0, app["root"])
 
     system = _pf.system()
-    if system == "Darwin":
-        from platform_mac import create_driver
-    elif system == "Windows":
-        from platform_win import create_driver
-    else:
+    if system not in ("Darwin", "Windows"):
         click.echo(f"Unsupported platform: {system}", err=True)
         ctx.exit(1)
 
-    driver = create_driver()
-    driver.ensure_permissions()
-    window = driver.find_wechat_window(config.wechat_app_name)
+    with progress_to_stderr():
+        if system == "Darwin":
+            from platform_mac import create_driver
+        else:
+            from platform_win import create_driver
+        driver = create_driver(config=config)
+        driver.ensure_permissions()
+        window = driver.find_wechat_window(config.wechat_app_name)
 
-    from algo_a.list_target_chats_win import list_target_chats
-    from algo_a.sidebar_scroll_to_top import scroll_sidebar_to_top
+        from algo_a.list_target_chats_win import list_target_chats
+        from algo_a.sidebar_scroll_to_top import scroll_sidebar_to_top
 
-    scroll_sidebar_to_top(
-        driver,
-        window,
-        max_down_scrolls=config.sidebar_max_scrolls,
-    )
-    rows = list_target_chats(
-        driver,
-        window,
-        all_groups=True,
-        unread_only=True,
-        chat_type=config.chat_type,
-        max_scrolls=config.sidebar_max_scrolls,
-    )
+        scroll_sidebar_to_top(
+            driver,
+            window,
+            max_down_scrolls=config.sidebar_max_scrolls,
+        )
+        rows = list_target_chats(
+            driver,
+            window,
+            all_groups=True,
+            unread_only=True,
+            chat_type=config.chat_type,
+            max_scrolls=config.sidebar_max_scrolls,
+        )
 
     results = [
         {

@@ -1,13 +1,15 @@
 """OpenAI-compatible vision client for screenshot + prompt queries.
 
 Usage:
-    VisionAI().query(prompt, image)
+    VisionAI(config=config).query(prompt, image)
     Optional env: WECLAW_VISION_HTTP_TIMEOUT_SEC (default 360) for slow multimodal calls.
 """
 
 import os
 import time
+from typing import TYPE_CHECKING
 
+from openai import APIConnectionError
 from openai import APITimeoutError
 from openai import OpenAI
 from openai import RateLimitError
@@ -17,9 +19,16 @@ from config.weclaw_config import load_config
 from shared.vision_image_codec import encode_vision_image
 from shared.vision_image_codec import log_vision_timing
 
+if TYPE_CHECKING:
+    from config.weclaw_config import WeclawConfig
+
 
 def _load_ai_config(config_path: str = "config/config.json") -> tuple[str, str, str, str]:
     config = load_config(config_path)
+    return _vision_config_values(config)
+
+
+def _vision_config_values(config: "WeclawConfig") -> tuple[str, str, str, str]:
     assert config.llm_api_key, (
         f"Set the API key for llm_provider={config.llm_provider}"
     )
@@ -87,28 +96,31 @@ def _rate_limit_retry_delay(exc: RateLimitError) -> float:
 
 
 class VisionAI:
-    """Singleton OpenAI-compatible multimodal client."""
+    """OpenAI-compatible multimodal client bound to one resolved config."""
 
-    _instance = None
-
-    def __new__(cls, *args, **kwargs):
-        if not cls._instance:
-            print("[*] Initializing Vision AI model...")
-            cls._instance = super(VisionAI, cls).__new__(cls)
-            provider, api_key, model_name, base_url = _load_ai_config()
-            t = _http_timeout_sec()
-            cls._instance.client = OpenAI(
-                base_url=base_url,
-                api_key=api_key,
-                timeout=t,
-            )
-            cls._instance.provider = provider
-            cls._instance.http_timeout_sec = t
-            cls._instance.model_name = model_name
-            print(
-                f"[+] Vision AI client via {provider} for model '{model_name}' initialized (HTTP timeout {t}s)."
-            )
-        return cls._instance
+    def __init__(
+        self,
+        *,
+        config: "WeclawConfig | None" = None,
+        config_path: str = "config/config.json",
+    ) -> None:
+        print("[*] Initializing Vision AI model...")
+        if config is None:
+            provider, api_key, model_name, base_url = _load_ai_config(config_path)
+        else:
+            provider, api_key, model_name, base_url = _vision_config_values(config)
+        t = _http_timeout_sec()
+        self.client = OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            timeout=t,
+        )
+        self.provider = provider
+        self.http_timeout_sec = t
+        self.model_name = model_name
+        print(
+            f"[+] Vision AI client via {provider} for model '{model_name}' initialized (HTTP timeout {t}s)."
+        )
 
     def query(self, prompt: str, image: Image.Image, max_tokens: int = 2048) -> str | None:
         assert self.client
@@ -164,6 +176,9 @@ class VisionAI:
                     request_args["max_tokens"] = max_tokens
                 if not uses_openai_reasoning_model:
                     request_args["temperature"] = _temperature_for_provider(self.provider)
+                use_streaming = self.provider == "qwen"
+                if use_streaming:
+                    request_args["stream"] = True
                 log_vision_timing(
                     "vision_ai",
                     "request_start",
@@ -177,6 +192,21 @@ class VisionAI:
                 )
                 request_started = time.perf_counter()
                 response = self.client.chat.completions.create(**request_args)
+                if use_streaming:
+                    content_parts: list[str] = []
+                    for chunk in response:
+                        if not chunk.choices:
+                            continue
+                        piece = chunk.choices[0].delta.content
+                        if piece:
+                            content_parts.append(piece)
+                    content = "".join(content_parts)
+                else:
+                    content = (
+                        response.choices[0].message.content
+                        if response.choices
+                        else None
+                    )
                 request_seconds = time.perf_counter() - request_started
             except APITimeoutError as e:
                 print(
@@ -185,6 +215,12 @@ class VisionAI:
                 if attempt + 1 < max_retries:
                     time.sleep(2)
                 continue
+            except APIConnectionError as e:
+                print(f"[!] Vision AI connection error: {e}")
+                if attempt + 1 < max_retries:
+                    time.sleep(2)
+                    continue
+                return None
             except RateLimitError as e:
                 if attempt + 1 >= max_retries:
                     raise
@@ -193,10 +229,6 @@ class VisionAI:
                 time.sleep(delay)
                 continue
             print("[+] Received response from Vision AI.")
-            if not response.choices:
-                time.sleep(1)
-                continue
-            content = response.choices[0].message.content
             if not content:
                 image.save("debug_empty_response_capture.png")
                 time.sleep(1)

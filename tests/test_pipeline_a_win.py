@@ -340,7 +340,11 @@ def test_named_chats_already_focused_captures_without_sidebar_click(tmp_path, mo
         chat_max_scrolls=0,
         output_dir=str(tmp_path),
     )
-    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+    monkeypatch.setattr(
+        pipeline_a_win,
+        "_create_driver",
+        lambda vision_backend=None, config=None: driver,
+    )
 
     paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
 
@@ -365,7 +369,11 @@ def test_named_chats_focused_respects_unread_filter(
         chat_max_scrolls=0,
         output_dir=str(tmp_path),
     )
-    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+    monkeypatch.setattr(
+        pipeline_a_win,
+        "_create_driver",
+        lambda vision_backend=None, config=None: driver,
+    )
 
     paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
 
@@ -386,7 +394,11 @@ def test_named_chats_use_ocr_fast_path_without_navigation_vlm(tmp_path, monkeypa
         chat_max_scrolls=0,
         output_dir=str(tmp_path),
     )
-    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+    monkeypatch.setattr(
+        pipeline_a_win,
+        "_create_driver",
+        lambda vision_backend=None, config=None: driver,
+    )
 
     paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
 
@@ -416,7 +428,11 @@ def test_named_fast_path_skips_sidebar_click_when_row_already_selected(
         chat_max_scrolls=0,
         output_dir=str(tmp_path),
     )
-    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+    monkeypatch.setattr(
+        pipeline_a_win,
+        "_create_driver",
+        lambda vision_backend=None, config=None: driver,
+    )
 
     paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
 
@@ -442,7 +458,11 @@ def test_named_chats_filtered_path_respects_unread_and_chat_type_filters(
         chat_max_scrolls=0,
         output_dir=str(tmp_path),
     )
-    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+    monkeypatch.setattr(
+        pipeline_a_win,
+        "_create_driver",
+        lambda vision_backend=None, config=None: driver,
+    )
 
     paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
 
@@ -468,11 +488,22 @@ def test_named_chats_semantic_path_continues_after_failed_capture(
         chat_max_scrolls=0,
         output_dir=str(tmp_path),
     )
-    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+    monkeypatch.setattr(
+        pipeline_a_win,
+        "_create_driver",
+        lambda vision_backend=None, config=None: driver,
+    )
 
     paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
 
     assert len(paths) == 1
+    assert paths.status == "partial"
+    assert any(
+        failure.chat_name == "Failed Group"
+        and failure.error == "no_screenshots_captured"
+        for failure in paths.failures
+    )
+    assert [failure.chat_name for failure in paths.failures] == ["Failed Group"]
     assert driver.clicked == ["Failed Group", "Unread Group"]
     assert driver.capture_calls == [
         ("Failed Group", True),
@@ -497,7 +528,11 @@ def test_wildcard_filtered_dynamic_sweep_skips_reordered_duplicate(
         chat_max_scrolls=0,
         output_dir=str(tmp_path),
     )
-    monkeypatch.setattr(pipeline_a_win, "_create_driver", lambda vision_backend=None: driver)
+    monkeypatch.setattr(
+        pipeline_a_win,
+        "_create_driver",
+        lambda vision_backend=None, config=None: driver,
+    )
 
     paths = pipeline_a_win._run_sidebar_scan_pipeline(cast(Any, config))
 

@@ -5,9 +5,10 @@ Usage:
     weclaw capture --no-llm            # stepwise: output images+prompts, no LLM
     weclaw capture --work-dir /tmp/w   # custom work directory for stepwise output
 
-In --no-llm mode, WeClaw performs all UI automation (screenshot, scroll, stitch)
-but does NOT call any LLM. Instead it writes images and prompts to a work directory.
-The calling agent processes them with its own LLM, then calls `weclaw finalize`.
+In --no-llm mode, WeClaw uses local OCR to navigate all selected chats and
+performs screenshot/scroll/stitch capture without calling an LLM. It writes the
+chat images and extraction prompts to a work directory for an external agent,
+which then calls `weclaw finalize`.
 """
 
 from importlib import import_module
@@ -58,9 +59,9 @@ def capture(
 
     \b
     Stepwise mode (--no-llm):
-      1. Screenshots sidebar + current chat panel
-      2. Scroll-captures and stitches chat frames
-      3. Writes images + prompts to work directory
+      1. Uses local OCR to navigate all selected chats
+      2. Scroll-captures and stitches each chat's frames
+      3. Writes one extraction task per image chunk
       4. Agent processes tasks with its own LLM
       5. Agent calls `weclaw finalize --work-dir <dir>` to produce JSON
     """
@@ -71,6 +72,8 @@ def capture(
     import sys
 
     from ..context import apply_capture_overrides, load_app_context
+    from ..progress import progress_to_stderr
+    from shared.capture_result import capture_failures, capture_status
 
     app = load_app_context(ctx)
     config = app["config"]
@@ -93,18 +96,29 @@ def capture(
         if not work_dir:
             work_dir = os.path.join(app["output_dir"], "work")
         os.makedirs(work_dir, exist_ok=True)
-        backend = StepwiseBackend(work_dir)
+        backend = StepwiseBackend(
+            work_dir,
+            record_untyped_queries=False,
+        )
         backend.set_metadata({"recent_window_hours": config.recent_window_hours})
 
-        run_pipeline_a_stepwise(config, backend)
+        with progress_to_stderr():
+            capture_result = run_pipeline_a_stepwise(config, backend)
 
         manifest_path = os.path.join(work_dir, "manifest.json")
         pending = backend.get_pending_tasks()
+        failures = capture_failures(capture_result)
+        status = capture_status(capture_result)
         result = {
             "mode": "stepwise",
+            "ok": not failures,
+            "status": status,
             "work_dir": os.path.abspath(work_dir),
             "manifest": manifest_path,
+            "run_id": backend.run_id,
+            "chats_captured": len(backend.get_message_chat_names()),
             "pending_tasks": len(pending),
+            "failures": failures,
             "instructions": (
                 "Process each task in manifest.json: send the .png image with "
                 "the .prompt.txt content to your vision LLM, then write the "
@@ -128,17 +142,25 @@ def capture(
                 f"  4. Run: weclaw finalize --work-dir {os.path.abspath(work_dir)}",
             ]
             output("\n".join(lines), "text")
+        if failures:
+            ctx.exit(1)
         return
 
     from algo_a import run_pipeline_a
 
-    json_paths = run_pipeline_a(config)
+    with progress_to_stderr():
+        capture_result = run_pipeline_a(config)
+    json_paths = list(capture_result)
+    failures = capture_failures(capture_result)
+    status = capture_status(capture_result)
 
     result = {
         "mode": "direct",
-        "ok": True,
+        "ok": not failures,
+        "status": status,
         "chats_captured": len(json_paths),
         "files": json_paths,
+        "failures": failures,
     }
 
     if fmt == "json":
@@ -151,6 +173,8 @@ def capture(
             output("\n".join(lines), "text")
         else:
             output("No matching chats found.", "text")
+    if failures:
+        ctx.exit(1)
 
 
 capture.add_command(

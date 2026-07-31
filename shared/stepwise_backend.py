@@ -15,6 +15,7 @@ import json
 import os
 import threading
 import time
+import uuid
 
 from PIL import Image
 
@@ -31,7 +32,13 @@ _EXTENSIONS = {
 
 
 class StepwiseBackend:
-    def __init__(self, work_dir: str) -> None:
+    def __init__(
+        self,
+        work_dir: str,
+        *,
+        resume: bool = False,
+        record_untyped_queries: bool = True,
+    ) -> None:
         assert work_dir
         self.work_dir = work_dir
         os.makedirs(work_dir, exist_ok=True)
@@ -40,21 +47,41 @@ class StepwiseBackend:
         self._manifest_path = os.path.join(work_dir, "manifest.json")
         self._tasks: list[dict] = []
         self._metadata: dict = {}
-        if os.path.isfile(self._manifest_path):
+        self._record_untyped_queries = record_untyped_queries
+        self.run_id = uuid.uuid4().hex[:12]
+        if resume and os.path.isfile(self._manifest_path):
             with open(self._manifest_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self._tasks = data.get("tasks", [])
             self._metadata = data.get("metadata", {})
             self._counter = len(self._tasks)
+            self.run_id = str(
+                data.get("run_id")
+                or self._metadata.get("run_id")
+                or self.run_id
+            )
+        else:
+            self._metadata = {"run_id": self.run_id}
+            self._write_manifest()
 
     def _next_step_id(self) -> str:
         with self._lock:
-            step_id = f"step_{self._counter:04d}"
+            step_id = f"step_{self.run_id}_{self._counter:04d}"
             self._counter += 1
             return step_id
 
-    def query(self, prompt: str, image: Image.Image, max_tokens: int = 2048) -> str | None:
+    def query(
+        self,
+        prompt: str,
+        image: Image.Image,
+        max_tokens: int = 2048,
+        *,
+        task_metadata: dict | None = None,
+    ) -> str | None:
         """Save image+prompt to work_dir. Returns None (agent must provide response later)."""
+        if task_metadata is None and not self._record_untyped_queries:
+            print("[stepwise] Skipping navigation-only vision query.")
+            return None
         step_id = self._next_step_id()
 
         started = time.perf_counter()
@@ -86,6 +113,7 @@ class StepwiseBackend:
 
         task = {
             "step_id": step_id,
+            "run_id": self.run_id,
             "image": os.path.basename(img_path),
             "image_mime_type": payload.mime_type,
             "image_format": payload.format_name,
@@ -94,9 +122,11 @@ class StepwiseBackend:
             "response_file": os.path.basename(response_path),
             "max_tokens": max_tokens,
             "completed": False,
+            "metadata": dict(task_metadata or {}),
         }
-        self._tasks.append(task)
-        self._write_manifest()
+        with self._lock:
+            self._tasks.append(task)
+            self._write_manifest()
 
         print(f"[stepwise] Saved vision task: {img_path}")
         print(f"[stepwise] Prompt: {prompt_path}")
@@ -110,6 +140,17 @@ class StepwiseBackend:
 
     def get_pending_tasks(self) -> list[dict]:
         return [t for t in self._tasks if not t["completed"]]
+
+    def get_message_chat_names(self) -> list[str]:
+        names: list[str] = []
+        for task in self._tasks:
+            metadata = task.get("metadata", {})
+            if metadata.get("kind") != "message_extraction":
+                continue
+            name = str(metadata.get("chat_name", "") or "").strip()
+            if name and name not in names:
+                names.append(name)
+        return names
 
     def set_metadata(self, metadata: dict) -> None:
         self._metadata.update(metadata)
@@ -131,7 +172,12 @@ class StepwiseBackend:
     def _write_manifest(self) -> None:
         with open(self._manifest_path, "w", encoding="utf-8") as f:
             json.dump(
-                {"metadata": self._metadata, "tasks": self._tasks},
+                {
+                    "schema_version": 2,
+                    "run_id": self.run_id,
+                    "metadata": self._metadata,
+                    "tasks": self._tasks,
+                },
                 f,
                 ensure_ascii=False,
                 indent=2,
